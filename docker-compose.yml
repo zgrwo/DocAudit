@@ -1,0 +1,20 @@
+# Docker Compose — LanguageTool 语法检查服务
+# 注意: Compose V2 已废弃 version 字段，无需声明
+
+services:
+  languagetool:
+    image: erikvl87/languagetool:6.4  # 固定版本，避免 :latest 导致不可重现
+    container_name: doc-audit-languagetool
+    ports:
+      - "8010:8010"
+    environment:
+      - langtool_languageModel=/ngrams
+      - Java_Xmx=2g
+    volumes:
+      - ./languagetool-data/ngrams:/ngrams:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/v2/languages"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docaudit"
+version = "0.1.0"
+description = "DocAudit — 本地离线文档审查系统 (PPTX/DOCX/PDF/MD)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "DocAudit Team"}
+]
+keywords = ["document", "audit", "pptx", "docx", "pdf", "quality", "semiconductor"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "streamlit>=1.25",
+    "python-pptx>=0.6",
+    "python-docx>=0.8",
+    "pyyaml>=6.0",
+    "requests>=2.28",
+    "pyspellchecker>=0.7",
+]
+
+[project.optional-dependencies]
+pdf = [
+    "docling>=2.0",
+    "pandas>=1.5",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.3",
+]
+all = [
+    "docaudit[pdf,dev]",
+]
+
+[project.scripts]
+docaudit = "src.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

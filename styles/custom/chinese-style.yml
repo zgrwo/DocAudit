@@ -1,0 +1,11 @@
+extends: existence
+message: "避免使用 '%s'"
+level: warning
+ignorecase: false
+tokens:
+  # 中文技术写作提醒
+  - "的的"
+  - "进行"
+  - "了"
+  - "通过"
+  - "所以"

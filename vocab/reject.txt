@@ -1,0 +1,19 @@
+# 项目禁用术语 — 应始终被标记
+# 格式：每行一个词或正则模式
+
+# 已废弃的技术名称
+flip-chip(?!.*bump)
+wire-bond(?!.*ing)
+
+# 应避免的口语化表达
+kind of
+sort of
+pretty much
+basically(?!.*yield)
+
+# 中文口语化表达（正式报告应避免）
+基本上
+差不多
+好像
+大概
+也许

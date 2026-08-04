@@ -1,0 +1,19 @@
+extends: substitution
+message: "建议使用 '%s' 替代 '%s'"
+level: warning
+ignorecase: true
+swap:
+  # 半导体制造术语
+  "fan-out(?!\\s*(wafer|panel|WLP|FOWLP))": "Fan-Out Wafer-Level Packaging (FOWLP)"
+  "through silicon via(?!.*TSV)": "TSV (Through Silicon Via)"
+  "silicon interposer(?!.*中介层)": "硅中介层 (Silicon Interposer)"
+  "chiplet(?!.*芯粒)": "Chiplet (芯粒)"
+
+  # 先进封装
+  "embedded multi.?die interconnect bridge(?!.*EMIB)": "EMIB (Embedded Multi-die Interconnect Bridge)"
+  "CoWoS(?!.*Chip.on.Wafer)": "CoWoS (Chip-on-Wafer-on-Substrate)"
+
+  # 通用技术写作
+  utilize: use
+  "in order to": to
+  "due to the fact that": because

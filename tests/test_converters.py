@@ -1,0 +1,176 @@
+"""Converter 单元测试 — DocxConverter 字段正确性 + MarkdownConverter 边界"""
+
+import pytest
+from pathlib import Path
+from docx import Document as DocxDocument
+from docx.shared import Pt
+
+from src.converters.docx_converter import DocxConverter
+from src.converters.md_converter import MarkdownConverter
+
+
+@pytest.fixture
+def docx_converter():
+    return DocxConverter()
+
+
+@pytest.fixture
+def md_converter():
+    return MarkdownConverter()
+
+
+@pytest.fixture
+def sample_docx(tmp_path):
+    """创建含标题+正文+表格的测试 DOCX"""
+    doc = DocxDocument()
+    # 标题
+    doc.add_heading("测试标题", level=1)
+    # 正文段落
+    p = doc.add_paragraph("这是正文内容。")
+    run = p.runs[0]
+    run.font.name = "Arial"
+    run.font.size = Pt(12)
+    # 二级标题
+    doc.add_heading("第二节", level=2)
+    doc.add_paragraph("第二节的内容。")
+    # 表格
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "A1"
+    table.cell(0, 1).text = "B1"
+    table.cell(1, 0).text = "A2"
+    table.cell(1, 1).text = "B2"
+
+    path = tmp_path / "test.docx"
+    doc.save(str(path))
+    return path
+
+
+class TestDocxConverter:
+    """DocxConverter 转换正确性"""
+
+    def test_can_handle(self, docx_converter):
+        assert docx_converter.can_handle("test.docx")
+        assert docx_converter.can_handle("test.doc")
+        assert not docx_converter.can_handle("test.pptx")
+        assert not docx_converter.can_handle("test.pdf")
+
+    def test_convert_returns_document(self, docx_converter, sample_docx):
+        doc = docx_converter.convert(str(sample_docx))
+        assert doc.format == "docx"
+        assert doc.source_path == str(sample_docx)
+        assert len(doc.pages) >= 1
+
+    def test_heading_detected_as_title(self, docx_converter, sample_docx):
+        """标题样式段落被识别（shape_name 含 Heading）"""
+        doc = docx_converter.convert(str(sample_docx))
+        # python-docx add_heading 不设置 outlineLvl，但样式名含 Heading
+        all_elements = [e for p in doc.pages for e in p.flattened_elements]
+        heading_elements = [
+            e for e in all_elements
+            if e.shape_name and "heading" in e.shape_name.lower()
+        ]
+        assert len(heading_elements) >= 1
+
+    def test_paragraph_text_preserved(self, docx_converter, sample_docx):
+        """正文文本完整保留"""
+        doc = docx_converter.convert(str(sample_docx))
+        assert "这是正文内容。" in doc.all_text
+        assert "第二节的内容。" in doc.all_text
+
+    def test_font_info_extracted(self, docx_converter, sample_docx):
+        """Run 级字体信息被提取"""
+        doc = docx_converter.convert(str(sample_docx))
+        found_arial = False
+        for page in doc.pages:
+            for elem in page.flattened_elements:
+                for para in elem.paragraphs:
+                    for run in para.runs:
+                        if run.font_name == "Arial":
+                            found_arial = True
+                            assert run.font_size == 12.0
+        assert found_arial, "Should find Arial font in converted document"
+
+    def test_table_converted(self, docx_converter, sample_docx):
+        """表格被正确转换"""
+        doc = docx_converter.convert(str(sample_docx))
+        table_elements = [
+            e for p in doc.pages
+            for e in p.flattened_elements
+            if e.type == "table"
+        ]
+        assert len(table_elements) >= 1
+        # 验证表格内容
+        table_elem = table_elements[0]
+        all_cell_text = [cell.text for row in table_elem.tables for cell in row]
+        assert "A1" in all_cell_text
+        assert "B2" in all_cell_text
+
+    def test_metadata_extracted(self, docx_converter, sample_docx):
+        """元数据（字数）被提取"""
+        doc = docx_converter.convert(str(sample_docx))
+        assert doc.metadata.word_count is not None
+        assert doc.metadata.word_count > 0
+
+    def test_empty_docx_no_crash(self, docx_converter, tmp_path):
+        """空 DOCX 不崩溃"""
+        doc = DocxDocument()
+        path = tmp_path / "empty.docx"
+        doc.save(str(path))
+        result = docx_converter.convert(str(path))
+        assert result.format == "docx"
+        assert len(result.pages) >= 1
+
+
+class TestMarkdownConverter:
+    """MarkdownConverter 边界测试"""
+
+    def test_can_handle(self, md_converter):
+        assert md_converter.can_handle("test.md")
+        assert md_converter.can_handle("test.markdown")
+        assert md_converter.can_handle("test.txt")
+        assert not md_converter.can_handle("test.docx")
+
+    def test_heading_levels(self, md_converter, tmp_path):
+        """Markdown 标题层级正确映射"""
+        md = "# H1\n\n## H2\n\n### H3\n\n正文\n"
+        path = tmp_path / "test.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        # 应有标题元素
+        all_paras = doc.all_paragraphs
+        levels = [p.level for p in all_paras if p.level is not None]
+        assert 1 in levels
+        assert 2 in levels
+
+    def test_code_block_preserved(self, md_converter, tmp_path):
+        """围栏代码块完整保留"""
+        md = "# Title\n\n```python\nprint('hello')\n```\n\nAfter code.\n"
+        path = tmp_path / "code.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert "print('hello')" in doc.all_text
+
+    def test_table_parsed(self, md_converter, tmp_path):
+        """GFM 表格被解析为 table 元素"""
+        md = "# Data\n\n| Name | Age |\n|------|-----|\n| Alice | 30 |\n"
+        path = tmp_path / "table.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        table_elems = [
+            e for p in doc.pages for e in p.flattened_elements if e.type == "table"
+        ]
+        assert len(table_elems) >= 1
+
+    def test_gbk_encoding_fallback(self, md_converter, tmp_path):
+        """GBK 编码文件正确读取"""
+        path = tmp_path / "gbk.md"
+        path.write_text("# 标题\n\n中文内容\n", encoding="gbk")
+        doc = md_converter.convert(str(path))
+        assert "中文内容" in doc.all_text
+
+    def test_empty_file_no_crash(self, md_converter, tmp_path):
+        """空文件不崩溃"""
+        path = tmp_path / "empty.md"
+        path.write_text("", encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert doc.format == "md"

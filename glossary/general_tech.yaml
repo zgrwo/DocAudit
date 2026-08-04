@@ -1,0 +1,39 @@
+# 通用技术写作规范术语
+# 格式: pattern 为需要检测的模式（支持正则），preferred 为推荐写法
+
+category: 通用技术写作
+version: '1.0'
+
+terms:
+  # 中文技术写作规范
+  - pattern: '的的'
+    preferred: '[重复用词]'
+    context: 避免重复用词
+
+  # 英文技术写作规范
+  - pattern: '(?i)utilize'
+    preferred: use
+    context: 技术写作中使用简洁动词
+  - pattern: '(?i)in order to'
+    preferred: to
+    context: 删除冗余短语
+  - pattern: '(?i)due to the fact that'
+    preferred: because
+    context: 简化表达
+
+  # 单位规范
+  - pattern: '(?<![a-zA-Z])um(?![a-zA-Z/])'
+    preferred: 'μm'
+    context: 使用标准微米符号
+
+  # 中英文排版规范
+  - pattern: '[a-zA-Z][一-鿿]'
+    context: 英文和中文之间应加空格
+  - pattern: '[一-鿿][a-zA-Z]'
+    context: 中文和英文之间应加空格
+
+  # 标点符号
+  - pattern: '[a-zA-Z]，'
+    context: 英文后应使用英文逗号而不是中文逗号
+  - pattern: '[a-zA-Z]。'
+    context: 英文后应使用英文句号而不是中文句号

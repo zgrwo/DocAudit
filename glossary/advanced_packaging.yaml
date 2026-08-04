@@ -1,0 +1,81 @@
+# 先进封装术语表
+# 格式: pattern 为需要检测的模式（支持正则），preferred 为推荐写法
+
+category: 先进封装
+version: '1.0'
+
+terms:
+  # 扇出型封装
+  - pattern: '(?i)fan.out(?!\s*(wafer|panel|WLP|FOWLP|FO-WLP))'
+    preferred: 'Fan-Out (扇出型封装)'
+    context: 将芯片 I/O 扇出到更大面积的封装技术
+  - pattern: '(?i)FOWLP|FO.WLP'
+    preferred: 'FOWLP (Fan-Out Wafer-Level Packaging, 扇出型晶圆级封装)'
+    context: 在晶圆级别进行的扇出型封装
+  - pattern: '(?i)FOPLP|FO.PLP'
+    preferred: 'FOPLP (Fan-Out Panel-Level Packaging, 扇出型面板级封装)'
+    context: 在面板级别进行的扇出型封装
+
+  # TSV
+  - pattern: '(?i)through.silicon.via'
+    preferred: 'TSV (Through Silicon Via, 硅通孔)'
+    context: 贯穿硅基板的垂直互连
+  - pattern: '(?i)through.glass.via|TGV'
+    preferred: 'TGV (Through Glass Via, 玻璃通孔)'
+    context: 贯穿玻璃基板的垂直互连
+
+  # 微凸块与混合键合
+  - pattern: '(?i)micro.?bump'
+    preferred: '微凸块 (Micro Bump)'
+    context: 芯片间微米级互连凸块
+  - pattern: '(?i)hybrid.bond'
+    preferred: '混合键合 (Hybrid Bonding)'
+    context: Cu-Cu + 介质-介质直接键合
+
+  # RDL
+  - pattern: '(?i)redistribution.layer|RDL'
+    preferred: 'RDL (Redistribution Layer, 重分布层)'
+    context: 重新分布芯片 I/O 的金属层
+
+  # 基板
+  - pattern: '(?i)ABF|Ajinomoto.build.up'
+    preferred: 'ABF (Ajinomoto Build-up Film, 味之素积层膜)'
+    context: IC 载板用积层绝缘材料
+
+  # 异质集成
+  - pattern: '(?i)heterogeneous.integrat'
+    preferred: '异质集成 (Heterogeneous Integration)'
+    context: 不同工艺/功能的芯片集成在一个封装中
+  - pattern: '(?i)chiplet'
+    preferred: 'Chiplet (芯粒)'
+    context: 将大芯片分解为多个小芯粒
+  - pattern: '(?i)SiP|system.in.package'
+    preferred: 'SiP (System in Package, 系统级封装)'
+    context: 将完整系统功能集成于单一封装
+  - pattern: '(?i)SoIC|system.on.integrated.chip'
+    preferred: 'SoIC (System on Integrated Chip, 系统整合芯片)'
+    context: 台积电 3D 堆叠技术
+  - pattern: '(?i)EMIB|embedded.multi.?die.interconnect'
+    preferred: 'EMIB (Embedded Multi-die Interconnect Bridge, 嵌入式多芯片互连桥)'
+    context: Intel 的硅桥互连技术
+  - pattern: '(?i)CoWoS|chip.on.wafer.on.substrat'
+    preferred: 'CoWoS (Chip-on-Wafer-on-Substrate)'
+    context: 台积电 2.5D 封装平台
+
+  # 底部填充
+  - pattern: '(?i)underfill'
+    preferred: '底部填充 (Underfill)'
+    context: 填充芯片与基板间隙的保护材料
+
+  # 中介层
+  - pattern: '(?i)interposer'
+    preferred: '中介层 (Interposer)'
+    context: 连接多芯片的中间转接板
+  - pattern: '(?i)silicon.interposer'
+    preferred: '硅中介层 (Silicon Interposer)'
+    context: 基于硅基板的中介层
+
+  # 晶圆键合
+  - pattern: '(?i)wafer.bond'
+    preferred: '晶圆键合 (Wafer Bonding)'
+    context: 将两片晶圆永久键合在一起

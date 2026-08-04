@@ -1,0 +1,69 @@
+# 半导体制造核心术语表
+# 格式: pattern 为需要检测的模式（支持正则），preferred 为推荐写法
+
+category: 半导体制造
+version: '1.0'
+
+terms:
+  # 前段工艺 (FEOL)
+  - pattern: '(?i)shallow.trench.isolation'
+    preferred: 'STI (Shallow Trench Isolation, 浅槽隔离)'
+    context: 前段工艺隔离技术
+  - pattern: '(?i)gate.oxide'
+    preferred: '栅氧化层 (Gate Oxide)'
+    context: 晶体管栅极介电层
+  - pattern: '(?i)high.k.dielectric'
+    preferred: 'High-K 介电材料'
+    context: 替代 SiO2 的高介电常数材料
+  - pattern: '(?i)metal.gate'
+    preferred: '金属栅极 (Metal Gate)'
+    context: 替代多晶硅栅极
+  - pattern: '(?i)finfet|Fin.?FET'
+    preferred: 'FinFET (Fin Field-Effect Transistor, 鳍式场效应晶体管)'
+    context: 3D 晶体管结构
+  - pattern: '(?i)gate.all.around|GAA'
+    preferred: 'GAA (Gate-All-Around, 全环绕栅极)'
+    context: 下一代晶体管结构
+
+  # 后段工艺 (BEOL)
+  - pattern: '(?i)damascene'
+    preferred: 'Damascene (镶嵌工艺)'
+    context: 铜互连工艺
+  - pattern: '(?i)low.k.dielectric'
+    preferred: 'Low-K 介电材料'
+    context: 降低互连电容的低介电常数材料
+
+  # 光刻
+  - pattern: '(?i)EUV|extreme.ultraviolet'
+    preferred: 'EUV (Extreme Ultraviolet, 极紫外光刻)'
+    context: 13.5nm 波长光刻技术
+  - pattern: '(?i)DUV|deep.ultraviolet'
+    preferred: 'DUV (Deep Ultraviolet, 深紫外光刻)'
+    context: 193nm/248nm 波长光刻技术
+
+  # 刻蚀与沉积
+  - pattern: '(?i)RIE|reactive.ion.etch'
+    preferred: 'RIE (Reactive Ion Etching, 反应离子刻蚀)'
+    context: 干法刻蚀技术
+  - pattern: '(?i)ALD|atomic.layer.deposition'
+    preferred: 'ALD (Atomic Layer Deposition, 原子层沉积)'
+    context: 纳米级薄膜沉积技术
+  - pattern: '(?i)CVD|chemical.vapor.deposition'
+    preferred: 'CVD (Chemical Vapor Deposition, 化学气相沉积)'
+    context: 薄膜沉积技术
+  - pattern: '(?i)PVD|physical.vapor.deposition'
+    preferred: 'PVD (Physical Vapor Deposition, 物理气相沉积)'
+    context: 溅射等物理沉积技术
+
+  # CMP
+  - pattern: '(?i)CMP|chemical.mechanical.polish'
+    preferred: 'CMP (Chemical Mechanical Polishing, 化学机械抛光)'
+    context: 晶圆平坦化技术
+
+  # 良率
+  - pattern: '(?i)yield'
+    preferred: '良率 (Yield)'
+    context: 合格芯片占比
+  - pattern: '(?i)defect.density'
+    preferred: '缺陷密度 (Defect Density)'
+    context: 单位面积缺陷数

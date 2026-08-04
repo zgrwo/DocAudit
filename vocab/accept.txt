@@ -1,0 +1,105 @@
+# 半导体领域认可术语 — LanguageTool 不会将这些词标记为拼写错误
+# 用途：补充 LanguageTool 词典，减少误报
+# 格式：每行一个词或短语（大小写不敏感）
+
+# 工艺节点
+FinFET
+GAA
+Nanosheet
+nanosheet
+Forksheet
+CFET
+
+# 光刻
+EUV
+DUV
+ArF
+KrF
+NA
+high-NA
+
+# 刻蚀/沉积
+RIE
+ICP
+CCP
+ALD
+ALE
+CVD
+PECVD
+LPCVD
+PVD
+sputtering
+
+# CMP
+CMP
+planarization
+
+# 先进封装
+FOWLP
+FO-WLP
+FOPLP
+FO-PLP
+CoWoS
+InFO
+SoIC
+EMIB
+Chiplet
+chiplet
+TSV
+TGV
+TMV
+RDL
+interposer
+redistribution
+microbump
+C4 bump
+Cu pillar
+
+# 材料
+polyimide
+ABF
+solder
+underfill
+MUF
+CUF
+molding
+compound
+
+# 量测
+CD-SEM
+TEM
+XSEM
+FIB
+AFM
+
+# 良率
+yield
+baseline
+bin
+sort
+
+# 基板/载板
+substrate
+coreless
+BT resin
+build-up
+
+# 键合
+hybrid bonding
+fusion bonding
+direct bonding
+temporary bonding
+debonding
+wafer bonding
+die attach
+
+# 其他常用缩写
+HBM
+SiP
+SoC
+WLP
+PLP
+BGA
+LGA
+QFN
+WLCSP
