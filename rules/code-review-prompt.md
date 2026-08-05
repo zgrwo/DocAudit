@@ -60,7 +60,7 @@
 4. **架构合规**：7 层单向依赖（UI→Reporter→Auditor→Engine→Converter→Model）；Config 横切层
 5. **注册完整性**：CustomRulesAuditor._DISPATCH 注册完整；_skip_checks 匹配；rule_parser 同步 rules.md
 6. **文档一致性**：api-reference 签名与代码一致；rules.md 格式与 parser 一致
-7. **测试完备性**：黄金测试三路径一致（CLI=WebUI=Python）；53 个用例全绿；边界/退化输入覆盖
+7. **测试完备性**：黄金测试三路径一致（CLI=WebUI=Python）；119 个用例全绿；边界/退化输入覆盖
 8. **性能**：大文档处理（>100 MB PPTX）；不必要的内容重解析；内存峰值控制
 9. **错误处理**：无裸 except；LanguageTool 不可用降级；文件格式不支持时的优雅错误提示
 10. **工程规范**：无死代码；命名一致；commit 粒度合理

@@ -52,7 +52,7 @@ class PageElement:
     type: str                            # "text_frame" | "table" | "image" | "chart" | "group"
     paragraphs: list[Paragraph] = field(default_factory=list)
     tables: list[list[TableCell]] = field(default_factory=list)  # 按行分组
-    children: list = field(default_factory=list)   # Group 子元素 (PageElement 列表)
+    children: list["PageElement"] = field(default_factory=list)   # Group 子元素 (PageElement 列表)
 
     # 位置与尺寸 (pt — 所有 Converter 已统一转换)
     left: float | None = None

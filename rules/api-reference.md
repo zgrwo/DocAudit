@@ -288,7 +288,7 @@
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_json_report` | `(findings: list[AuditFinding], title: str, output_path: str \| Path \| None)` | `str` | 生成 JSON 报告 |
+| `generate_json_report` | `(doc: Document, findings: list[AuditFinding], output_path: str \| Path \| None)` | `dict` | 生成 JSON 报告，可选写入文件 |
 
 ---
 
@@ -298,8 +298,9 @@
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `audit_file` | `(file_path, rules_path, glossary_dir, verbose, auto_fix)` | 执行单文件审查并输出结果 |
-| `print_summary` | `(findings, verbose)` | 打印审查结果摘要 |
+| `audit_file` | `(file_path, rules_path="rules.md", glossary_dir="glossary", vocab_dir=None, verbose=False)` → `(Document, list[AuditFinding])` | 执行单文件审查并返回结果 |
+| `print_summary` | `(findings)` | 打印审查结果摘要 |
+| `doctor_check` | `()` → `int` | 环境诊断：检查运行环境健康状态，失败项 > 0 时返回 1 |
 
 ---
 

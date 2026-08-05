@@ -174,3 +174,38 @@ class TestMarkdownConverter:
         path.write_text("", encoding="utf-8")
         doc = md_converter.convert(str(path))
         assert doc.format == "md"
+
+    def test_utf8_bom_frontmatter_still_detected(self, md_converter, tmp_path):
+        """UTF-8 BOM 文件的 frontmatter 仍能正确解析 (BOM 剥离)"""
+        path = tmp_path / "bom.md"
+        content = "---\ntitle: BOM 文档\nauthor: tester\n---\n\n# 标题\n\n内容\n"
+        path.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
+        doc = md_converter.convert(str(path))
+        assert doc.metadata.title == "BOM 文档"
+        assert doc.metadata.author == "tester"
+        assert "\ufeff" not in doc.all_text
+
+
+class TestPdfConverter:
+    """PdfConverter 基本行为 (docling 可选依赖)"""
+
+    def test_can_handle(self):
+        from src.converters.pdf_converter import PdfConverter
+        cvt = PdfConverter()
+        assert cvt.can_handle("test.pdf")
+        assert cvt.can_handle("TEST.PDF")
+        assert not cvt.can_handle("test.docx")
+
+    def test_missing_docling_raises_helpful_error(self, tmp_path):
+        """docling 未安装 → 抛出含安装指引的 ImportError"""
+        pytest.importorskip("src.converters.pdf_converter")
+        try:
+            import docling  # noqa: F401
+            pytest.skip("docling 已安装，无法验证缺失依赖路径")
+        except ImportError:
+            pass
+        from src.converters.pdf_converter import PdfConverter
+        fake = tmp_path / "fake.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake content")
+        with pytest.raises(ImportError, match="docling"):
+            PdfConverter().convert(str(fake))

@@ -266,6 +266,8 @@ class CustomRulesAuditor(BaseAuditor):
                 "exempt_layouts": cfg.get("exempt_layouts", []),
                 "max_english_words": cfg.get("max_english_words", 10),
                 "max_chinese_chars_title": cfg.get("max_chinese_chars_title", 40),
+                # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
+                "min_title_font_size": cfg.get("min_title_font_size", 28),
             })
         elif key == "fa":
             return FormatAuditor(config={

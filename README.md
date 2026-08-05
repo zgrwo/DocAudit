@@ -250,7 +250,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **53 个测试用例**：models / auditors / engines / rules / integration
+- **119 个测试用例**：models / auditors / engines / rules / integration
 - **黄金测试**：CLI = Web UI = Python API 三路径一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 

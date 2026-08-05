@@ -1,6 +1,7 @@
 """DOCX 转换器 — 使用 python-docx 解析，保留段落/字符样式信息"""
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 from docx import Document as DocxDocument
@@ -239,9 +240,12 @@ class DocxConverter(BaseConverter):
                     ))
 
             nrows = len(table.rows)
+            # 按行分组 (单次遍历，与 PptxConverter._convert_table 一致)
+            row_map: dict[int, list[TableCell]] = defaultdict(list)
+            for c in cells:
+                row_map[c.row].append(c)
             rows: list[list[TableCell]] = [
-                [c for c in cells if c.row == r]
-                for r in range(nrows)
+                row_map[r] for r in sorted(row_map) if r < nrows
             ]
 
             return PageElement(

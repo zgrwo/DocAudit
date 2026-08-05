@@ -79,7 +79,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 61 个用例（5 个层次）
+├── tests/                            # 119 个用例（5 个层次）
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
 ├── agents.md                         # 本文件
@@ -128,7 +128,7 @@ DocAudit/
 
 ## 测试
 
-61 个用例，5 个层次：
+119 个用例，5 个层次：
 
 | 文件 | 内容 |
 |------|------|

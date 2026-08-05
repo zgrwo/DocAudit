@@ -381,3 +381,46 @@ title: 测试文档
         keys1 = sorted(f.dedup_key for f in findings1)
         keys2 = sorted(f.dedup_key for f in findings2)
         assert keys1 == keys2
+
+
+class TestCliArgumentParsing:
+    """CLI 参数解析回归测试 — 位置参数向后兼容"""
+
+    def test_positional_path_backward_compat(self):
+        """回归: 'cli.py report.pptx' (无 audit 子命令) 不得报 invalid choice。
+
+        exit 0/1 = 审查正常完成 (无问题/有 error); exit 2 = argparse 用法错误。
+        """
+        import subprocess
+        import sys
+
+        project_root = Path(__file__).parent.parent
+        result = subprocess.run(
+            [sys.executable, str(project_root / "src" / "cli.py"),
+             str(project_root / "tests" / "fixtures" / "sample.pptx"),
+             "--rules", str(project_root / "rules.md")],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(project_root),
+            encoding="utf-8", errors="replace",  # CLI 在 Windows 上输出 UTF-8
+        )
+        # exit 2 = argparse 用法错误 (回退失败); 首次解析的报错文本会残留在
+        # stderr 中，故用正向断言 (审查完成必打印 SUMMARY) 而非检查 stderr
+        assert result.returncode != 2, f"CLI 用法错误: {result.stderr}"
+        assert "SUMMARY" in result.stdout, f"审查未完成: {result.stdout[-500:]}"
+
+    def test_audit_subcommand_still_works(self):
+        """'cli.py audit <path>' 显式子命令路径不受影响"""
+        import subprocess
+        import sys
+
+        project_root = Path(__file__).parent.parent
+        result = subprocess.run(
+            [sys.executable, str(project_root / "src" / "cli.py"), "audit",
+             str(project_root / "tests" / "fixtures" / "sample.docx"),
+             "--rules", str(project_root / "rules.md")],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(project_root),
+            encoding="utf-8", errors="replace",  # CLI 在 Windows 上输出 UTF-8
+        )
+        assert result.returncode != 2, f"CLI 用法错误: {result.stderr}"
+        assert "SUMMARY" in result.stdout

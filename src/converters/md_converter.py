@@ -40,6 +40,8 @@ class MarkdownConverter(BaseConverter):
     def convert(self, source_path: str | Path) -> Document:
         source_path = Path(source_path)
         text = _read_with_fallback(source_path)
+        # 剥离 UTF-8 BOM (utf-8 解码会保留 \ufeff，影响 frontmatter/标题检测)
+        text = text.lstrip("\ufeff")
 
         # --- 解析 YAML frontmatter (可选) ---
         frontmatter: dict = {}
@@ -252,9 +254,11 @@ class MarkdownConverter(BaseConverter):
 
 
 def _read_with_fallback(path: Path) -> str:
-    """读取文本文件，依次尝试多种编码 (UTF-8 → GBK → GB2312 → Latin-1)。
+    """读取文本文件，依次尝试多种编码 (UTF-8 → UTF-8-SIG → UTF-16 → GBK → GB2312 → Shift-JIS → Latin-1)。
 
-    Latin-1 作为最终回退永远不会失败（单字节全覆盖），但会用替换字符标记无法解码的字节。
+    Latin-1 作为最终回退永远不会失败（单字节全覆盖）。
+    注意: utf-8 先于 utf-8-sig 时，带 BOM 的文件会以 utf-8 解码成功并保留
+    \\ufeff 前缀，调用方应自行剥离 (见 convert())。
     """
     for encoding in _FALLBACK_ENCODINGS:
         try:

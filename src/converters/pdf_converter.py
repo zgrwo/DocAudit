@@ -139,18 +139,13 @@ class PdfConverter(BaseConverter):
         )
 
     def _convert_cell(self, cell) -> PageElement | None:
-        """Docling cell → PageElement"""
+        """Docling cell → PageElement
+
+        表格 cell 暂不拆分结构，统一作为 text_frame 保留文本内容。
+        """
         cell_text = getattr(cell, 'text', '')
         if not cell_text or not str(cell_text).strip():
             return None
-
-        # 判断是否为表格
-        if hasattr(cell, 'row_span') or hasattr(cell, 'col_span'):
-            # 如果是表格的一部分，标记但暂不处理复杂的拆分
-            return PageElement(
-                type="text_frame",
-                paragraphs=[Paragraph(text=str(cell_text).strip(), runs=[])],
-            )
 
         return PageElement(
             type="text_frame",

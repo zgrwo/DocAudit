@@ -234,3 +234,138 @@ class TestLanguageSegmentation:
         # 验证存在 en 段
         en_segments = [t for t, lang in segments if lang == "en"]
         assert len(en_segments) > 0, f"Short English '5nm' should be in an 'en' segment, got: {segments}"
+
+
+class TestLanguageToolFallback:
+    """LanguageToolClient 三层降级 — tier-3 纯 Python 回退路径"""
+
+    @staticmethod
+    def _make_offline_client():
+        """构造一个不会命中 tier-1/tier-2 的客户端 (无网络、不启动 Java)"""
+        from src.engines.languagetool import LanguageToolClient
+        # 端口 1 无服务 → tier-1 失败; auto_start=False → 跳过 Java
+        return LanguageToolClient(
+            base_url="http://localhost:1/v2", timeout=1, auto_start=False
+        )
+
+    def test_fallback_backend_selection(self):
+        """tier-1/2 不可用 → 降级到 python 或完全不可用 (不崩溃)"""
+        client = self._make_offline_client()
+        if client.is_available:
+            assert client._backend == "python"
+        else:
+            assert client.check("any text") == []
+
+    def test_python_fallback_chinese_patterns(self):
+        """tier-3 中文语法正则检查生效 (如 '仔细的' → 建议 '仔细地')"""
+        try:
+            import spellchecker  # noqa: F401
+        except ImportError:
+            import pytest
+            pytest.skip("pyspellchecker 未安装，tier-3 不可用")
+
+        client = self._make_offline_client()
+        assert client.is_available
+        results = client.check("他仔细的看了看晶圆表面", language="zh-CN")
+        messages = [r["message"] for r in results]
+        assert any("仔细地" in m for m in messages), f"未命中中文语法模式: {messages}"
+
+    def test_python_fallback_offset_and_length(self):
+        """tier-3 结果含正确的 offset/length 字段"""
+        try:
+            import spellchecker  # noqa: F401
+        except ImportError:
+            import pytest
+            pytest.skip("pyspellchecker 未安装，tier-3 不可用")
+
+        client = self._make_offline_client()
+        text = "重复逗号，，测试"
+        results = client.check(text, language="zh-CN")
+        comma_hits = [r for r in results if "重复逗号" in r["message"]]
+        assert comma_hits, "应命中 '重复逗号' 模式"
+        hit = comma_hits[0]
+        assert text[hit["offset"]:hit["offset"] + hit["length"]] == "，，"
+
+
+class TestLanguageToolHttpTiers:
+    """LanguageTool tier-1/tier-2 — HTTP 探测与分块检查 (mock, 无网络/无 Java)"""
+
+    @staticmethod
+    def _make_client():
+        from src.engines.languagetool import LanguageToolClient
+        return LanguageToolClient(
+            base_url="http://localhost:9999/v2", timeout=1, auto_start=False
+        )
+
+    def test_tier1_existing_service_detected(self):
+        """tier-1: HTTP 服务可用 → backend='docker'，不尝试 tier-2"""
+        import pytest
+        pytest.importorskip("requests")
+        from unittest.mock import MagicMock, patch
+
+        client = self._make_client()
+        mock_resp = MagicMock(status_code=200)
+        with patch("requests.get", return_value=mock_resp):
+            assert client.is_available
+            assert client._backend == "docker"
+
+    def test_check_http_chunk_offset_adjusted(self):
+        """_check_http 分块发送时，第二块的 match offset 必须加 chunk_start 偏移"""
+        import pytest
+        pytest.importorskip("requests")
+        from unittest.mock import MagicMock, patch
+
+        client = self._make_client()
+        client._available = True
+        client._backend = "docker"
+
+        text = "x" * 15000 + " 目标句"
+        # 第一块无匹配，第二块返回 offset=1 的匹配
+        responses = [
+            MagicMock(status_code=200, json=lambda: {"matches": []}),
+            MagicMock(status_code=200, json=lambda: {
+                "matches": [{"offset": 1, "length": 3, "message": "m"}]
+            }),
+        ]
+        with patch("requests.post", side_effect=responses), \
+             patch("time.sleep"):
+            results = client._check_http(text, "zh-CN")
+
+        assert len(results) == 1
+        # 第二块 offset=1 → 全局 offset = 15000 + 1
+        assert results[0]["offset"] == 15001
+
+    def test_check_http_request_failure_returns_partial(self):
+        """HTTP 请求异常 → 不抛出，返回已收集的部分结果"""
+        import pytest
+        pytest.importorskip("requests")
+        from unittest.mock import patch
+
+        client = self._make_client()
+        client._available = True
+        client._backend = "docker"
+
+        with patch("requests.post", side_effect=ConnectionError("boom")):
+            results = client._check_http("一些文本", "zh-CN")
+        assert results == []
+
+    def test_tier2_skipped_when_java_missing(self):
+        """tier-2: 系统无 java → _try_java 直接返回 False，不启动子进程"""
+        from unittest.mock import patch
+
+        client = self._make_client()
+        with patch("shutil.which", return_value=None), \
+             patch("subprocess.Popen") as mock_popen:
+            assert client._try_java() is False
+            mock_popen.assert_not_called()
+
+    def test_tier2_skipped_when_jar_missing(self):
+        """tier-2: 有 java 但无本地 jar → 返回 False，不下载不启动"""
+        from unittest.mock import patch
+
+        client = self._make_client()
+        with patch("shutil.which", return_value="/usr/bin/java"), \
+             patch.object(client, "_find_jar", return_value=None), \
+             patch("subprocess.Popen") as mock_popen:
+            assert client._try_java() is False
+            mock_popen.assert_not_called()

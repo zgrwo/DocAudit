@@ -51,7 +51,8 @@ def build_auditors(rules_path: str, glossary_dir: str, vocab_dir: str | None = N
 
     # ── _skip_checks 内部简写 → _DISPATCH check_type 映射 ──
     # StructureAuditor: title_slide→first_slide_has_title_layout,
-    #   heading_levels→heading_level_sequential, figure_numbering→figure_numbering_sequential
+    #   heading_levels→heading_level_sequential, figure_numbering→figure_numbering_sequential,
+    #   every_slide_conclusion→every_slide_has_conclusion
     # FactualAuditor: numeric_consistency→numeric_cross_reference
     # 其余键名与 _DISPATCH 一致
 

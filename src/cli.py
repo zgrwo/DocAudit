@@ -245,19 +245,33 @@ def main():
                               help="指定修复类型 (默认: all)")
 
     # Backward compat: if first arg looks like a path, treat as audit
-    args, remaining = parser.parse_known_args()
+    try:
+        # 抑制首次解析的报错噪音 (此阶段唯一报错场景是位置参数被误判为
+        # 子命令的 invalid choice，由下方回退接管；--help 正常输出不受影响)
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            args, remaining = parser.parse_known_args()
+    except SystemExit as e:
+        # --help 正常输出后直接退出；参数错误 (exit code 2) 才回退
+        if e.code == 0:
+            raise
+        # 显式子命令 (audit/doctor) 的参数错误 → 严格重解析，
+        # 交还 argparse 报标准用法错误 (exit 2)，不回退为 audit
+        first = sys.argv[1] if len(sys.argv) > 1 else ""
+        if first in ("audit", "doctor"):
+            parser.parse_args()
+        # 位置参数 (如 "docaudit report.pptx") 会被子命令解析器视为
+        # invalid choice 而报错退出 → 回退为按 audit 子命令重新解析
+        args = audit_parser.parse_args()
+        args.command = "audit"
 
     if args.command == "doctor":
         sys.exit(doctor_check())
 
-    # If no subcommand but path provided, treat as audit
-    if args.command is None:
-        # Re-parse as audit with positional path
-        args = parser.parse_args()
-        if not hasattr(args, "path") or args.path is None:
-            parser.print_help()
-            sys.exit(0)
-        args.command = "audit"
+    # 无子命令但存在未知选项 → 严格报错 (exit 2)，不静默接受
+    if args.command is None and remaining:
+        parser.error(f"unrecognized arguments: {' '.join(remaining)}")
 
     if args.command != "audit":
         parser.print_help()
