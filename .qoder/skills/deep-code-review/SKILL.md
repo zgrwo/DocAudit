@@ -1,6 +1,7 @@
 ---
+name: "deep-code-review"
 description: "DocAudit 全面深度代码审查 — 8 维度分析，含项目架构知识、领域检查清单、已知陷阱。每次功能迭代后使用。"
-name: "DocAudit 深度代码审查"
+trigger: "每次功能迭代后或需要深度代码审查时触发。"
 argument-hint: "[审查范围: 文件/目录/模块] [--focus 正确性|安全|性能|CJK|配置流]"
 agent: "agent"
 model: "Claude Opus 4.8"

@@ -5,6 +5,7 @@ description: >
   在编写、审查或重构 DocAudit Python 代码时使用，涵盖：
   Auditor 开发、Finding 创建、_DISPATCH 注册、_skip_checks 配置、
   rules.md 规则编写、中文文本规范、测试编写、AutoFix 实现。
+trigger: "编写、审查或重构 DocAudit Python 代码时触发。"
 last_updated: 2026-07-11
 ---
 

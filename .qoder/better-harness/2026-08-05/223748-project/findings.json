@@ -1,0 +1,162 @@
+{
+  "summary": {
+    "projectName": "文档审查套件",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目拥有完善的 AGENTS.md 指导体系和五项目级 Skill，但 Skill 元数据（名称声明、触发条件）与实际文件夹存在偏差，影响代理精确路由。当前窗口无可观测会话数据，行为层面的验证受限。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Skills",
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            "AGENTS.md"
+          ]
+        },
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Project"
+          ],
+          "count": 5,
+          "paths": [
+            ".qoder/skills/architecture-reviewer/SKILL.md",
+            ".qoder/skills/deep-code-review/SKILL.md",
+            ".qoder/skills/project-plan-review/SKILL.md",
+            ".qoder/skills/python/SKILL.md",
+            ".qoder/skills/refactoring-guardian/SKILL.md"
+          ]
+        },
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            ".github/workflows/ci.yml"
+          ]
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "MCP",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Hooks",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Commands",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Plugins",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 72,
+        "summary": "AGENTS.md 提供了完整的架构分层、红线规则、防幻觉铁律和开发流程指导，任务边界清晰。证据状态为 Present，上限 74。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 68,
+        "summary": "install/run 脚本与 pyproject.toml 提供了完整的启动链路，CI 工作流覆盖自动化验证。但 Skill 缺少结构化触发声明，代理依赖语义推断选择 Skill。",
+        "findingRefs": [
+          "skill-name-folder-mismatch",
+          "skills-missing-trigger-declarations"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 70,
+        "summary": "pytest 61 用例覆盖五个层次，CI 流水线自动执行，核心变更低风险。无会话观测数据验证实际执行效果。",
+        "findingRefs": []
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 55,
+        "summary": "CI 工作流存在但无观测到的交付验收证据。交付验收 Unobserved，上限 59。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "无可观测会话事件，学习捕获不可评估。无后续比较窗口验证改进效果。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "skill-name-folder-mismatch",
+      "title": "四个 Skill 的声明名称与文件夹名不一致，影响代理精确路由",
+      "severity": "Low",
+      "reason": "资产完整性扫描确认 architecture-reviewer、deep-code-review、project-plan-review、refactoring-guardian 四个 Skill 在 SKILL.md 中声明的名称（架构审查员、DocAudit 深度代码审查、项目规划效果审查、重构守卫）与文件夹名不一致。代理按文件夹名发现和路由，名称偏差可能导致精确匹配失败或依赖回退到语义推断，降低 Skill 被正确选中的概率。修复方式为对齐文件夹名与声明名或反之，属于项目侧可操作修改。",
+      "expectedOutput": [
+        "每个 Skill 的文件夹名与 SKILL.md 声明名称一致",
+        "agents.md 中的 Skill 引用表同步更新",
+        "资产基线扫描不再报告 skill-name-mismatch"
+      ],
+      "expectedArtifact": ".qoder/skills/*/SKILL.md",
+      "aiFixPrompt": "/better-harness fix this issue\n\n对齐 .qoder/skills/ 下四个 Skill 的文件夹名与 SKILL.md 中声明的名称：\n- architecture-reviewer ↔ 架构审查员\n- deep-code-review ↔ DocAudit 深度代码审查\n- project-plan-review ↔ 项目规划效果审查\n- refactoring-guardian ↔ 重构守卫\n\n选择保留文件夹名并更新 SKILL.md 中的 name 字段，或反之。同步更新 agents.md 中的 Skill 引用表。\n\n## Validation\n\n- 运行 `node <better-harness-root>/scripts/better-harness.mjs coding-agent-practices asset-baseline qoder --workspace . --language zh --json` 确认 skill-name-mismatch 警告消失",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    },
+    {
+      "id": "skills-missing-trigger-declarations",
+      "title": "五个项目 Skill 均未声明触发条件，代理只能语义推断使用时机",
+      "severity": "Low",
+      "reason": "分析器报告显示全部五个 Skill 的 trigger 字段为 no，同时 output、validation、routed 也均为 no。这意味着 Skill 仅包含过程内容（procedure），但缺少结构化的触发边界。代理无法通过声明式条件判断何时选用某个 Skill，只能依赖语义匹配推断，增加了误选或漏选的风险。agents.md 中的 Skill 加载表描述了触发时机，但这些信息未下沉到各 SKILL.md 的元数据中，形成了两层指导的潜在不一致。",
+      "expectedOutput": [
+        "每个 SKILL.md 包含明确的触发条件声明",
+        "agents.md 中的 Skill 触发描述与 SKILL.md 保持一致",
+        "分析器将 trigger 字段识别为已声明"
+      ],
+      "expectedArtifact": ".qoder/skills/*/SKILL.md",
+      "aiFixPrompt": "/better-harness fix this issue\n\n为 .qoder/skills/ 下每个 SKILL.md 补充触发声明，将 agents.md 中已有的触发时机下沉到各 Skill 的元数据中：\n- architecture-reviewer: 新增组件/层级/依赖前触发\n- deep-code-review: 深度代码审查时触发\n- project-plan-review: 里程碑复盘/规划评审时触发\n- python: 编写/修改 Python 代码时触发\n- refactoring-guardian: 重构每个 Phase 开始/结束时触发\n\n## Validation\n\n- 运行资产基线分析确认 Skill 的 trigger 字段被识别为 present",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 ---
+name: "refactoring-guardian"
 description: "重构守卫专家 — 在每个重构 Phase 前后执行安全网检查，确保零回归。"
-name: "重构守卫"
+trigger: "每个重构 Phase 开始和结束时触发。"
 argument-hint: "[phase: 0|1|2|3|4] [action: start|end]"
 ---
 
