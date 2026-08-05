@@ -42,19 +42,22 @@
 
 ## 技能加载
 
-| 范围 | Skill 文件 | 内容 |
+> 以下 Skill 已注册为平台资产（`.qoder/skills/`），代理可通过平台机制自动发现和加载。
+> 规范源文件保留在 `skills/` 目录，修改后需同步到 `.qoder/skills/`。
+
+| 范围 | Skill | 内容 |
 | :--- | :--- | :--- |
-| 编写/审查 Python 代码 | `skills/python-SKILL.md` | 编码规范、陷阱 |
+| 编写/审查 Python 代码 | `python` | 编码规范、陷阱 |
 | 新增/修改审查规则 | `rules/rules.md` | 规则声明格式 |
-| 深度审查 | `skills/deep-code-review.prompt.md` | 审查 Prompt 模板 |
+| 深度审查 | `deep-code-review` | 审查 Prompt 模板 |
 
 ### 专家 Skill（重构生命周期）
 
 | 阶段 | Skill | 触发时机 |
 |------|-------|----------|
-| 决策前 | `skills/architecture-reviewer.md` | 新增组件/层级/依赖前 |
-| 执行中 | `skills/refactoring-guardian.md` | 每个 Phase 开始/结束时 |
-| 执行后 | `skills/project-plan-review.md` | 里程碑复盘/规划评审时 |
+| 决策前 | `architecture-reviewer` | 新增组件/层级/依赖前 |
+| 执行中 | `refactoring-guardian` | 每个 Phase 开始/结束时 |
+| 执行后 | `project-plan-review` | 里程碑复盘/规划评审时 |
 
 ## 架构分层
 

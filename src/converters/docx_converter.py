@@ -1,7 +1,7 @@
 """DOCX 转换器 — 使用 python-docx 解析，保留段落/字符样式信息"""
 
-from pathlib import Path
 import logging
+from pathlib import Path
 
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH

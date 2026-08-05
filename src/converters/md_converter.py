@@ -1,8 +1,8 @@
 """Markdown 转换器 — 直接解析 Markdown 文件"""
 
-from pathlib import Path
-import re
 import logging
+import re
+from pathlib import Path
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -11,7 +11,6 @@ from src.models.document import (
     Page,
     PageElement,
     Paragraph,
-    Run,
     TableCell,
 )
 

@@ -5,9 +5,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from src import __version__
 from src.models.document import Document
 from src.models.finding import AuditFinding
-from src import __version__
 
 logger = logging.getLogger(__name__)
 

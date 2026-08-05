@@ -274,4 +274,33 @@
 
 ---
 
-<!-- last_updated: 2026-07-11 -->
+## Reporters（报告生成）
+
+`src/reporters/` — AuditFinding → HTML / JSON
+
+### HtmlReporter `src/reporters/html_reporter.py`
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()` |
+
+### JsonReporter `src/reporters/json_reporter.py`
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `generate_json_report` | `(findings: list[AuditFinding], title: str, output_path: str \| Path \| None)` | `str` | 生成 JSON 报告 |
+
+---
+
+## CLI（命令行入口）
+
+`src/cli.py` — 命令行审查入口
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `audit_file` | `(file_path, rules_path, glossary_dir, verbose, auto_fix)` | 执行单文件审查并输出结果 |
+| `print_summary` | `(findings, verbose)` | 打印审查结果摘要 |
+
+---
+
+<!-- last_updated: 2026-08-05 -->

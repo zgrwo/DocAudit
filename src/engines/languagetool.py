@@ -8,9 +8,9 @@ Tier 3: 纯 Python 拼写检查 — pyspellchecker + 中文语法正则 (零依�
 import atexit
 import logging
 import re
+import shutil
 import subprocess
 import time
-import shutil
 import weakref
 from pathlib import Path
 from typing import Any

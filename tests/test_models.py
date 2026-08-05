@@ -1,6 +1,6 @@
 """测试统一文档模型"""
 
-from src.models.document import Document, Page, PageElement, Paragraph, Run, DocumentMetadata
+from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph, Run
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
 

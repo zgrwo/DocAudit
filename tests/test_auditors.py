@@ -2,12 +2,11 @@
 
 import os
 import tempfile
-from pathlib import Path
 
-from src.converters.pptx_converter import PptxConverter
-from src.auditors.structure import StructureAuditor
-from src.auditors.format import FormatAuditor
 from src.auditors.factual import FactualAuditor
+from src.auditors.format import FormatAuditor
+from src.auditors.structure import StructureAuditor
+from src.converters.pptx_converter import PptxConverter
 from src.models.finding import FindingSeverity
 
 

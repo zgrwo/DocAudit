@@ -1,7 +1,7 @@
 """PDF 转换器 — 使用 Docling 解析，保留标题层级和表格结构"""
 
-from pathlib import Path
 import logging
+from pathlib import Path
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -10,7 +10,6 @@ from src.models.document import (
     Page,
     PageElement,
     Paragraph,
-    Run,
     TableCell,
 )
 
@@ -183,7 +182,7 @@ class PdfConverter(BaseConverter):
             rows: list[list[TableCell]] = []
             if hasattr(table, 'export_to_dataframe'):
                 try:
-                    import pandas as pd
+                    import pandas  # noqa: F401 — availability check
                 except ImportError:
                     logger.warning(
                         "PDF 表格转换需要 pandas。请运行: pip install doc-audit[pdf]"

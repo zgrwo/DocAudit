@@ -1,10 +1,9 @@
 """术语一致性检查引擎 — 基于 YAML 术语表的正则匹配"""
 
-import re
 import logging
-from pathlib import Path
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
 
 import yaml
 

@@ -1,7 +1,7 @@
 """rules.md 解析器 — 将 Markdown 规则文件转换为可执行规则"""
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,20 +42,18 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
 
     content = path.read_text(encoding="utf-8")
 
-    # 解析 YAML frontmatter (可选)
-    frontmatter: dict = {}
+    # 解析 YAML frontmatter (可选，当前仅用于跳过)
     body = content
     if content.startswith("---"):
         parts = content.split("---", 2)
         if len(parts) >= 3:
             try:
-                frontmatter = yaml.safe_load(parts[1]) or {}
+                yaml.safe_load(parts[1])  # validate but discard
             except yaml.YAMLError:
                 pass
             body = parts[2]
 
     rules: list[AuditRule] = []
-    current_category = ""
     current_section = ""
 
     lines = body.split("\n")
@@ -88,7 +86,6 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
         if m:
             rule_id = m.group(1).strip()
             rule_desc = m.group(2).strip()
-            current_category = rule_id
 
             # 创建规则对象
             rules.append(AuditRule(
@@ -106,7 +103,6 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
         if m:
             rule_id = m.group(1).strip()
             rule_desc = m.group(2).strip()
-            current_category = rule_id
 
             rules.append(AuditRule(
                 rule_id=rule_id,

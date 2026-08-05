@@ -3,12 +3,10 @@
 审查发现 P1：缺少空文档/0 页输入边界测试。本文件补充覆盖。
 """
 
-import pytest
 
-from src.auditors.structure import StructureAuditor
-from src.auditors.format import FormatAuditor
 from src.auditors.factual import FactualAuditor
-from src.auditors.language import LanguageAuditor
+from src.auditors.format import FormatAuditor
+from src.auditors.structure import StructureAuditor
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 
 

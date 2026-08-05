@@ -4,10 +4,10 @@ import json
 import tempfile
 from pathlib import Path
 
-from src.engines.pipeline import find_converter, build_auditors, run_auditors
+from src.engines.pipeline import build_auditors, find_converter, run_auditors
+from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.reporters.html_reporter import generate_html_report
 from src.reporters.json_reporter import generate_json_report
-from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
 
 class TestFullPipeline:
@@ -179,7 +179,7 @@ title: 测试文档
         """自定义规则审查器作为流水线一部分正确执行"""
         doc_path = "tests/fixtures/sample.pptx"
         converter = find_converter(doc_path)
-        doc = converter.convert(doc_path)
+        converter.convert(doc_path)  # 验证转换不抛异常
         auditors = build_auditors("rules.md", str(Path("glossary").resolve()))
 
         # 确保 CustomRulesAuditor 在流水线中
@@ -310,7 +310,6 @@ title: 测试文档
     def test_golden_path_docx(self, tmp_path):
         """黄金测试扩展: DOCX 格式三路径一致性"""
         from docx import Document as DocxDocument
-        from docx.shared import Pt
 
         # 创建测试 DOCX
         docx_doc = DocxDocument()

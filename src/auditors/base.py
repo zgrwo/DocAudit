@@ -1,6 +1,7 @@
 """审查器抽象基类"""
 
 from abc import ABC, abstractmethod
+
 from src.models.document import Document
 from src.models.finding import AuditFinding
 

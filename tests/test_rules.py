@@ -1,7 +1,7 @@
 """测试规则解析器"""
 
-from src.engines.rule_parser import parse_rules_md, extract_auditor_config
 from src.auditors.custom_rules import CustomRulesAuditor
+from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 
 
 class TestRuleParser:
@@ -36,7 +36,6 @@ class TestRuleParser:
 
     def test_str004_defaults_when_not_in_rules(self):
         """无 STR-004 规则的 rules.md → 使用默认值"""
-        from src.engines.rule_parser import AuditRule
         config = extract_auditor_config([])  # 空规则列表
         assert config["max_english_words"] == 10
         assert config["max_chinese_chars_title"] == 40

@@ -1,13 +1,14 @@
 """测试引擎层 — TerminologyChecker, Vocabulary, LanguageAuditor"""
 
-from pathlib import Path
 
+from src.auditors.language import LanguageAuditor
 from src.engines.terminology import (
-    TerminologyChecker, TermRule, TermGlossary, _already_preferred,
+    TermGlossary,
+    TerminologyChecker,
+    TermRule,
+    _already_preferred,
 )
 from src.engines.vocabulary import Vocabulary, _has_regex_chars
-from src.auditors.language import LanguageAuditor
-
 
 # ── Terminology: _already_preferred ──────────────────────────
 
@@ -66,7 +67,6 @@ class TestTerminologyChecker:
 
     def test_check_skips_already_preferred(self, tmp_path):
         """含推荐写法的文档 → 不产生误报"""
-        import yaml
         glossary_file = tmp_path / "test_glossary.yaml"
         glossary_file.write_text("""
 category: 测试
@@ -86,7 +86,6 @@ terms:
 
     def test_check_flags_unpreferred(self, tmp_path):
         """文档未使用推荐写法 → 产生 findings"""
-        import yaml
         glossary_file = tmp_path / "test_glossary.yaml"
         glossary_file.write_text("""
 category: 测试
@@ -232,8 +231,6 @@ class TestLanguageSegmentation:
         """短英文段 ('5nm') 在两个中文段之间 → 分段正确"""
         auditor = LanguageAuditor()
         segments = auditor._segment_by_language("工艺 5nm 技术已量产")
-        # 5nm 作为英文段应保留其语言标签
-        texts_and_langs = [(t.strip(), l) for t, l in segments]
         # 验证存在 en 段
-        en_segments = [t for t, l in segments if l == "en"]
+        en_segments = [t for t, lang in segments if lang == "en"]
         assert len(en_segments) > 0, f"Short English '5nm' should be in an 'en' segment, got: {segments}"

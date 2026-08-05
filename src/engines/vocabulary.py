@@ -11,8 +11,8 @@ reject.txt 支持两种格式:
    - 否则回退到字面字符串的边界匹配
 """
 
-import re
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

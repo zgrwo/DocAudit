@@ -4,7 +4,11 @@ import pytest
 
 from src.auditors.language import LanguageAuditor
 from src.models.document import (
-    Document, DocumentMetadata, Page, PageElement, Paragraph,
+    Document,
+    DocumentMetadata,
+    Page,
+    PageElement,
+    Paragraph,
 )
 from src.models.finding import FindingSeverity, FindingType
 

@@ -1,16 +1,20 @@
 """共享审计流水线 — app.py 和 cli.py 的单一真相来源"""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from src.auditors.base import BaseAuditor
-from src.converters import PptxConverter, DocxConverter, PdfConverter, MarkdownConverter
 from src.auditors import (
-    StructureAuditor, FormatAuditor, LanguageAuditor,
-    FactualAuditor, CustomRulesAuditor,
+    CustomRulesAuditor,
+    FactualAuditor,
+    FormatAuditor,
+    LanguageAuditor,
+    StructureAuditor,
 )
-from src.engines.rule_parser import parse_rules_md, extract_auditor_config
+from src.auditors.base import BaseAuditor
+from src.converters import DocxConverter, MarkdownConverter, PdfConverter, PptxConverter
+from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 

@@ -1,8 +1,8 @@
 """CLI 命令行入口 — 单文件和批量审查"""
 
-import sys
-import logging
 import argparse
+import logging
+import sys
 from pathlib import Path
 
 # 修复 Windows GBK 终端输出问题
@@ -16,7 +16,7 @@ if sys.platform == "win32":
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.engines.pipeline import CONVERTERS, find_converter, build_auditors, run_auditors
+from src.engines.pipeline import build_auditors, find_converter, run_auditors
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
 from src.reporters.html_reporter import generate_html_report
@@ -110,36 +110,160 @@ def print_summary(findings: list[AuditFinding]) -> None:
         print(f"\n--- Info: {len(infos)} items ---")
 
 
+def doctor_check() -> int:
+    """环境诊断：检查运行环境健康状态。"""
+    import importlib
+
+    checks_passed = 0
+    checks_failed = 0
+
+    def _check(name: str, ok: bool, detail: str = "") -> None:
+        nonlocal checks_passed, checks_failed
+        status = "PASS" if ok else "FAIL"
+        if not ok:
+            checks_failed += 1
+        else:
+            checks_passed += 1
+        suffix = f" ({detail})" if detail else ""
+        print(f"  [{status}] {name}{suffix}")
+
+    print("DocAudit Environment Doctor")
+    print("=" * 40)
+
+    # 1. Python version
+    py_version = sys.version_info
+    py_ok = py_version >= (3, 10)
+    _check(
+        "Python version",
+        py_ok,
+        f"{py_version.major}.{py_version.minor}.{py_version.micro} (>= 3.10 required)",
+    )
+
+    # 2. Core dependencies
+    core_deps = [
+        ("streamlit", "streamlit"),
+        ("python-pptx", "pptx"),
+        ("python-docx", "docx"),
+        ("pyyaml", "yaml"),
+        ("requests", "requests"),
+        ("pyspellchecker", "spellchecker"),
+    ]
+    for display_name, module_name in core_deps:
+        try:
+            importlib.import_module(module_name)
+            _check(f"Dependency: {display_name}", True)
+        except ImportError:
+            _check(f"Dependency: {display_name}", False, "pip install docaudit")
+
+    # 3. Optional dependencies
+    optional_deps = [("docling (PDF)", "docling"), ("pandas", "pandas")]
+    for display_name, module_name in optional_deps:
+        try:
+            importlib.import_module(module_name)
+            _check(f"Optional: {display_name}", True)
+        except ImportError:
+            _check(f"Optional: {display_name}", False, "pip install docaudit[pdf]")
+
+    # 4. rules.md parseable
+    rules_path = Path("rules.md")
+    if rules_path.exists():
+        try:
+            from src.engines.rule_parser import parse_rules_md
+            rules = parse_rules_md(str(rules_path))
+            _check("rules.md parsing", True, f"{len(rules)} rules loaded")
+        except Exception as e:
+            _check("rules.md parsing", False, str(e)[:80])
+    else:
+        _check("rules.md parsing", False, "file not found")
+
+    # 5. Glossary YAML files
+    glossary_path = Path("glossary")
+    if glossary_path.is_dir():
+        yaml_files = list(glossary_path.glob("*.yaml"))
+        if yaml_files:
+            try:
+                import yaml
+                for yf in yaml_files:
+                    yaml.safe_load(yf.read_text(encoding="utf-8"))
+                _check("Glossary YAML files", True, f"{len(yaml_files)} files loaded")
+            except Exception as e:
+                _check("Glossary YAML files", False, str(e)[:80])
+        else:
+            _check("Glossary YAML files", False, "no .yaml files found")
+    else:
+        _check("Glossary YAML files", False, "glossary/ directory not found")
+
+    # 6. LanguageTool connectivity (optional)
+    try:
+        import requests as req
+        resp = req.get("http://localhost:8010/v2/languages", timeout=3)
+        if resp.status_code == 200:
+            _check("LanguageTool server", True, "localhost:8010 reachable")
+        else:
+            _check("LanguageTool server", False, f"HTTP {resp.status_code}")
+    except Exception:
+        _check("LanguageTool server", False, "not reachable (optional: docker-compose up)")
+
+    # Summary
+    print(f"\n{'=' * 40}")
+    print(f"Result: {checks_passed} passed, {checks_failed} failed")
+    return 1 if checks_failed > 0 else 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="DocAudit — 本地离线文档审查系统",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  doc-audit report.pptx                    审查单个文件
-  doc-audit report.pptx -o report.html     导出 HTML 报告
-  doc-audit docs/ --rules my-rules.md      批量审查目录，使用自定义规则
-  doc-audit report.pptx --fix              审查并自动修复格式问题
+  docaudit report.pptx                    审查单个文件
+  docaudit report.pptx -o report.html     导出 HTML 报告
+  docaudit docs/ --rules my-rules.md      批量审查目录，使用自定义规则
+  docaudit report.pptx --fix              审查并自动修复格式问题
+  docaudit doctor                         环境诊断
         """,
     )
-    parser.add_argument("path", help="文件或目录路径")
-    parser.add_argument("--rules", default="rules.md", help="自定义规则文件 (默认: rules.md)")
-    parser.add_argument("--glossary", default="glossary", help="术语表目录 (默认: glossary)")
-    parser.add_argument("--vocab", default=None, help="词汇表目录 (默认: glossary 同级 vocab/ 目录)")
-    parser.add_argument("-o", "--output", help="输出报告文件 (.html 或 .json)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
-    parser.add_argument("--format", choices=["pptx", "docx", "pdf", "md", "all"],
-                        default="all", help="按格式过滤 (批量模式)")
-    parser.add_argument("--fix", action="store_true",
-                        help="自动修复简单格式问题 (字体标准化、字号修正)")
-    parser.add_argument("--fix-type", choices=["all", "font", "spacing", "overflow", "title_punct", "bullet"],
-                        default="all",
-                        help="指定修复类型 (默认: all)。font=字体+字号, spacing=中英文间距, "
-                             "overflow=元素溢出, title_punct=标题标点, bullet=项目符号")
+    subparsers = parser.add_subparsers(dest="command")
 
-    args = parser.parse_args()
+    # doctor subcommand
+    subparsers.add_parser("doctor", help="环境诊断：检查运行环境健康状态")
 
-    # 收集文件
+    # audit (default) arguments
+    audit_parser = subparsers.add_parser("audit", help="审查文档")
+    audit_parser.add_argument("path", help="文件或目录路径")
+    audit_parser.add_argument("--rules", default="rules.md", help="自定义规则文件 (默认: rules.md)")
+    audit_parser.add_argument("--glossary", default="glossary", help="术语表目录 (默认: glossary)")
+    audit_parser.add_argument("--vocab", default=None, help="词汇表目录")
+    audit_parser.add_argument("-o", "--output", help="输出报告文件 (.html 或 .json)")
+    audit_parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
+    audit_parser.add_argument("--format", choices=["pptx", "docx", "pdf", "md", "all"],
+                              default="all", help="按格式过滤 (批量模式)")
+    audit_parser.add_argument("--fix", action="store_true",
+                              help="自动修复简单格式问题")
+    audit_parser.add_argument("--fix-type", choices=["all", "font", "spacing", "overflow", "title_punct", "bullet"],
+                              default="all",
+                              help="指定修复类型 (默认: all)")
+
+    # Backward compat: if first arg looks like a path, treat as audit
+    args, remaining = parser.parse_known_args()
+
+    if args.command == "doctor":
+        sys.exit(doctor_check())
+
+    # If no subcommand but path provided, treat as audit
+    if args.command is None:
+        # Re-parse as audit with positional path
+        args = parser.parse_args()
+        if not hasattr(args, "path") or args.path is None:
+            parser.print_help()
+            sys.exit(0)
+        args.command = "audit"
+
+    if args.command != "audit":
+        parser.print_help()
+        sys.exit(0)
+
+    # Collect files
     path = Path(args.path)
     files: list[Path] = []
 
@@ -155,7 +279,7 @@ def main():
             files.extend(path.glob(pat))
         files = sorted(files)
         if not files:
-            print(f"[ERROR] No supported documents found in directory")
+            print("[ERROR] No supported documents found in directory")
             sys.exit(1)
         print(f"[SCAN] Found {len(files)} files")
     else:
@@ -182,7 +306,7 @@ def main():
             # Auto-fix (inspired by intern)
             if args.fix and doc.format in ("pptx", "docx"):
                 from src.engines.autofix import AutoFixer
-                from src.engines.rule_parser import parse_rules_md, extract_auditor_config
+                from src.engines.rule_parser import extract_auditor_config, parse_rules_md
                 out = file_path.parent / f"{file_path.stem}_fixed{file_path.suffix}"
                 # 从 rules.md 读取允许字体列表（配置驱动，非硬编码）
                 rules = parse_rules_md(args.rules)

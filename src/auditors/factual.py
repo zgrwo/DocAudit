@@ -108,7 +108,7 @@ class FactualAuditor(BaseAuditor):
                 findings.append(AuditFinding(
                     type=FindingType.FACTUAL,
                     severity=FindingSeverity.ERROR,
-                    message=f"数值不一致: 相同指标在不同位置出现不同的数值",
+                    message="数值不一致: 相同指标在不同位置出现不同的数值",
                     rule_id="CON-001",
                     page_index=entries_sorted[0]["page_index"],
                     location=f"第 {entries_sorted[0]['page_number']} 页等多处",

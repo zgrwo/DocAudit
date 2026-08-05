@@ -10,7 +10,6 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +131,9 @@ class AutoFixer:
         在 CJK 字符与拉丁字符/数字之间自动插入空格。
         支持 PPTX 和 DOCX。使用原子写入：先写临时文件，成功后再替换。
         """
-        from src.text_utils import CJK_LATIN_BOUNDARY, LATIN_CJK_BOUNDARY
         import tempfile
+
+        from src.text_utils import CJK_LATIN_BOUNDARY, LATIN_CJK_BOUNDARY
         source = Path(source)
         ext = source.suffix.lower()
         target = Path(target)
@@ -197,6 +197,7 @@ class AutoFixer:
         PPTX only。使用原子写入。
         """
         import tempfile
+
         from pptx import Presentation
 
         source = Path(source)
@@ -256,6 +257,7 @@ class AutoFixer:
         """
         import re
         import tempfile
+
         from pptx import Presentation
 
         source = Path(source)
@@ -323,6 +325,7 @@ class AutoFixer:
         """
         import re
         import tempfile
+
         from pptx import Presentation
 
         source = Path(source)

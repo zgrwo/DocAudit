@@ -4,11 +4,11 @@
 使用方应直接从子模块导入: from src.engines.pipeline import build_auditors
 """
 
-from src.engines.rule_parser import parse_rules_md, extract_auditor_config, AuditRule
+from src.engines.autofix import AutoFixer
+from src.engines.languagetool import LanguageToolClient
+from src.engines.rule_parser import AuditRule, extract_auditor_config, parse_rules_md
 from src.engines.terminology import TerminologyChecker
 from src.engines.vocabulary import Vocabulary
-from src.engines.languagetool import LanguageToolClient
-from src.engines.autofix import AutoFixer
 
 __all__ = [
     "parse_rules_md",

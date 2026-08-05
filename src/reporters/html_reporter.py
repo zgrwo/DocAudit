@@ -1,13 +1,13 @@
 """HTML 报告生成器"""
 
 import logging
-from html import escape
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
+from src import __version__
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
-from src import __version__
 
 logger = logging.getLogger(__name__)
 

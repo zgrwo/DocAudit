@@ -1,12 +1,12 @@
 """自定义规则审查器 — 基于 rules.md 的规则引擎"""
 
-import re
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 from src.auditors.base import BaseAuditor
-from src.engines.rule_parser import parse_rules_md, AuditRule
+from src.engines.rule_parser import AuditRule, parse_rules_md
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
@@ -63,9 +63,9 @@ class CustomRulesAuditor(BaseAuditor):
         Returns:
             错误信息列表，空列表表示验证通过。
         """
-        from src.auditors.structure import StructureAuditor
-        from src.auditors.format import FormatAuditor
         from src.auditors.factual import FactualAuditor
+        from src.auditors.format import FormatAuditor
+        from src.auditors.structure import StructureAuditor
 
         AUDITOR_CLS_MAP = {
             "sa": StructureAuditor,
@@ -253,9 +253,9 @@ class CustomRulesAuditor(BaseAuditor):
         独立模式(无 pipeline 注入)下使用此路径 — 不需要 _skip_checks，
         因为没有 CustomRulesAuditor 分发来实现双重执行。
         """
-        from src.auditors.structure import StructureAuditor
-        from src.auditors.format import FormatAuditor
         from src.auditors.factual import FactualAuditor
+        from src.auditors.format import FormatAuditor
+        from src.auditors.structure import StructureAuditor
 
         cfg = self._resolve_auditor_config()
 

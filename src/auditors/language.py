@@ -1,7 +1,7 @@
 """语言审查器 — 中英混合语法检查 + 术语一致性"""
 
-import re
 import logging
+import re
 
 from src.auditors.base import BaseAuditor
 from src.engines.languagetool import LanguageToolClient
@@ -11,9 +11,11 @@ from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import (
     CJK_LATIN_BOUNDARY,
-    LATIN_CJK_BOUNDARY,
-    LATIN_CHINESE_PUNCT as _LATIN_CHINESE_PUNCT,
     CJK_RE,
+    LATIN_CJK_BOUNDARY,
+)
+from src.text_utils import (
+    LATIN_CHINESE_PUNCT as _LATIN_CHINESE_PUNCT,
 )
 
 logger = logging.getLogger(__name__)

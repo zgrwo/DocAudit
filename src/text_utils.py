@@ -48,7 +48,7 @@ LATIN_CJK_BOUNDARY = re.compile(
 """拉丁/数字后紧接 CJK 字符 — 应加空格"""
 
 LATIN_CHINESE_PUNCT = re.compile(
-    rf"([a-zA-Z0-9])([，。；：！？])"
+    r"([a-zA-Z0-9])([，。；：！？])"
 )
 """英文/数字后使用中文标点符号 — 应改为英文标点"""
 

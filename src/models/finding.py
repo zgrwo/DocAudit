@@ -1,10 +1,10 @@
 """审查发现 (Finding) 数据模型"""
 
+import hashlib
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-import hashlib
-import uuid
 
 
 class FindingSeverity(str, Enum):
@@ -72,7 +72,7 @@ class AuditFinding:
     @staticmethod
     def deduplicate(findings: list["AuditFinding"]) -> list["AuditFinding"]:
         """移除重复发现（保留严重度更高的版本）"""
-        seen: dict[str, "AuditFinding"] = {}
+        seen: dict[str, AuditFinding] = {}
         sev_rank = {FindingSeverity.ERROR: 3, FindingSeverity.WARNING: 2, FindingSeverity.INFO: 1}
         for f in findings:
             key = f.dedup_key

@@ -359,10 +359,14 @@ class FormatAuditor(BaseAuditor):
             r = elem.left + elem.width if elem.width is not None else None
             b = elem.top + elem.height if elem.height is not None else None
             issues = []
-            if elem.left < -TOL: issues.append(f"left={elem.left:.0f}pt")
-            if r is not None and r > SW + TOL: issues.append(f"right={r:.0f}pt > {SW}pt")
-            if elem.top < -TOL: issues.append(f"top={elem.top:.0f}pt")
-            if b is not None and b > SH + TOL: issues.append(f"bottom={b:.0f}pt > {SH}pt")
+            if elem.left < -TOL:
+                issues.append(f"left={elem.left:.0f}pt")
+            if r is not None and r > SW + TOL:
+                issues.append(f"right={r:.0f}pt > {SW}pt")
+            if elem.top < -TOL:
+                issues.append(f"top={elem.top:.0f}pt")
+            if b is not None and b > SH + TOL:
+                issues.append(f"bottom={b:.0f}pt > {SH}pt")
 
             if issues:
                 w_str = f"{elem.width:.0f}" if elem.width is not None else "?"
