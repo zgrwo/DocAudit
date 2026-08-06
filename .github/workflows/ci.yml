@@ -5,6 +5,7 @@ on:
     branches: [main, master]
   push:
     branches: [main, master]
+  workflow_dispatch:  # 支持 Actions 页面手动触发
 
 jobs:
   test:
