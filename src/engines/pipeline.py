@@ -25,6 +25,20 @@ CONVERTERS = [PptxConverter(), DocxConverter(), PdfConverter(), MarkdownConverte
 # 支持的文档扩展名 (app.py scan_folder 和 cli.py 批量扫描共用)
 SUPPORTED_EXTENSIONS = {".pptx", ".ppt", ".docx", ".doc", ".pdf", ".md", ".markdown", ".txt"}
 
+# _skip_checks 内部简写 → _DISPATCH check_type 映射 (单一真相来源，供 tests 守卫引用)
+# StructureAuditor: title_slide→first_slide_has_title_layout,
+#   heading_levels→heading_level_sequential, figure_numbering→figure_numbering_sequential,
+#   every_slide_conclusion→every_slide_has_conclusion
+# FactualAuditor: numeric_consistency→numeric_cross_reference
+# 其余键名与 _DISPATCH check_type 一致
+SKIP_TO_CHECK_TYPE = {
+    "title_slide": "first_slide_has_title_layout",
+    "heading_levels": "heading_level_sequential",
+    "figure_numbering": "figure_numbering_sequential",
+    "every_slide_conclusion": "every_slide_has_conclusion",
+    "numeric_consistency": "numeric_cross_reference",
+}
+
 
 def find_converter(file_path: str) -> Any | None:
     """自动匹配文件对应的转换器，无匹配返回 None"""
@@ -48,13 +62,6 @@ def build_auditors(rules_path: str, glossary_dir: str, vocab_dir: str | None = N
         if not derived.exists():
             logger.debug("vocab 目录不存在，跳过词汇表检查: %s", derived)
         vocab_dir = str(derived)
-
-    # ── _skip_checks 内部简写 → _DISPATCH check_type 映射 ──
-    # StructureAuditor: title_slide→first_slide_has_title_layout,
-    #   heading_levels→heading_level_sequential, figure_numbering→figure_numbering_sequential,
-    #   every_slide_conclusion→every_slide_has_conclusion
-    # FactualAuditor: numeric_consistency→numeric_cross_reference
-    # 其余键名与 _DISPATCH 一致
 
     # 构建各审计器实例 (使用 .get() 防御，避免 extract_auditor_config 未来重构时 KeyError)
     structure_auditor = StructureAuditor(config={

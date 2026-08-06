@@ -1,18 +1,11 @@
 """测试规则解析器"""
 
 from src.auditors.custom_rules import CustomRulesAuditor
+from src.engines.pipeline import SKIP_TO_CHECK_TYPE
 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 
 # StructureAuditor/FactualAuditor 的 _skip_checks 简写 → _DISPATCH check_type 反向映射
-# (与 pipeline.build_auditors 注释一致)
-_SKIP_TO_CHECK_TYPE = {
-    "title_slide": "first_slide_has_title_layout",
-    "heading_levels": "heading_level_sequential",
-    "figure_numbering": "figure_numbering_sequential",
-    "every_slide_conclusion": "every_slide_has_conclusion",
-    "numeric_consistency": "numeric_cross_reference",
-    # 其余键名与 _DISPATCH check_type 一致
-}
+# 单一真相来源: src/engines/pipeline.py:SKIP_TO_CHECK_TYPE (其余键名与 check_type 一致)
 
 
 class TestRuleParser:
@@ -120,7 +113,7 @@ class TestDispatchValidation:
         for _name, auditor in auditors:
             skip_keys = getattr(auditor, "_skip_checks", set())
             for key in skip_keys:
-                check_type = _SKIP_TO_CHECK_TYPE.get(key, key)
+                check_type = SKIP_TO_CHECK_TYPE.get(key, key)
                 assert check_type in CustomRulesAuditor._DISPATCH, (
                     f"{type(auditor).__name__}._skip_checks 键 '{key}' 映射的 "
                     f"check_type '{check_type}' 不在 _DISPATCH 中 → 检查静默失效"
