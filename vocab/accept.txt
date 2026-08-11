@@ -103,3 +103,8 @@ BGA
 LGA
 QFN
 WLCSP
+
+# 常用缩写/专有名词 (避免 pyspellchecker 误报)
+Gantt
+Qual
+Tech

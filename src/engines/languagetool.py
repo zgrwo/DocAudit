@@ -303,6 +303,10 @@ class LanguageToolClient:
                     # 使用大小写不敏感正则查找所有出现位置
                     pattern = re.compile(re.escape(word_lower), re.IGNORECASE)
                     for m in pattern.finditer(text):
+                        # context 必须携带 offset/length (相对 context.text)，供
+                        # language.py 的 accept.txt 白名单过滤定位匹配词。
+                        # 否则 ctx_length=0 会导致白名单过滤被整体跳过。
+                        ctx_start = max(0, m.start() - 20)
                         results.append({
                             "message": f"可能的拼写错误: '{word_lower}'",
                             "offset": m.start(),
@@ -314,7 +318,9 @@ class LanguageToolClient:
                             },
                             "replacements": [{"value": suggestion}] if suggestion else [],
                             "context": {
-                                "text": text[max(0, m.start() - 20):m.end() + 20],
+                                "text": text[ctx_start:m.end() + 20],
+                                "offset": m.start() - ctx_start,
+                                "length": len(m.group()),
                             },
                         })
 
