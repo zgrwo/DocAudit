@@ -1,13 +1,13 @@
 @echo off
-chcp 65001 > nul
+chcp 936 > nul
 
 setlocal enabledelayedexpansion
 
-title DocAudit â€” æœ¬åœ°ç¦»çº¿æ–‡æ¡£å®¡æŸ¥ç³»ç»Ÿ
+title DocAudit ¡ª ±¾µØÀëÏßÎÄµµÉó²éÏµÍ³
 
 :: ============================================================
-::  DocAudit ä¸€é”®å¯åŠ¨è„šæœ¬ (Windows)
-::  åŒå‡»å³å¯: è‡ªåŠ¨æ£€æµ‹ â†’ å®‰è£… â†’ æ‰“å¼€æµè§ˆå™¨ â†’ å®¡æŸ¥æ–‡æ¡£
+::  DocAudit Ò»¼üÆô¶¯½Å±¾ (Windows)
+::  Ë«»÷¼´¿É: ×Ô¶¯¼ì²â ¡ú °²×° ¡ú ´ò¿ªä¯ÀÀÆ÷ ¡ú Éó²éÎÄµµ
 :: ============================================================
 
 set "PROJECT_DIR=%~dp0.."
@@ -16,17 +16,17 @@ set "PYTHON="
 
 echo.
 echo   +==============================================+
-echo   ^|     DocAudit â€” æœ¬åœ°ç¦»çº¿æ–‡æ¡£å®¡æŸ¥ç³»ç»Ÿ         ^|
-echo   ^|     ä¸€é”®å¯åŠ¨è„šæœ¬ v1.0                        ^|
+echo   ^|     DocAudit ¡ª ±¾µØÀëÏßÎÄµµÉó²éÏµÍ³         ^|
+echo   ^|     Ò»¼üÆô¶¯½Å±¾ v1.0                        ^|
 echo   +==============================================+
 echo.
 
-:: â”€â”€ 1. æŸ¥æ‰¾ Python 3.10+ (ä¸‰çº§é™çº§ç­–ç•¥) â”€â”€
-echo   [1] æ£€æµ‹ Python çŽ¯å¢ƒ...
+:: ©¤©¤ 1. ²éÕÒ Python 3.10+ (Èý¼¶½µ¼¶²ßÂÔ) ©¤©¤
+echo   [1] ¼ì²â Python »·¾³...
 
-:: â”€â”€ ç­–ç•¥ 1: py launcher (Windows Python Launcher, è¦†ç›–é¢æœ€å¹¿) â”€â”€
-:: py.exe éšå®˜æ–¹ Python å®‰è£…å™¨å†™å…¥ C:\Windows\py.exe ï¼Œ
-:: å¯å‘çŽ°æœ¬æœºæ‰€æœ‰å·²å®‰è£…çš„ Python ç‰ˆæœ¬ï¼ˆå«æœªåŠ å…¥ PATH çš„ï¼‰ã€‚
+:: ©¤©¤ ²ßÂÔ 1: py launcher (Windows Python Launcher, ¸²¸ÇÃæ×î¹ã) ©¤©¤
+:: py.exe Ëæ¹Ù·½ Python °²×°Æ÷Ð´Èë C:\Windows\py.exe £¬
+:: ¿É·¢ÏÖ±¾»úËùÓÐÒÑ°²×°µÄ Python °æ±¾£¨º¬Î´¼ÓÈë PATH µÄ£©¡£
 py --version >nul 2>&1
 if !errorlevel!==0 (
     for /f "tokens=2" %%v in ('py --version 2^>^&1') do set "PYVER=%%v"
@@ -36,7 +36,7 @@ if !errorlevel!==0 (
         if !_MJ! gtr 3 set "PYTHON=py" & goto :python_found
         if !_MJ! equ 3 if !_MN! geq 10 set "PYTHON=py" & goto :python_found
     )
-    :: py å¯åŠ¨å™¨å¯ç”¨ä½†é»˜è®¤ç‰ˆæœ¬ < 3.10ï¼Œå°è¯•æŒ‡å®šæ›´é«˜ç‰ˆæœ¬
+    :: py Æô¶¯Æ÷¿ÉÓÃµ«Ä¬ÈÏ°æ±¾ < 3.10£¬³¢ÊÔÖ¸¶¨¸ü¸ß°æ±¾
     for %%v in (3.13 3.12 3.11 3.10) do (
         py -%%v --version >nul 2>&1
         if !errorlevel!==0 (
@@ -47,7 +47,7 @@ if !errorlevel!==0 (
     )
 )
 
-:: â”€â”€ ç­–ç•¥ 2: where å‘½ä»¤ (PATH ä¸­çš„ python / python3) â”€â”€
+:: ©¤©¤ ²ßÂÔ 2: where ÃüÁî (PATH ÖÐµÄ python / python3) ©¤©¤
 for %%p in (python3 python) do (
     where.exe %%p >nul 2>nul
     if !errorlevel!==0 (
@@ -62,7 +62,7 @@ for %%p in (python3 python) do (
     )
 )
 
-:: â”€â”€ ç­–ç•¥ 3: æ‰«æå¸¸è§å®‰è£…è·¯å¾„ (æœªåŠ å…¥ PATH çš„ç”¨æˆ·/ç³»ç»Ÿå®‰è£…) â”€â”€
+:: ©¤©¤ ²ßÂÔ 3: É¨Ãè³£¼û°²×°Â·¾¶ (Î´¼ÓÈë PATH µÄÓÃ»§/ÏµÍ³°²×°) ©¤©¤
 for %%d in (
     "%LOCALAPPDATA%\Programs\Python\Python313"
     "%LOCALAPPDATA%\Programs\Python\Python312"
@@ -87,74 +87,74 @@ for %%d in (
 
 :python_found
 if "%PYTHON%"=="" (
-    echo   [X] æœªæ‰¾åˆ° Python 3.10+
+    echo   [X] Î´ÕÒµ½ Python 3.10+
     echo.
-    echo      è¯·ä»Ž https://www.python.org/downloads/ ä¸‹è½½å®‰è£… Python 3.10+
-    echo      å®‰è£…æ—¶è¯·å‹¾é€‰ "Add Python to PATH" é€‰é¡¹
+    echo      Çë´Ó https://www.python.org/downloads/ ÏÂÔØ°²×° Python 3.10+
+    echo      °²×°Ê±Çë¹´Ñ¡ "Add Python to PATH" Ñ¡Ïî
     echo.
-    echo      å¦‚å·²å®‰è£…ä½†æœªè¢«æ£€æµ‹åˆ°, è¯·å°† Python åŠ å…¥ç³»ç»Ÿ PATH åŽé‡è¯•
+    echo      ÈçÒÑ°²×°µ«Î´±»¼ì²âµ½, Çë½« Python ¼ÓÈëÏµÍ³ PATH ºóÖØÊÔ
     pause
     exit /b 1
 )
-echo   [OK] æ‰¾åˆ° Python %PYVER%  (%PYTHON%)
+echo   [OK] ÕÒµ½ Python %PYVER%  (%PYTHON%)
 
-:: â”€â”€ 2. å‡†å¤‡è™šæ‹ŸçŽ¯å¢ƒ â”€â”€
-echo   [2] å‡†å¤‡è™šæ‹ŸçŽ¯å¢ƒ...
+:: ©¤©¤ 2. ×¼±¸ÐéÄâ»·¾³ ©¤©¤
+echo   [2] ×¼±¸ÐéÄâ»·¾³...
 
 set "NEED_INSTALL=0"
 if not exist "%VENV_DIR%\Scripts\python.exe" (
-    echo        é¦–æ¬¡è¿è¡Œï¼Œæ­£åœ¨åˆ›å»ºè™šæ‹ŸçŽ¯å¢ƒ...
+    echo        Ê×´ÎÔËÐÐ£¬ÕýÔÚ´´½¨ÐéÄâ»·¾³...
     %PYTHON% -m venv "%VENV_DIR%" --clear
-    if !errorlevel! neq 0 (
-        echo   [X] è™šæ‹ŸçŽ¯å¢ƒåˆ›å»ºå¤±è´¥ï¼Œè¯·æ£€æŸ¥ç£ç›˜ç©ºé—´å’Œæƒé™
+    if errorlevel 1 (
+        echo   [X] ÐéÄâ»·¾³´´½¨Ê§°Ü£¬Çë¼ì²é´ÅÅÌ¿Õ¼äºÍÈ¨ÏÞ
         pause
         exit /b 1
     )
-    echo   [OK] è™šæ‹ŸçŽ¯å¢ƒåˆ›å»ºæˆåŠŸ
+    echo   [OK] ÐéÄâ»·¾³´´½¨³É¹¦
     set "NEED_INSTALL=1"
 ) else (
-    echo   [OK] è™šæ‹ŸçŽ¯å¢ƒå·²å°±ç»ª
+    echo   [OK] ÐéÄâ»·¾³ÒÑ¾ÍÐ÷
 )
 
 set "RUN_PYTHON=%VENV_DIR%\Scripts\python"
 
-:: â”€â”€ 3. å®‰è£…ä¾èµ– â”€â”€
-echo   [3] æ£€æŸ¥ä¾èµ–...
+:: ©¤©¤ 3. °²×°ÒÀÀµ ©¤©¤
+echo   [3] ¼ì²éÒÀÀµ...
 
-:: é€šè¿‡èƒ½å¦å¯¼å…¥ streamlit æ¥åˆ¤æ–­ä¾èµ–æ˜¯å¦å·²å®‰è£…
+:: Í¨¹ýÄÜ·ñµ¼Èë streamlit À´ÅÐ¶ÏÒÀÀµÊÇ·ñÒÑ°²×°
 set "DEPS_OK=0"
 "%RUN_PYTHON%" -c "import streamlit" >nul 2>&1
 if !errorlevel!==0 (set "DEPS_OK=1")
 
 if "%DEPS_OK%"=="0" (
-    echo        æ­£åœ¨å®‰è£… DocAudit åŠå…¨éƒ¨ä¾èµ– (çº¦éœ€ 1-3 åˆ†é’Ÿ)...
+    echo        ÕýÔÚ°²×° DocAudit ¼°È«²¿ÒÀÀµ Ô¼Ðè 1-3 ·ÖÖÓ...
     "%RUN_PYTHON%" -m pip install --upgrade pip -q
     "%RUN_PYTHON%" -m pip install "%PROJECT_DIR%[all]" -q
-    if !errorlevel! neq 0 (
-        echo   [X] ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·æ£€æŸ¥ç½‘ç»œè¿žæŽ¥åŽé‡è¯•
+    if errorlevel 1 (
+        echo   [X] ÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂçÁ¬½ÓºóÖØÊÔ
         pause
         exit /b 1
     )
-    echo   [OK] ä¾èµ–å®‰è£…å®Œæˆ
+    echo   [OK] ÒÀÀµ°²×°Íê³É
 ) else (
-    echo   [OK] ä¾èµ–å·²å®‰è£…
+    echo   [OK] ÒÀÀµÒÑ°²×°
 )
 
-:: â”€â”€ å¯åŠ¨ Web UI â”€â”€
+:: ©¤©¤ Æô¶¯ Web UI ©¤©¤
 echo.
-echo   [å¯åŠ¨] å¯åŠ¨ Web ç•Œé¢...
+echo   [Æô¶¯] Æô¶¯ Web ½çÃæ...
 
 echo.
 echo   +==============================================+
-echo   ^|  æµè§ˆå™¨å°†è‡ªåŠ¨æ‰“å¼€ http://127.0.0.1:8501      ^|
-echo   ^|  ä¸Šä¼ æ–‡æ¡£ â†’ ç‚¹å‡»å®¡æŸ¥ â†’ æŸ¥çœ‹ç»“æžœ              ^|
-echo   ^|  æŒ‰ Ctrl+C æˆ–å…³é—­æ­¤çª—å£åœæ­¢æœåŠ¡               ^|
+echo   ^|  ä¯ÀÀÆ÷½«×Ô¶¯´ò¿ª http://127.0.0.1:8501      ^|
+echo   ^|  ÉÏ´«ÎÄµµ ¡ú µã»÷Éó²é ¡ú ²é¿´½á¹û              ^|
+echo   ^|  °´ Ctrl+C »ò¹Ø±Õ´Ë´°¿ÚÍ£Ö¹·þÎñ               ^|
 echo   +==============================================+
 echo.
 
-:: å¯åŠ¨ Streamlit åº”ç”¨
+:: Æô¶¯ Streamlit Ó¦ÓÃ
 "%RUN_PYTHON%" -m streamlit run "%PROJECT_DIR%\app.py"
 
 echo.
-echo   DocAudit å·²åœæ­¢ã€‚
+echo   DocAudit ÒÑÍ£Ö¹¡£
 pause

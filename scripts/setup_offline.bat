@@ -1,20 +1,20 @@
 @echo off
-chcp 65001 > nul
+chcp 936 > nul
 :: ============================================================
-:: DocAudit ç¦»çº¿å®‰è£…è„šæœ¬ï¼ˆWindowsï¼‰
-:: ç”¨æ³•:
-::   è”ç½‘ä¸‹è½½:  setup_offline.bat download [core|pdf|full]
-::   ç¦»çº¿å®‰è£…:  setup_offline.bat install   [core|pdf|full]
+:: DocAudit ÀëÏß°²×°½Å±¾£¨Windows£©
+:: ÓÃ·¨:
+::   ÁªÍøÏÂÔØ:  setup_offline.bat download [core|pdf|full]
+::   ÀëÏß°²×°:  setup_offline.bat install   [core|pdf|full]
 :: ============================================================
 setlocal enabledelayedexpansion
 set "PACKAGES_DIR=%~dp0packages"
-set "PROJECT_DIR=%~dp0"
+set "PROJECT_DIR=%~dp0..\"
 
-:: é»˜è®¤ profile = core
+:: Ä¬ÈÏ profile = core
 set "PROFILE=%~2"
 if "%PROFILE%"=="" set "PROFILE=core"
 
-:: è§£æ profile â†’ pip extras å‚æ•°
+:: ½âÎö profile ¡ú pip extras ²ÎÊı
 set "EXTRAS="
 if /I "%PROFILE%"=="core" set "EXTRAS="
 if /I "%PROFILE%"=="pdf"  set "EXTRAS=[pdf]"
@@ -23,88 +23,88 @@ if /I "%PROFILE%"=="full" set "EXTRAS=[all]"
 if /I "%~1"=="download" (
     if not exist "%PACKAGES_DIR%" mkdir "%PACKAGES_DIR%"
 
-    echo [DocAudit] ä¸‹è½½ä¾èµ– profile=%PROFILE% åˆ° packages/ ...
+    echo [DocAudit] ÏÂÔØÒÀÀµ profile=%PROFILE% µ½ packages/ ...
     echo.
     pip download "%PROJECT_DIR%%EXTRAS%" -d "%PACKAGES_DIR%"
 
     if errorlevel 1 (
-        echo [é”™è¯¯] ä¸‹è½½å¤±è´¥ï¼Œè¯·æ£€æŸ¥ç½‘ç»œè¿æ¥
+        echo [´íÎó] ÏÂÔØÊ§°Ü£¬Çë¼ì²éÍøÂçÁ¬½Ó
         exit /b 1
     )
 
     echo.
     echo ========================================
-    echo  ä¸‹è½½å®Œæˆï¼packages/ æ–‡ä»¶åˆ—è¡¨:
+    echo  ÏÂÔØÍê³É£¡packages/ ÎÄ¼şÁĞ±í:
     echo ========================================
     dir /b "%PACKAGES_DIR%\*.whl" 2>nul
     dir /b "%PACKAGES_DIR%\*.tar.gz" 2>nul
     echo.
-    echo è¯·å°† packages/ æ–‡ä»¶å¤¹å¤åˆ¶åˆ°ç¦»çº¿æœºå™¨çš„é¡¹ç›®æ ¹ç›®å½•,
-    echo ç„¶ååœ¨ç¦»çº¿æœºå™¨ä¸Šè¿è¡Œ: setup_offline.bat install %PROFILE%
+    echo Çë½« packages/ ÎÄ¼ş¼Ğ¸´ÖÆµ½ÀëÏß»úÆ÷µÄÏîÄ¿¸ùÄ¿Â¼,
+    echo È»ºóÔÚÀëÏß»úÆ÷ÉÏÔËĞĞ: setup_offline.bat install %PROFILE%
     goto :eof
 )
 
 if /I "%~1"=="install" (
     if not exist "%PACKAGES_DIR%" (
-        echo [é”™è¯¯] packages/ æ–‡ä»¶å¤¹ä¸å­˜åœ¨ï¼Œè¯·å…ˆåœ¨æœ‰ç½‘æœºå™¨ä¸Šè¿è¡Œ:
+        echo [´íÎó] packages/ ÎÄ¼ş¼Ğ²»´æÔÚ£¬ÇëÏÈÔÚÓĞÍø»úÆ÷ÉÏÔËĞĞ:
         echo        setup_offline.bat download %PROFILE%
         exit /b 1
     )
 
     if not exist ".venv" (
-        echo [0/2] åˆ›å»ºè™šæ‹Ÿç¯å¢ƒ...
+        echo [0/2] ´´½¨ĞéÄâ»·¾³...
         python -m venv .venv
         if errorlevel 1 (
-            echo [é”™è¯¯] åˆ›å»ºè™šæ‹Ÿç¯å¢ƒå¤±è´¥
+            echo [´íÎó] ´´½¨ĞéÄâ»·¾³Ê§°Ü
             exit /b 1
         )
     ) else (
-        echo [0/2] è™šæ‹Ÿç¯å¢ƒå·²å­˜åœ¨
+        echo [0/2] ĞéÄâ»·¾³ÒÑ´æÔÚ
     )
 
-    echo [1/2] ä»æœ¬åœ° packages/ å®‰è£…ä¾èµ– (profile=%PROFILE%)...
+    echo [1/2] ´Ó±¾µØ packages/ °²×°ÒÀÀµ profile=%PROFILE%...
     .venv\Scripts\pip install --upgrade pip -q
     .venv\Scripts\pip install --no-index --find-links="%PACKAGES_DIR%" "%PROJECT_DIR%%EXTRAS%"
 
     if errorlevel 1 (
-        echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·æ£€æŸ¥ packages/ ä¸­çš„æ–‡ä»¶æ˜¯å¦å®Œæ•´
+        echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²é packages/ ÖĞµÄÎÄ¼şÊÇ·ñÍêÕû
         exit /b 1
     )
 
-    echo [2/2] éªŒè¯å®‰è£…...
-    .venv\Scripts\python -c "import streamlit; from src.converters import PptxConverter; from src.auditors import StructureAuditor; print('        æ ¸å¿ƒæ¨¡å—å¯¼å…¥æˆåŠŸ')"
+    echo [2/2] ÑéÖ¤°²×°...
+    .venv\Scripts\python -c "import streamlit; from src.converters import PptxConverter; from src.auditors import StructureAuditor; print('        ºËĞÄÄ£¿éµ¼Èë³É¹¦')"
     if errorlevel 1 (
-        echo [è­¦å‘Š] æ¨¡å—å¯¼å…¥éªŒè¯å¤±è´¥
+        echo [¾¯¸æ] Ä£¿éµ¼ÈëÑéÖ¤Ê§°Ü
     )
 
     echo.
     echo ========================================
-    echo  ç¦»çº¿å®‰è£…å®Œæˆï¼
+    echo  ÀëÏß°²×°Íê³É£¡
     echo ========================================
-    echo  å¯åŠ¨ Web UI:
+    echo  Æô¶¯ Web UI:
     echo    .venv\Scripts\streamlit run app.py
     echo.
-    echo  CLI å®¡æŸ¥:
-    echo    .venv\Scripts\python src\cli.py æ–‡æ¡£.pptx
+    echo  CLI Éó²é:
+    echo    .venv\Scripts\python src\cli.py ÎÄµµ.pptx
     echo ========================================
     goto :eof
 )
 
-:: é»˜è®¤ï¼šæ˜¾ç¤ºå¸®åŠ©
-echo DocAudit ç¦»çº¿å®‰è£…è„šæœ¬
+:: Ä¬ÈÏ£ºÏÔÊ¾°ïÖú
+echo DocAudit ÀëÏß°²×°½Å±¾
 echo ========================================
-echo ç”¨æ³•:
-echo   setup_offline.bat download [profile]  - ä¸‹è½½ä¾èµ–åˆ° packages/
-echo   setup_offline.bat install  [profile]  - ä»æœ¬åœ° packages/ å®‰è£…
+echo ÓÃ·¨:
+echo   setup_offline.bat download [profile]  - ÏÂÔØÒÀÀµµ½ packages/
+echo   setup_offline.bat install  [profile]  - ´Ó±¾µØ packages/ °²×°
 echo.
-echo profile é€‰é¡¹:
-echo   core  (é»˜è®¤) - PPTX/DOCX/MD å®¡æŸ¥
-echo   pdf           - core + PDF æ”¯æŒ
-echo   full          - core + PDF + å¼€å‘å·¥å…·
+echo profile Ñ¡Ïî:
+echo   core  (Ä¬ÈÏ) - PPTX/DOCX/MD Éó²é
+echo   pdf           - core + PDF Ö§³Ö
+echo   full          - core + PDF + ¿ª·¢¹¤¾ß
 echo ========================================
 echo.
-echo å…¸å‹æµç¨‹:
-echo   è”ç½‘æœºå™¨: setup_offline.bat download core
-echo   æ‹·åˆ°ç¦»çº¿: å¤åˆ¶æ•´ä¸ªé¡¹ç›®æ–‡ä»¶å¤¹ï¼ˆå« packages/ï¼‰
-echo   ç¦»çº¿æœºå™¨: setup_offline.bat install core
+echo µäĞÍÁ÷³Ì:
+echo   ÁªÍø»úÆ÷: setup_offline.bat download core
+echo   ¿½µ½ÀëÏß: ¸´ÖÆÕû¸öÏîÄ¿ÎÄ¼ş¼Ğ£¨º¬ packages/£©
+echo   ÀëÏß»úÆ÷: setup_offline.bat install core
 endlocal
