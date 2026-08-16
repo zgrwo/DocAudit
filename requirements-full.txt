@@ -47,7 +47,7 @@ latex2mathml==3.81.0
 lxml==6.1.1
 mail-parser==4.6.0
 markdown-it-py==4.2.0
-marko==2.2.3
+marko==2.2.4
 markupsafe==3.0.3
 mdurl==0.1.2
 mpire==2.10.2
