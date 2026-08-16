@@ -292,7 +292,7 @@ class AutoFixer:
                             if ph_type in (1, 3):
                                 is_title_shape = True
                         except Exception:
-                            pass
+                            pass  # bare-handler-ok — 占位符类型读取降级，失败时按非标题形状处理
                     if not is_title_shape and shape.name:
                         if "title" in str(shape.name).lower():
                             is_title_shape = True

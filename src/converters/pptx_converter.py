@@ -79,7 +79,7 @@ class PptxConverter(BaseConverter):
             try:
                 layout_name = slide.slide_layout.name
             except Exception:
-                pass
+                pass  # bare-handler-ok — 版式名读取降级，失败时保留 None
 
             # 演讲者备注
             notes_text = None
@@ -87,7 +87,7 @@ class PptxConverter(BaseConverter):
                 if slide.has_notes_slide:
                     notes_text = slide.notes_slide.notes_text_frame.text.strip()
             except Exception:
-                pass
+                pass  # bare-handler-ok — 备注提取降级，失败时保留 None
 
             elements: list[PageElement] = []
 
@@ -279,7 +279,7 @@ class PptxConverter(BaseConverter):
             # 从内嵌 Excel 读取原始数据
             chart_data = self._extract_chart_data(shape)
         except Exception:
-            pass
+            pass  # bare-handler-ok — 图表数据提取降级，失败时保留 None，不阻塞审查
 
         return PageElement(
             type="chart",
@@ -326,7 +326,7 @@ class PptxConverter(BaseConverter):
                     if blob and len(blob) > 0:
                         return {"source": "embedded_excel", "size": len(blob)}
         except Exception:
-            pass
+            pass  # bare-handler-ok — 内嵌 Excel 提取降级，失败时返回 None
         return None
 
 

@@ -53,7 +53,7 @@ class MarkdownConverter(BaseConverter):
                     import yaml
                     frontmatter = yaml.safe_load(parts[1]) or {}
                 except Exception:
-                    pass
+                    pass  # bare-handler-ok — frontmatter 解析失败时忽略，按纯正文处理
                 body = parts[2]
 
         # --- 元数据 (优先使用 frontmatter 中的 title/author) ---

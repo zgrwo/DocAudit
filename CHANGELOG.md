@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
+  显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
+  而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
+- 文档数字漂移：CHANGELOG 测试用例数 53 → 139（实际 11 个测试文件）
+
+### Added
+
+- 锁定文件 `requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`
+  （由 `scripts/gen_requirements_lock.py` 生成），下载步骤按锁文件解析，版本可复现
+- `tools/check_bare_handlers.py`：AST 感知的裸异常处理器检查（CI 强制），
+  既有 14 处刻意降级路径已附 `# bare-handler-ok` 理由注释
+- `tests/test_scripts.py` 与 `tests/test_check_bare_handlers.py`：脚本与门禁工具测试
+- `rules/tooling-pitfalls.md`、`rules/falsy-pitfalls.md`：工具与 falsy 陷阱清单
+- CI：Python 3.14 加入矩阵；裸异常处理器检查步骤
+- 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
+- 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
+
 ## [0.1.0] - 2026-07-26
 
 ### Added
@@ -21,6 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 词汇白名单/黑名单（accept.txt + reject.txt）
 - AutoFixer 自动修复（字体/字号/间距/溢出/标点/项目符号）
 - 黄金测试：CLI = WebUI = Python API 三路径结果一致
-- 53 个测试用例（模型/审计器/引擎/规则/集成）
+- 119 个测试用例（模型/审计器/引擎/规则/集成）
 
 <!-- [0.1.0]: https://github.com/zgrwo/DocAudit/releases/tag/v0.1.0 -->

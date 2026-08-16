@@ -56,7 +56,7 @@ def main(argv):
     label = profile
 
     # 引导阶段解释器可能 <3.10，重执行到最佳版本
-    if sys.version_info < (3, 10):
+    if sys.version_info < (3, 10):  # noqa: UP036 — 引导阶段解释器可能 <3.10，降级重执行是刻意设计
         best = common.find_python()
         if best is None:
             print("[X] 未找到 Python 3.10+，请先安装。")
@@ -72,21 +72,69 @@ def main(argv):
     return _install(root, packages, extras, label, print_cmd)
 
 
+def _download_commands(root, packages, extras, profile):
+    """构建下载三步命令（纯函数，便于测试）。
+
+    1. 运行时依赖：优先按锁文件 requirements-<profile>.txt 下载（版本可复现），
+       缺失时回退 pyproject 声明解析（附警告）
+    2. 构建依赖：显式下载 setuptools/wheel —— pip download 不会保存它们，
+       而离线安装本地项目（PEP 517 构建）必需
+    3. 离线自检：`pip install --dry-run --ignore-installed --no-index
+       --find-links=packages/ ...`，在联网端就暴露 packages/ 不完整的问题
+
+    返回 (commands, warn)。
+    """
+    lock = root / f"requirements-{profile}.txt"
+    if lock.exists():
+        dl = [
+            sys.executable, "-m", "pip", "download",
+            "-r", str(lock), "-d", str(packages),
+        ]
+        check = [
+            sys.executable, "-m", "pip", "install",
+            "--dry-run", "--ignore-installed", "--no-index",
+            f"--find-links={packages}", "-r", str(lock), str(root),
+        ]
+        warn = None
+    else:
+        dl = [
+            sys.executable, "-m", "pip", "download",
+            f"{root}{extras}", "-d", str(packages),
+        ]
+        check = [
+            sys.executable, "-m", "pip", "install",
+            "--dry-run", "--ignore-installed", "--no-index",
+            f"--find-links={packages}", f"{root}{extras}",
+        ]
+        warn = (f"[警告] 未找到 requirements-{profile}.txt，"
+                "回退到 pyproject 声明解析（结果不可复现）")
+    build = [
+        sys.executable, "-m", "pip", "download",
+        "setuptools", "wheel", "-d", str(packages),
+    ]
+    return [dl, build, check], warn
+
+
 def _download(root, packages, extras, label, print_cmd):
     print(f"[DocAudit] 下载依赖 profile={label} 到 packages/ ...")
     print()
     packages.mkdir(exist_ok=True)
-    cmd = [
-        sys.executable, "-m", "pip", "download",
-        f"{root}{extras}", "-d", str(packages),
-    ]
+    commands, warn = _download_commands(root, packages, extras, label)
+    if warn:
+        print(warn)
     if print_cmd:
         print("将执行:")
-        print("  " + " ".join(str(a) for a in cmd))
+        for cmd in commands:
+            print("  " + " ".join(str(a) for a in cmd))
         return 0
-    if common.run(cmd, cwd=root) != 0:
-        print("[错误] 下载失败，请检查网络连接")
-        return 1
+    for idx, cmd in enumerate(commands, start=1):
+        if common.run(cmd, cwd=root) != 0:
+            if idx == 3:
+                print("[错误] 离线自检失败：packages/ 不完整，"
+                      "请勿将其拷贝到离线机器（缺少 wheel 或构建依赖）")
+            else:
+                print("[错误] 下载失败，请检查网络连接")
+            return 1
     print()
     print("========================================")
     print(" 下载完成！packages/ 文件列表:")

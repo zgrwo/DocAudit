@@ -1,0 +1,17 @@
+# 依赖自动更新 — 每周检查 pyproject.toml / requirements-*.txt / GitHub Actions
+# 注意: requirements-*.txt 由 scripts/gen_requirements_lock.py 生成，
+#       dependabot 对其的 PR 需与 pyproject.toml 变更一起人工核对后合并。
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    versioning-strategy: increase-if-necessary
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

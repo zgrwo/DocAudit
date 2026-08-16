@@ -167,7 +167,7 @@ class DocxConverter(BaseConverter):
                 if outline is not None:
                     level = int(outline.get(qn("w:val"), "0"))
         except Exception:
-            pass
+            pass  # bare-handler-ok — 大纲级别提取降级，失败时保留 None
 
         full_text = para.text
         if not full_text.strip() and not runs:
@@ -180,7 +180,7 @@ class DocxConverter(BaseConverter):
             style_name = para.style.name
             is_heading = style_name and "heading" in style_name.lower()
         except Exception:
-            pass
+            pass  # bare-handler-ok — 样式名读取降级，失败时按非标题处理
 
         return PageElement(
             type="text_frame",

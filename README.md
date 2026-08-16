@@ -132,7 +132,13 @@ bash scripts/setup_offline.sh download pdf
 bash scripts/setup_offline.sh download full
 ```
 
-执行后在项目根目录生成 `packages/` 文件夹，包含全部依赖的 `.whl` 文件。
+下载脚本自动执行三步：
+
+1. **按锁文件下载运行时依赖**（`requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`，版本钉死、跨机器可复现；锁文件由 `scripts/gen_requirements_lock.py` 生成，修改 `pyproject.toml` 后需重新生成）
+2. **补下载构建依赖 `setuptools` / `wheel`** — `pip download` 不会保存它们，而离线安装本地项目（PEP 517 构建）必需
+3. **离线自检** — 自动执行 `pip install --dry-run --ignore-installed --no-index --find-links=packages/`，若 packages/ 不完整会当场报错，避免把装不上的包拷贝到离线机器
+
+> &#9888;&#65039; 个别依赖只提供源码包（sdist，如 `antlr4-python3-runtime`），下载后以 `.tar.gz` 形式存在于 packages/，离线安装时由 setuptools 现场构建，属正常现象。
 
 **第 2 步：拷贝到离线机器**
 
@@ -250,9 +256,10 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **119 个测试用例**：models / auditors / engines / rules / integration
+- **139 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
 - **黄金测试**：CLI = Web UI = Python API 三路径一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
+- **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
 
 ---
 
@@ -286,7 +293,7 @@ pytest tests/ -v
 python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(CustomRulesAuditor.validate_dispatch())"
 
 # 单文件审查
-python src/cli.py tests/data/sample.pptx --rules rules.md
+python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 ```
 
 ---
@@ -299,7 +306,7 @@ python src/cli.py tests/data/sample.pptx --rules rules.md
 | [用户手册](rules/user-manual.md) | 学习教程 | 每个功能详细示例 + 结果解读 |
 | [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |
-| [agents.md](agents.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
+| [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
 | [rules.md](rules.md) | 人+AI | 审查规则声明 |
 
 ---
@@ -310,8 +317,8 @@ python src/cli.py tests/data/sample.pptx --rules rules.md
 
 | 文件 | 面向 | 职责 |
 |------|------|------|
-| `agents.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
-| `readme.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
+| `AGENTS.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
+| `README.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
 | `rules/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、审查模板 |
 | `skills/` | AI 编码 | 技能定义——语言陷阱、编码模式、重构守则 |
 

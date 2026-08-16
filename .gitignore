@@ -50,3 +50,9 @@ logs/
 
 # Cache
 .docaudit_cache.json
+
+# Qoder harness 生成的审查报告（平台资产 skills/ 除外）
+.qoder/better-harness/
+
+# LanguageTool ngrams 数据（docker-compose 挂载）
+languagetool-data/

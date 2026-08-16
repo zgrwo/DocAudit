@@ -24,7 +24,7 @@ def main(argv):
 
     # ---- 1. 检测 Python 3.10+ ----
     print("  [1] 检测 Python 环境...")
-    if sys.version_info < (3, 10):
+    if sys.version_info < (3, 10):  # noqa: UP036 — 引导阶段解释器可能 <3.10，降级重执行是刻意设计
         best = common.find_python()
         if best is None:
             print("  [X] 未找到 Python 3.10+")

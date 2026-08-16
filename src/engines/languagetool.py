@@ -166,19 +166,19 @@ class LanguageToolClient:
                     self._java_process.kill()
                     self._java_process.wait(timeout=5)
                 except Exception:
-                    pass
+                    pass  # bare-handler-ok — 子进程清理尽力而为，kill 失败可安全忽略
             except Exception:
                 try:
                     self._java_process.kill()
                 except Exception:
-                    pass
+                    pass  # bare-handler-ok — 子进程清理尽力而为，kill 失败可安全忽略
             # 进程已终止，stderr 可安全读取 (EOF 已到达)
             stderr_output = ""
             try:
                 if self._java_process.stderr:
                     stderr_output = self._java_process.stderr.read().decode(errors="replace")
             except Exception:
-                pass
+                pass  # bare-handler-ok — stderr 读取失败时按空输出处理，日志仍会给出超时警告
             logger.warning("LanguageTool Java server timed out (port %d). stderr: %s",
                            port, stderr_output[:500] if stderr_output else "(empty)")
             self._java_process = None
@@ -384,7 +384,7 @@ class LanguageToolClient:
                     self._java_process.kill()
                 self._java_process = None
         except Exception:
-            pass  # 解释器关闭期间模块可能已被清理
+            pass  # bare-handler-ok — 解释器关闭期间模块可能已被清理，任意异常均可安全忽略
 
     def shutdown(self):
         """终止 Java 子进程 (用户主动调用)。"""
@@ -401,4 +401,4 @@ class LanguageToolClient:
             if self._java_process is not None:
                 self._cleanup_java()
         except Exception:
-            pass  # 解释器关闭期间不抛异常
+            pass  # bare-handler-ok — 解释器关闭期间不抛异常，清理失败可安全忽略

@@ -174,7 +174,7 @@ def _disp_width(s: str) -> int:
 
 def banner(lines) -> None:
     """打印一个简单方框横幅（按东亚字符宽度对齐）。"""
-    width = max(30, max(_disp_width(l) for l in lines) + 2)
+    width = max(30, max(_disp_width(line) for line in lines) + 2)
     print()
     print("+" + "=" * width + "+")
     for line in lines:
@@ -190,4 +190,4 @@ def set_console_title(title: str) -> None:
 
             ctypes.windll.kernel32.SetConsoleTitleW(title)
         except Exception:
-            pass
+            pass  # bare-handler-ok — 控制台标题尽力而为，失败不影响功能

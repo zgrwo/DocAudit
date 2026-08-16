@@ -14,7 +14,7 @@ def main():
     venv = common.venv_dir()
     venv_py = common.venv_python()
 
-    if sys.version_info < (3, 10):
+    if sys.version_info < (3, 10):  # noqa: UP036 — 引导阶段解释器可能 <3.10，降级重执行是刻意设计
         best = common.find_python()
         if best is None:
             print("[X] 未找到 Python 3.10+，请先从 https://www.python.org/downloads/ 安装。")

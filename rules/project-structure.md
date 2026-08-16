@@ -77,13 +77,17 @@
 
 ```
 DocAudit/
-├── agents.md                        # AI 上下文中枢 — 路由表 + 红线 + 约束
-├── readme.md                        # 人类项目首页 — 场景入口 + 快速上手
+├── AGENTS.md                        # AI 上下文中枢 — 路由表 + 红线 + 约束（跨工具标准大写）
+├── CLAUDE.md                        # Claude Code 兼容副本（AGENTS.md 静态副本，修改后需重新复制）
+├── README.md                        # 人类项目首页 — 场景入口 + 快速上手
 ├── rules.md                         # 审查规则声明 (25 条，配置驱动)
 ├── app.py                           # Streamlit Web UI 入口
 ├── docker-compose.yml               # LanguageTool Docker 服务
 ├── pyproject.toml                   # 项目配置 + 依赖声明
-├── .vale.ini                        # Vale 配置 (预留)
+├── requirements-core.txt            # 离线依赖锁定文件 (生成物，勿手改)
+├── requirements-pdf.txt             # 离线依赖锁定文件 (生成物，勿手改)
+├── requirements-full.txt            # 离线依赖锁定文件 (生成物，勿手改)
+├── .vale.ini                        # Vale 配置 (可选，未接入 CI)
 ├── LICENSE                          # MIT 许可证
 ├── CHANGELOG.md                     # 变更日志 (keepachangelog)
 ├── CONTRIBUTING.md                  # 贡献指南 (含三步注册法)
@@ -97,7 +101,9 @@ DocAudit/
 │   ├── user-manual.md               #   用户手册 — 场景驱动配方
 │   ├── refactoring-plan.md          #   重构计划
 │   ├── code-review-prompt.md        #   深度代码审查 Prompt
-│   └── documentation.md             #   文档职责规范
+│   ├── documentation.md             #   文档职责规范
+│   ├── tooling-pitfalls.md          #   工具/脚本坑位清单 (cmd/bat/pip/git)
+│   └── falsy-pitfalls.md            #   Python falsy 值误判检查清单
 │
 ├── skills/                          # 🛠️ AI 编码规范
 │   ├── python-SKILL.md              #   Python 开发规范
@@ -106,13 +112,25 @@ DocAudit/
 │   ├── project-plan-review.md       #   规划评审专家
 │   └── deep-code-review.prompt.md   #   深度审查 Prompt 模板
 │
-├── .github/workflows/
-│   └── ci.yml                       # CI: pytest + DISPATCH 验证 + ruff
+├── tools/                           # 🔧 CI 门禁工具
+│   ├── check_bare_handlers.py       #   裸异常处理器检查 (AST 感知)
+│   ├── check_html_escape.py         #   html.escape 合规性检查
+│   └── check_api_sync.py            #   api-reference.md 同步检查
 │
-├── scripts/                         # 🔧 启动/安装脚本
-│   ├── run.bat / run.sh             #   一键启动 Web UI
-│   ├── install.bat / install.sh     #   安装依赖
-│   └── setup_offline.bat / .sh      #   离线安装
+├── .github/
+│   ├── dependabot.yml               # 依赖自动更新 (每周)
+│   ├── workflows/
+│   │   └── ci.yml                   # CI: pytest 矩阵 + DISPATCH + ruff + 三门禁检查
+│   ├── ISSUE_TEMPLATE/              # bug / feature / docs / refactor 四类模板
+│   └── PULL_REQUEST_TEMPLATE.md     # PR 模板
+│
+├── scripts/                         # 🔧 启动/安装脚本 (批处理仅为 ASCII 启动器，逻辑在 .py)
+│   ├── common.py                    #   共享工具 (UTF-8/路径/解释器探测/run 封装)
+│   ├── run.bat / run.sh / run.py    #   一键启动 Web UI
+│   ├── install.bat / install.sh / install.py   # 安装依赖
+│   ├── setup_offline.bat / .sh / .py           # 离线安装 (下载三步: 锁文件+构建依赖+自检)
+│   ├── gen_requirements_lock.py     #   从 packages/ 离线解析生成 requirements-*.txt
+│   └── packages/                    #   离线依赖缓存 (生成物，gitignore 排除)
 │
 ├── glossary/                        # 📖 半导体术语表 (YAML)
 │   ├── semiconductor_core.yaml      #   半导体制造核心 (17 条)
@@ -123,7 +141,7 @@ DocAudit/
 │   ├── accept.txt                   #   术语白名单 (80+ 词)
 │   └── reject.txt                   #   禁用词黑名单 (11 条)
 │
-├── styles/                          # 🎨 Vale 风格配置 (预留)
+├── styles/                          # 🎨 Vale 风格配置 (可选，未接入 CI)
 │
 ├── .streamlit/
 │   └── config.toml                  # Streamlit 配置
@@ -169,7 +187,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试
+└── tests/                           # 🧪 测试 (139 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -179,7 +197,13 @@ DocAudit/
     ├── test_auditors.py             #     Structure + Format + Factual 审计器测试
     ├── test_engines.py              #     Terminology + Vocabulary + 语言分段测试
     ├── test_rules.py                #     规则解析 + DISPATCH 验证
-    └── test_integration.py          #     全流水线集成测试 (含黄金测试)
+    ├── test_integration.py          #     全流水线集成测试 (含黄金测试)
+    ├── test_autofix.py              #     AutoFixer 修复链路
+    ├── test_converters.py           #     四格式转换器
+    ├── test_edge_cases.py           #     边界输入
+    ├── test_language_auditor.py     #     语言审计器细节
+    ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
+    └── test_check_bare_handlers.py  #     裸异常检查器门禁
 ```
 
 ---

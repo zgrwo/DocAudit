@@ -1,4 +1,4 @@
-﻿# DocAudit — 重构计划
+# DocAudit — 重构计划
 
 > 基于 7 commits 全量历史分析 | 目标：从"可用"到"稳定+易扩展"
 > 项目成熟度：★☆☆☆☆（非常早期，先稳定再扩展，避免过度工程）
@@ -36,14 +36,14 @@
 | 增量审查 | 全量扫描 | retext AST 级别增量（只检查变更段落） | 🟡 中 |
 | 输出格式 | HTML + JSON | SARIF（GitHub Code Scanning 集成） | 🟡 中 |
 | 性能 | 无基准 | 大文档（100+ 页）<10s | 🟡 中 |
-| 规则测试 | 119 个用例（整体） | 每条规则至少 3 个测试（pass/fail/edge） | 🔴 高 |
+| 规则测试 | 139 个用例（整体） | 每条规则至少 3 个测试（pass/fail/edge） | 🔴 高 |
 | 开源基础 | ✅ 已完成 | MIT + 贡献指南 + Issue 模板 | ✅ |
 
 ### 1.4 技术债（需审计确认）
 
 > ⚠️ 项目仅 7 commits，以下技术债为推测，需 Phase 0 审计确认实际范围
 
-- [ ] 测试覆盖率 119 用例，但边界情况不足
+- [ ] 测试覆盖率 139 用例，但边界情况不足
 - [ ] 缺少性能测试（大文档/批量审查）
 - [ ] LanguageTool 依赖 Docker，部署复杂
 - [ ] 报告模板硬编码，难以自定义
@@ -275,7 +275,7 @@ Phase 4 (按需): 部署 + 性能 【P2】
 
 ```
 Phase 开始前：
-  ① pytest tests/ -v（119 用例全通过）
+  ① pytest tests/ -v（139 用例全通过）
   ② python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(CustomRulesAuditor.validate_dispatch())"
   → 记录通过数/失败数
 
