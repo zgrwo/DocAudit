@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/test_scripts.py` 与 `tests/test_check_bare_handlers.py`：脚本与门禁工具测试
 - `rules/tooling-pitfalls.md`、`rules/falsy-pitfalls.md`：工具与 falsy 陷阱清单
 - CI：Python 3.14 加入矩阵；裸异常处理器检查步骤；锁文件解析门禁
-  （`pip install --dry-run --ignore-installed -r requirements-*.txt`，防 dependabot 冲突 pin 合入）
+  （windows-latest job，`pip install --dry-run --ignore-installed -r requirements-*.txt .`，
+  防 dependabot 冲突 pin 合入；锁文件为 Windows 生成契约，见 tooling-pitfalls #6b-6d）
 - 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
 - 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
 

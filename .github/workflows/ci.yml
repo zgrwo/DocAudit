@@ -63,12 +63,28 @@ jobs:
       - name: Check api-reference.md sync
         run: python tools/check_api_sync.py
 
+  lockfile:
+    # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束
+    # (实测: pyarrow 25 违反 streamlit<25, typer 0.27 违反 docling-core<0.27 等)
+    # 必须在 Windows 上原生解析: 锁文件是 Windows 生成契约 (含 pywin32 等
+    # 平台专属依赖与 antlr 的 sdist, 跨平台 flags 无法覆盖)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
       - name: Validate offline lockfiles resolve
-        # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束
-        # (实测: pyarrow 25 违反 streamlit<25, typer 0.27 违反 docling-core<0.27 等)
+        shell: pwsh
         run: |
-          for profile in core pdf full; do
-            echo "== $profile =="
-            python -m pip install --dry-run --ignore-installed -r requirements-$profile.txt . >/dev/null \
-              || { echo "lockfile requirements-$profile.txt 无法解析，请回退冲突 pin 或升级约束方"; exit 1; }
-          done
+          foreach ($profile in @('core', 'pdf', 'full')) {
+            Write-Host "== $profile =="
+            python -m pip install --dry-run --ignore-installed -r requirements-$profile.txt .
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "lockfile requirements-$profile.txt 无法解析，请回退冲突 pin 或升级约束方"
+              exit 1
+            }
+          }

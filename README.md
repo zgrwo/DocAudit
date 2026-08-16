@@ -162,6 +162,8 @@ bash scripts/setup_offline.sh install
 全程零网络请求，`packages/` 文件夹可重复用于多台机器。
 
 > &#9888;&#65039; **Python 版本注意**：下载的 `.whl` 与下载时的 Python 版本和平台绑定。离线安装的机器必须使用相同的 Python 版本（如 3.12）和操作系统。
+>
+> &#9888;&#65039; **锁文件平台绑定**：`requirements-*.txt` 为 Windows 生成（含 `pywin32` 等平台专属依赖，`antlr4-python3-runtime` 仅 sdist）。macOS / Linux 用户请在目标平台运行 `python scripts/gen_requirements_lock.py` 重新生成后再下载。
 
 ---
 
