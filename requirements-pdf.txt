@@ -115,7 +115,7 @@ tree-sitter-python==0.25.0
 tree-sitter-typescript==0.23.2
 tree-sitter==0.26.0
 typer==0.27.1
-typing-inspection==0.4.3
+typing-inspection==0.4.4
 typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.7.0
