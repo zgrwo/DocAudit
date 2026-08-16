@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
   而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
 - 文档数字漂移：CHANGELOG 测试用例数 53 → 139（实际 11 个测试文件）
+- dependabot 锁文件 bump 引入的版本约束冲突已回退：
+  pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
+  starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
+  mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
+  mail-parser/marko/typing-inspection 五个合法 bump
 
 ### Added
 
@@ -22,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   既有 14 处刻意降级路径已附 `# bare-handler-ok` 理由注释
 - `tests/test_scripts.py` 与 `tests/test_check_bare_handlers.py`：脚本与门禁工具测试
 - `rules/tooling-pitfalls.md`、`rules/falsy-pitfalls.md`：工具与 falsy 陷阱清单
-- CI：Python 3.14 加入矩阵；裸异常处理器检查步骤
+- CI：Python 3.14 加入矩阵；裸异常处理器检查步骤；锁文件解析门禁
+  （`pip install --dry-run --ignore-installed -r requirements-*.txt`，防 dependabot 冲突 pin 合入）
 - 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
 - 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
 

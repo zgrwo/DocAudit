@@ -62,3 +62,13 @@ jobs:
 
       - name: Check api-reference.md sync
         run: python tools/check_api_sync.py
+
+      - name: Validate offline lockfiles resolve
+        # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束
+        # (实测: pyarrow 25 违反 streamlit<25, typer 0.27 违反 docling-core<0.27 等)
+        run: |
+          for profile in core pdf full; do
+            echo "== $profile =="
+            python -m pip install --dry-run --ignore-installed -r requirements-$profile.txt . >/dev/null \
+              || { echo "lockfile requirements-$profile.txt 无法解析，请回退冲突 pin 或升级约束方"; exit 1; }
+          done

@@ -12,6 +12,8 @@
 | 4 | **`pip download` 结果与解释器版本/平台绑定**（cp314 win_amd64 的 wheel 装不到其他版本/系统） | README 已提醒：离线机器必须与下载机同 Python 版本、同 OS；锁文件只锁版本，不跨平台 |
 | 5 | **`>=` 未锁版本导致下载结果不可复现**（docling 依赖链极长，两次解析结果可能不同） | 用 `requirements-{core,pdf,full}.txt` 锁文件（`scripts/gen_requirements_lock.py` 生成），download 走 `-r` |
 | 6 | **离线安装解析不校验 packages/ 完整性**（缺失 wheel 到离线机才暴露） | download 完成后立即 `pip install --dry-run --ignore-installed --no-index --find-links=packages/ ...` 自检（setup_offline 已内置，第 3 步） |
+| 6b | **dependabot 单点 bump 锁文件 pin 会破坏版本约束**（2026-08 实测：pyarrow 25 违反 streamlit `pyarrow<25`、typer 0.27 违反 docling-core `typer<0.27`、starlette 1.6 违反 streamlit `starlette<1.4`、pydantic-core 2.48 违反 pydantic 精确钉 `==2.46.4`、mpmath 1.4 违反 sympy `mpmath<1.4`；dependabot PR 的 CI 只测 `pip install .[dev]`（未钉版本），从不验证锁文件自洽） | CI 门禁 `pip install --dry-run --ignore-installed -r requirements-*.txt .`（有网解析）；冲突 pin 回退或升级约束方后再合 |
+| 6c | **离线 dry-run 自检无法发现 pin 冲突**（packages/ 是旧版本缓存，`--no-index` 只验证缓存完整性） | 锁文件自洽性由 CI 门禁（6b）守护；packages/ 与锁文件版本在重新 download 前短暂不一致属正常 |
 
 ## Windows / cmd / bat 陷阱
 
