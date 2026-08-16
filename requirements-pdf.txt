@@ -19,7 +19,7 @@ defusedxml==0.7.1
 dill==0.4.1
 doclang==0.7.3
 docling-core==2.91.0
-docling-ibm-models==3.13.3
+docling-ibm-models==3.14.0
 docling-parse==7.11.0
 docling-slim==2.119.0
 docling==2.119.0
