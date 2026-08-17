@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **文档数字一致性 CI 门禁**：`tools/check_doc_numbers.py` 校验白名单文档中的当前事实
+  数字（测试用例数/规则数/测试文件数/format.py 检查数）与代码实际值一致；
+  历史语境自动排除（「」引号内、CHANGELOG 历史区、规划文档）；已接入 CI lint job，
+  首次运行即捕获 2 处真实漂移（测试文件数 12→13、用例数 189→200）
+- **文档数字一致性门禁测试**：`tests/test_check_doc_numbers.py`（TDD，含历史语境排除/多写法识别）
+
 ### Fixed
 
 - **第二轮 max level 全量审查修复批次**（2026-08，HEAD d0637ff 复审）：
@@ -39,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
   显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
   而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
-- 文档数字漂移：CHANGELOG 测试用例数 53 → 189（实际 12 个测试文件）
+- 文档数字漂移：CHANGELOG 测试用例数 53 → 200（实际 12 个测试文件）
 - dependabot 锁文件 bump 引入的版本约束冲突已回退：
   pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
   starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
@@ -51,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FMT-008 表格文字与底色对比度规则**：深色底色配浅色文字、浅色底色配深色文字
   （WCAG AA，正文 4.5:1 / 大字 3:1，阈值经 rules.md 配置）；覆盖 PPTX/DOCX 原生表格，
   仅对 solid 纯色底色判定，无填充/渐变/主题色/嵌入 Excel 降级跳过不误报；
-  `TableCell` 新增 `fill_color` / `font_color` 字段，新增 `tests/test_contrast.py`（17 用例）
+  `TableCell` 新增 `fill_color` / `font_color` 字段，新增 `tests/test_contrast.py`（含算法/边界/降级用例）
 - 锁定文件 `requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`
   （由 `scripts/gen_requirements_lock.py` 生成），下载步骤按锁文件解析，版本可复现
 - `tools/check_bare_handlers.py`：AST 感知的裸异常处理器检查（CI 强制），

@@ -63,6 +63,10 @@ jobs:
       - name: Check api-reference.md sync
         run: python tools/check_api_sync.py
 
+      - name: Check doc number consistency
+        # 防数字漂移复发 (历史 3+ 次: 测试数/规则数/检查数在多处硬编码后漂移)
+        run: python tools/check_doc_numbers.py
+
   lockfile:
     # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束
     # (实测: pyarrow 25 违反 streamlit<25, typer 0.27 违反 docling-core<0.27 等)

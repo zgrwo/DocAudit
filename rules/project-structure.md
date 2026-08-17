@@ -114,6 +114,7 @@ DocAudit/
 │
 ├── tools/                           # 🔧 CI 门禁工具
 │   ├── check_bare_handlers.py       #   裸异常处理器检查 (AST 感知)
+│   ├── check_doc_numbers.py         #   文档数字一致性检查 (防数字漂移)
 │   ├── check_html_escape.py         #   html.escape 合规性检查
 │   └── check_api_sync.py            #   api-reference.md 同步检查
 │
@@ -187,7 +188,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (189 用例)
+└── tests/                           # 🧪 测试 (200 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -204,6 +205,7 @@ DocAudit/
     ├── test_language_auditor.py     #     语言审计器细节
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
     ├── test_contrast.py              #     FMT-008 WCAG 对比度算法 + 表格检查
+    ├── test_check_doc_numbers.py     #     文档数字一致性检查器门禁
     └── test_check_bare_handlers.py  #     裸异常检查器门禁
 ```
 

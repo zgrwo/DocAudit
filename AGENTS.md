@@ -75,7 +75,7 @@
 
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（189 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（200 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
 
@@ -99,10 +99,10 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 189 个用例（12 个文件，含黄金测试）
+├── tests/                            # 200 个用例（13 个文件，含黄金测试）
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
-├── tools/                            # CI 门禁工具（check_bare_handlers / check_html_escape / check_api_sync）
+├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync）
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
 ├── requirements-{core,pdf,full}.txt  # 离线依赖锁定文件（生成物）
 ├── AGENTS.md                         # 本文件（Claude Code 用 CLAUDE.md 副本）
@@ -159,7 +159,7 @@ DocAudit/
 
 ## 测试
 
-189 个用例，12 个文件：
+200 个用例，13 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -174,6 +174,7 @@ DocAudit/
 | test_language_auditor.py | 语言审计器细节 |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
+| test_check_doc_numbers.py | 文档数字一致性检查器门禁 |
 | test_check_bare_handlers.py | 裸异常检查器门禁 |
 
 ### 黄金测试
@@ -205,7 +206,7 @@ DocAudit/
 | rules.md 格式变更未同步 parser | 2 | 新属性键无法解析 |
 | PPTX EMU vs pt 单位混淆 | 2 | python-pptx 用 EMU，Document 用 pt |
 | Group 子元素未递归展开 | 2 | 直接遍历 page.elements 漏检嵌套 |
-| 文档数字漂移 | 3+ | CHANGELOG「53 用例」实际 189、agents.md 测试表 5 文件实际 12、README 引用 `tests/data/` 不存在路径；2026-08 已修，需 CI/检查器持续守护 |
+| 文档数字漂移 | 3+ | CHANGELOG「53 用例」实际 200、agents.md 测试表 5 文件实际 13、README 引用 `tests/data/` 不存在路径；2026-08 已修，由 check_doc_numbers 门禁持续守护 |
 | pip download 不产构建依赖 | 1 | `pip download <本地项目>` 只保存运行时 wheel，setuptools/wheel 需显式下载（2026-08 实证），否则离线安装 PEP 517 构建失败 |
 
 ### 关键设计决策
