@@ -139,6 +139,8 @@ bash scripts/setup_offline.sh download full
 3. **离线自检** — 自动执行 `pip install --dry-run --ignore-installed --no-index --find-links=packages/`，若 packages/ 不完整会当场报错，避免把装不上的包拷贝到离线机器
 
 > &#9888;&#65039; 个别依赖只提供源码包（sdist，如 `antlr4-python3-runtime`），下载后以 `.tar.gz` 形式存在于 packages/，离线安装时由 setuptools 现场构建，属正常现象。
+>
+> &#9888;&#65039; **packages/ 必须与锁文件一致**：若 `pyproject.toml` / `requirements-*.txt` 有更新（或 packages/ 来自旧版本），请**重新执行 download** 后再拷贝——下载步骤的"离线自检"会直接拦截不一致，避免把装不上的包带到离线机。
 
 **第 2 步：拷贝到离线机器**
 
@@ -197,6 +199,8 @@ python src/cli.py report.pptx --fix --fix-type font
 ```
 
 > 完整参数 &#8594; [用户手册](rules/user-manual.md)
+>
+> **退出码**（markdownlint 风格，便于 CI 集成）：发现 ERROR 级问题 → `1`；仅有 warning/info → `0`；处理失败 → `1`。
 
 ### Python API
 
