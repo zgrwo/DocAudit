@@ -145,6 +145,10 @@ def collect_actual_counts(root: Path) -> dict:
         cwd=root, capture_output=True, text=True,
     )
     m = re.search(r"(\d+) tests? collected", r.stdout)
+    if m is None:
+        # 收集失败 (如环境未装 pytest) — 输出诊断, 避免 -1 无差别报红难排查
+        print(f"[警告] pytest --collect-only 失败 (exit={r.returncode}): "
+              f"{r.stderr.strip()[-300:] or r.stdout.strip()[-300:]}")
     test_count = int(m.group(1)) if m else -1
 
     rules_md = (root / "rules.md").read_text(encoding="utf-8")
