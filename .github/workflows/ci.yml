@@ -48,9 +48,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ruff and pytest
-        # pytest 供 check_doc_numbers 的 --collect-only 统计测试用例数
-        run: pip install "ruff>=0.3" pytest
+      - name: Install dependencies
+        # .[dev] 保证测试收集环境与 test job 一致 (check_doc_numbers 的
+        # --collect-only 需要 python-pptx/python-docx 等基础依赖才能完整收集)
+        run: pip install ".[dev]"
 
       - name: Run ruff check
         run: ruff check src/ tests/ tools/ scripts/ app.py
