@@ -316,9 +316,21 @@ python src/cli.py <path> [选项]
 | `大字最小对比度` | FMT-008 | `3.0` (WCAG AA 大字) |
 | `大字字号阈值` | FMT-008 | `18` (pt) |
 | `最大英文词数/最大中文字数` | STR-004 | `10` / `40` |
+| `最小标题字号` | STR-001 | `28` (标题页大号标题判定阈值) |
 | `关键词` | CON-004 | `[结论, 总结, Summary, Conclusion]` |
 | `豁免版式` | CON-004 | `[标题幻灯片, Title Slide]` |
 | `章节` | CON-002 | `[概述, 工艺流程, 关键参数, 结论]` |
+
+### 内置检查（不经 rules.md 配置）
+
+以下检查由审计器内置实现，**不通过 rules.md 声明/关闭**，豁免请用报告中的豁免面板按 rule_id 操作：
+
+| rule_id | 内容 | 位置 |
+|---------|------|------|
+| `FMT-MIXED-001~003` | 中英混排规范（CJK-Latin 间距、中文标点） | LanguageAuditor |
+| `VOCAB-REJECT` | 词汇表黑名单（`vocab/reject.txt`） | LanguageAuditor |
+| `PY-SPELL` / `PY-ZH-GRAMMAR` | 拼写与中文语法（LanguageTool 三层降级） | LanguageAuditor |
+| `SYS-ERROR` | 系统级错误（审计器/规则执行失败时产生） | 流水线 |
 
 ### regex vs check 类型
 

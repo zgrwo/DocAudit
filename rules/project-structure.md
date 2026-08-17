@@ -80,7 +80,7 @@ DocAudit/
 ├── AGENTS.md                        # AI 上下文中枢 — 路由表 + 红线 + 约束（跨工具标准大写）
 ├── CLAUDE.md                        # Claude Code 兼容副本（AGENTS.md 静态副本，修改后需重新复制）
 ├── README.md                        # 人类项目首页 — 场景入口 + 快速上手
-├── rules.md                         # 审查规则声明 (25 条，配置驱动)
+├── rules.md                         # 审查规则声明 (26 条，配置驱动)
 ├── app.py                           # Streamlit Web UI 入口
 ├── docker-compose.yml               # LanguageTool Docker 服务
 ├── pyproject.toml                   # 项目配置 + 依赖声明
@@ -187,7 +187,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (158 用例)
+└── tests/                           # 🧪 测试 (181 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -232,7 +232,7 @@ DocAudit/
 | 文件 | 关键类 | 规则 ID | 检查数 |
 |------|--------|---------|--------|
 | `structure.py` | `StructureAuditor` | STR-001~008 | 10 |
-| `format.py` | `FormatAuditor` | FMT-001~008 | 10 |
+| `format.py` | `FormatAuditor` | FMT-001~008 | 11 |
 | `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED | 语言+术语+词汇 |
 | `factual.py` | `FactualAuditor` | CON-001~003-C | 6 |
 | `custom_rules.py` | `CustomRulesAuditor` | 路由所有 check_type | 中枢路由器 |

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **两轮 max level 审查（diff + 全量）修复批次**（2026-08，code-review-prompt + deep-code-review 模板）：
+  - STR-003 页首标题不再误报跳级（按标题分页的 MD/DOCX 每页页首 H2/H3 曾必报假阳性）
+  - TERM-003 中英混排规则降噪：纯英文页跳过 + 仅标记术语特征（全大写缩写/首字母大写词）+
+    已附 (中文) 翻译的术语豁免 + 大小写敏感可配置
+  - FactualAuditor 缩写扫描缓存绑定文档身份（独立模式跨文档曾串档）
+  - Vocabulary 词汇表编码回退 UTF-8→GBK→replace（GBK 文件曾打穿 build_auditors）
+  - STR-002 同页编号按出现次序检查（倒退不再被重排掩盖成跳号）
+  - MD 列表项含竖线不再误判为表格
+  - setup_offline 离线安装的 pip 升级改为 --no-index（完全离线红线）
+  - min_title_font_size / FMT-008 阈值配置链打通（rules.md 声明 → parser → auditor）
+  - 规则执行异常不再静默吞掉，转为 SYS-ERROR finding（UI 可见）
+  - FMT-008 dedup 折叠修复：context 含行列坐标，同页同文本单元格不合并
+  - STR-007 图表标题指纹对空格不敏感；PDF 转换器正路径 mock 测试补齐
+  - check_api_sync 门禁扩展至全部 auditors/converters/engines（补齐 3 个缺失文档）
+  - 文档数字统一：25→26 条规则、测试数 →179、format.py 检查数 →11
+- 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
+  显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
+  而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
+- 文档数字漂移：CHANGELOG 测试用例数 53 → 181（实际 12 个测试文件）
+- dependabot 锁文件 bump 引入的版本约束冲突已回退：
+  pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
+  starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
+  mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
+  mail-parser/marko/typing-inspection 五个合法 bump
+
 ### Added
 
 - **FMT-008 表格文字与底色对比度规则**：深色底色配浅色文字、浅色底色配深色文字
@@ -24,18 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   防 dependabot 冲突 pin 合入；锁文件为 Windows 生成契约，见 tooling-pitfalls #6b-6d）
 - 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
 - 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
-
-### Fixed
-
-- 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
-  显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
-  而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
-- 文档数字漂移：CHANGELOG 测试用例数 53 → 158（实际 12 个测试文件）
-- dependabot 锁文件 bump 引入的版本约束冲突已回退：
-  pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
-  starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
-  mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
-  mail-parser/marko/typing-inspection 五个合法 bump
 
 ## [0.1.0] - 2026-07-26
 

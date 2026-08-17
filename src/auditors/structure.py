@@ -141,7 +141,7 @@ class StructureAuditor(BaseAuditor):
         findings: list[AuditFinding] = []
 
         for page in doc.pages:
-            prev_level = 0
+            prev_level: int | None = None  # None = 页内首个标题, 不参与跳级比较
             for elem in page.flattened_elements:
                 if elem.type != "text_frame":
                     continue
@@ -149,7 +149,7 @@ class StructureAuditor(BaseAuditor):
                     if para.level is None:
                         continue
                     current_level = para.level
-                    if current_level > prev_level + 1:
+                    if prev_level is not None and current_level > prev_level + 1:
                         findings.append(AuditFinding(
                             type=FindingType.STRUCTURE,
                             severity=FindingSeverity.WARNING,
@@ -203,12 +203,14 @@ class StructureAuditor(BaseAuditor):
         if len(items) < 2:
             return findings
 
-        # 按出现顺序排序 (防御性: 确保跨页顺序正确)
-        items.sort(key=lambda x: (x[0], x[1]))
-        prev_num = items[0][1] - 1  # 从第一个编号减一开始
+        # 按出现顺序排序 (防御性: 跨页按 page 归组, 同页内保持出现次序 —
+        # 按编号重排会掩盖页内倒退, 如 "图3 与图1" 被误报为跳过图2)
+        ordered = [(p, n, t, i) for i, (p, n, t) in enumerate(items)]
+        ordered.sort(key=lambda x: (x[0], x[3]))
+        prev_num = ordered[0][1] - 1  # 从第一个编号减一开始
         seen_numbers: set[int] = set()
 
-        for page_idx, num, text in items:
+        for page_idx, num, text, _ in ordered:
             # 检测重复编号
             if num in seen_numbers:
                 findings.append(AuditFinding(
@@ -278,6 +280,8 @@ class StructureAuditor(BaseAuditor):
                 # 统一化分隔符
                 fp = re.sub(r"[：:]", ":", fp)
                 fp = re.sub(r"[—–\-]", "-", fp)
+                # 折叠空白: "Fig. 1:" 与 "Fig.1:" 视为同一种格式 (2026-08 审查 P3)
+                fp = re.sub(r"\s+", "", fp)
                 fp = fp.strip()
                 if fp not in fingerprints:
                     fingerprints[fp] = []

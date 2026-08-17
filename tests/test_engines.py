@@ -159,6 +159,16 @@ class TestVocabulary:
         assert len(hits) == 1
         assert hits[0][0] == "kind of"
 
+    def test_load_gbk_encoding_graceful(self, tmp_path):
+        """回归: GBK 编码词汇表不得崩溃 (曾抛 UnicodeDecodeError 打穿 build_auditors)"""
+        accept_file = tmp_path / "accept.txt"
+        accept_file.write_text("FinFET\n", encoding="utf-8")
+        reject_file = tmp_path / "reject.txt"
+        reject_file.write_text("糟糕词 # 理由\n", encoding="gbk")
+
+        vocab = Vocabulary(str(tmp_path))  # 不应抛异常
+        assert vocab.is_accepted("FinFET") is True
+
     def test_reject_regex_pattern(self, tmp_path):
         """正则条目 (含特殊字符) → 使用 regex 匹配"""
         reject_file = tmp_path / "reject.txt"

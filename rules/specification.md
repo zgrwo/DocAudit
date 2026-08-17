@@ -4,7 +4,7 @@
 
 ## 1. 项目概述
 
-**DocAudit** 是一个本地离线文档审查系统，支持 PPTX/DOCX/PDF/Markdown 格式，提供结构审查、格式审查、事实审查、语言审查、自定义规则审查等 5 大审查维度，25 条配置驱动规则。
+**DocAudit** 是一个本地离线文档审查系统，支持 PPTX/DOCX/PDF/Markdown 格式，提供结构审查、格式审查、事实审查、语言审查、自定义规则审查等 5 大审查维度，26 条配置驱动规则。
 
 ### 核心价值
 
@@ -30,9 +30,10 @@
 | 格式审查 | FormatAuditor | 字体/字号/颜色/对齐/页边距 |
 | 事实审查 | FactualAuditor | 日期/数字/单位/引用一致性 |
 | 语言审查 | LanguageAuditor | 术语/词汇/语法（LanguageTool） |
-| 自定义规则 | CustomRulesAuditor | rules.md 配置的 25 条规则 |
+| 自定义规则 | CustomRulesAuditor | rules.md 配置的 26 条规则 |
+| 内置检查 | LanguageAuditor 等 | FMT-MIXED / VOCAB-REJECT / PY-SPELL（不经 rules.md 配置） |
 
-### 2.2 规则清单（25 条）
+### 2.2 规则清单（26 条）
 
 | 规则 ID | 类型 | 说明 |
 |---------|------|------|
@@ -98,7 +99,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 
 ## 4. 质量规格
 
-### 4.1 测试体系（158 个用例）
+### 4.1 测试体系（181 个用例）
 
 | 文件 | 内容 |
 |------|------|

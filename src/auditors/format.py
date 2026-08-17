@@ -517,7 +517,9 @@ class FormatAuditor(BaseAuditor):
                         rule_id="FMT-008",
                         page_index=page.index,
                         location=f"{page_label} [表格 第{cell.row + 1}行 第{cell.col + 1}列]",
-                        context=text[:100],
+                        # 前缀含行列坐标: dedup_key 用 context 哈希, 同页同文本的
+                        # 不同单元格必须互异, 否则 deduplicate 折叠为一条 (信息丢失)
+                        context=f"[{cell.row + 1}行 {cell.col + 1}列] {text[:85]}",
                         suggestion=(
                             "深色底色配浅色文字、浅色底色配深色文字，"
                             f"确保对比度不低于 {threshold}:1"

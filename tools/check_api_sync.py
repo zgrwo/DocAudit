@@ -17,6 +17,21 @@ CHECKED_MODULES = [
     "src/reporters/html_reporter.py",
     "src/reporters/json_reporter.py",
     "src/cli.py",
+    "src/auditors/structure.py",
+    "src/auditors/format.py",
+    "src/auditors/factual.py",
+    "src/auditors/language.py",
+    "src/auditors/custom_rules.py",
+    "src/converters/base.py",
+    "src/converters/pptx_converter.py",
+    "src/converters/docx_converter.py",
+    "src/converters/md_converter.py",
+    "src/converters/pdf_converter.py",
+    "src/engines/rule_parser.py",
+    "src/engines/terminology.py",
+    "src/engines/vocabulary.py",
+    "src/engines/languagetool.py",
+    "src/engines/autofix.py",
 ]
 
 # 忽略的函数/类名模式

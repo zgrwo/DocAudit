@@ -138,7 +138,18 @@ class CustomRulesAuditor(BaseAuditor):
             try:
                 findings.extend(self._execute_rule(rule, doc))
             except Exception as e:
+                # 规则执行失败不静默吞掉 — 生成 SYS-ERROR finding 保证 UI 可见
+                # (2026-08 全量审查: 曾仅 logger.warning, 报告"正常"完成但规则静默缺失)
                 logger.warning("规则 %s 执行失败: %s", rule.rule_id, e, exc_info=True)
+                findings.append(AuditFinding(
+                    type=FindingType.CUSTOM,
+                    severity=FindingSeverity.ERROR,
+                    message=f"规则 '{rule.rule_id}' 执行失败: {e}",
+                    rule_id="SYS-ERROR",
+                    location="系统",
+                    suggestion="请检查文档内容或规则配置",
+                    metadata={"rule_id": rule.rule_id, "error": str(e)},
+                ))
 
         return findings
 
@@ -168,13 +179,22 @@ class CustomRulesAuditor(BaseAuditor):
             return findings
 
         try:
-            compiled = re.compile(pattern_str, re.IGNORECASE)
+            # 大小写敏感规则 (如 TERM-003 仅匹配术语特征) 不传 IGNORECASE
+            if str(rule.params.get("大小写敏感", "")).lower() in ("true", "1", "yes"):
+                compiled = re.compile(pattern_str)
+            else:
+                compiled = re.compile(pattern_str, re.IGNORECASE)
         except re.error as e:
             logger.warning("规则 %s 的正则无效: %s", rule.rule_id, e)
             return findings
 
         for page in doc.pages:
             text = page.all_text
+            # 仅中文页面: 页面无 CJK 字符时跳过 (如 TERM-003 中英混排规则对纯英文页无意义)
+            if rule.params.get("仅中文页面") and not any(
+                "\u4e00" <= ch <= "\u9fff" for ch in text
+            ):
+                continue
             matches = list(compiled.finditer(text))
             if matches:
                 for match in matches:

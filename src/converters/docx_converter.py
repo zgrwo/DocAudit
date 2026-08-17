@@ -249,7 +249,7 @@ class DocxConverter(BaseConverter):
                                 if fill and fill.lower() != "auto":
                                     fill_color = fill.upper()
                     except Exception:
-                        fill_color = None  # 异常 XML 结构 — 降级
+                        fill_color = None  # bare-handler-ok — 异常 XML 结构，降级
 
                     cells.append(TableCell(
                         text=cell_text,

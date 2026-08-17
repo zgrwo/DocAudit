@@ -53,8 +53,9 @@ class FactualAuditor(BaseAuditor):
         cfg = config or {}
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
-        # 缩写扫描缓存 — 每次 audit() 调用时重置
-        self._abbr_scan_cache: dict | None = None
+        # 缩写扫描缓存 — 每次 audit() 调用时重置；独立模式 (dispatch 直调) 下
+        # 以 (id(doc), result) 绑定文档身份，防止跨文档串档
+        self._abbr_scan_cache: tuple | None = None
 
     def audit(self, doc: Document) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
@@ -185,10 +186,11 @@ class FactualAuditor(BaseAuditor):
                 "first_page_number": int,
                 "first_is_definition": bool,
             }}
-        结果缓存在 self._abbr_scan_cache 中，同一次 audit 调用内复用。
+        结果缓存在 self._abbr_scan_cache 中，同一次 audit 调用内复用
+        (绑定 id(doc)，独立模式跨文档不串档)。
         """
-        if self._abbr_scan_cache is not None:
-            return self._abbr_scan_cache
+        if self._abbr_scan_cache is not None and self._abbr_scan_cache[0] == id(doc):
+            return self._abbr_scan_cache[1]
 
         abbr_pattern = re.compile(r"\b([A-Z]{2,8})\b")
         scan_result: dict = {}
@@ -252,7 +254,7 @@ class FactualAuditor(BaseAuditor):
                 else False
             )
 
-        self._abbr_scan_cache = scan_result
+        self._abbr_scan_cache = (id(doc), scan_result)
         return scan_result
 
     # ── 缩写首次定义 ─────────────────────────────────────────

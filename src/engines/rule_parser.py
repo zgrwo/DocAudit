@@ -216,6 +216,7 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
         ],
         "max_english_words": 10,        # STR-004
         "max_chinese_chars_title": 40,  # STR-004
+        "min_title_font_size": 28,      # STR-001 标题页大号标题文本判定阈值
         "min_contrast": 4.5,            # FMT-008 表格对比度阈值 (WCAG AA 正文)
         "large_text_min_contrast": 3.0, # FMT-008 大字对比度阈值 (WCAG AA 大字)
         "large_text_threshold": 18,     # FMT-008 大字字号阈值 (pt)
@@ -280,6 +281,14 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
                 except (ValueError, TypeError):
                     logger.warning("FMT-008 大字字号阈值 值无效: %s，使用默认值 %s",
                                    rule.params["大字字号阈值"], config["large_text_threshold"])
+
+        elif rid.startswith("STR-001"):
+            if "最小标题字号" in rule.params:
+                try:
+                    config["min_title_font_size"] = int(rule.params["最小标题字号"])
+                except (ValueError, TypeError):
+                    logger.warning("STR-001 最小标题字号 值无效: %s，使用默认值 %s",
+                                   rule.params["最小标题字号"], config["min_title_font_size"])
 
         elif rid.startswith("STR-004"):
             if "最大英文词数" in rule.params:

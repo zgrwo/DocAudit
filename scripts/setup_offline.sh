@@ -74,7 +74,9 @@ install_offline() {
 
     echo "[1/2] 从本地 packages/ 安装依赖 (profile=$PROFILE)..."
     source .venv/bin/activate
-    pip install --upgrade pip -q
+    # pip 升级必须离线 (完全离线红线); packages/ 无 pip wheel 时跳过升级
+    pip install --upgrade pip -q --no-index --find-links="$PACKAGES_DIR" \
+        || echo "[警告] pip 升级失败 (packages/ 中无 pip wheel 属正常)，使用现有 pip 继续"
     pip install --no-index --find-links="$PACKAGES_DIR" "$SCRIPT_DIR$EXTRAS"
 
     echo "[2/2] 验证安装..."

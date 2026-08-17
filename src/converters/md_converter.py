@@ -164,8 +164,16 @@ class MarkdownConverter(BaseConverter):
                 continue
 
             # 表格行 (支持可选前导 | 的 GFM 语法: "Name | Age" 和 "| Name | Age |" 均可)
+            # 排除: 水平分隔线 (---) 与列表标记开头的行 (如 "- 项 A | 内容" 是列表非表格)
             stripped = line.strip()
-            if "|" in stripped and not re.match(r"^[\-*_]{3,}\s*$", stripped):
+            is_list_marker = (
+                re.match(r"^[\-*+]\s", stripped) or re.match(r"^\d+\.\s", stripped)
+            )
+            if (
+                "|" in stripped
+                and not re.match(r"^[\-*_]{3,}\s*$", stripped)
+                and not is_list_marker
+            ):
                 if current_type != "table":
                     if current_lines:
                         elements.append(self._make_element(current_lines, current_type))

@@ -198,6 +198,20 @@ class TestMarkdownConverter:
         ]
         assert len(table_elems) >= 1
 
+    def test_list_item_with_pipe_not_table(self, md_converter, tmp_path):
+        """回归: 列表项含竖线不得误判为表格 (修复: 曾把 '- 项 A | 内容' 解析成 table)"""
+        md = "- 列表项 A | 内容\n- 普通列表项\n"
+        path = tmp_path / "list.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        table_elems = [
+            e for p in doc.pages for e in p.flattened_elements if e.type == "table"
+        ]
+        assert len(table_elems) == 0, f"列表项不应被解析为表格: {table_elems}"
+        # 两个列表项都应在文本中完整保留
+        assert "- 列表项 A | 内容" in doc.all_text
+        assert "- 普通列表项" in doc.all_text
+
     def test_gbk_encoding_fallback(self, md_converter, tmp_path):
         """GBK 编码文件正确读取"""
         path = tmp_path / "gbk.md"
@@ -246,6 +260,85 @@ class TestPdfConverter:
         fake.write_bytes(b"%PDF-1.4 fake content")
         with pytest.raises(ImportError, match="docling"):
             PdfConverter().convert(str(fake))
+
+    def test_convert_positive_path_with_cells_api(self, tmp_path, monkeypatch):
+        """正路径: cells API 页面 → 文本完整保留 (docling mock)"""
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeCell:
+            def __init__(self, text, row=0, col=0):
+                self.text = text
+                self.row = row
+                self.col = col
+
+        class FakePage:
+            def __init__(self):
+                self.cells = [FakeCell("第一段文本", 0, 0)]
+
+        class FakeDoclingDoc:
+            pages = {1: FakePage()}
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        monkeypatch.setattr(
+            "docling.document_converter.DocumentConverter", FakeDoclingConverter
+        )
+        fake = tmp_path / "sample.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        assert doc.format == "pdf"
+        assert doc.metadata.page_count == 1
+        assert "第一段文本" in doc.all_text
+
+    def test_convert_positive_path_with_tables_api(self, tmp_path, monkeypatch):
+        """正路径: tables API + export_to_dataframe → table 元素 (docling mock)"""
+        import pandas as pd
+
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeTable:
+            def export_to_dataframe(self):
+                return pd.DataFrame([["表头A", "表头B"], ["值1", "值2"]])
+
+        class FakePage:
+            def __init__(self):
+                self.tables = [FakeTable()]
+
+        class FakeDoclingDoc:
+            pages = {1: FakePage()}
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        monkeypatch.setattr(
+            "docling.document_converter.DocumentConverter", FakeDoclingConverter
+        )
+        fake = tmp_path / "table.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        tables = [
+            e for p in doc.pages for e in p.flattened_elements if e.type == "table"
+        ]
+        assert len(tables) == 1, f"期望 1 个表格元素, got {len(tables)}"
+        cells = [c.text for row in tables[0].tables for c in row]
+        assert cells == ["表头A", "表头B", "值1", "值2"]
 
 
 class TestPptxConverterTableColors:

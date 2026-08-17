@@ -4,13 +4,20 @@
 > 完整用法 → [用户手册](user-manual.md) &nbsp;|&nbsp; 编码规范 → [skills/python/SKILL.md](../skills/python/SKILL.md)
 > 结构导航 → [project-structure.md](project-structure.md)
 
-**总模块**: 15 | **总公开函数**: 30+ | **规则**: 25 条
+**总模块**: 15 | **总公开函数**: 30+ | **规则**: 26 条
 
 ---
 
 ## Converters（转换器）
 
 `src/converters/` — 多格式 → 统一 Document 模型
+
+### BaseConverter `src/converters/base.py`
+
+| 方法 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `can_handle` | `(source_path: str \| Path)` | `bool` | 抽象方法 — 扩展名匹配 |
+| `convert` | `(source_path: str \| Path)` | `Document` | 抽象方法 — 格式 → Document |
 
 ### PptxConverter `src/converters/pptx_converter.py`
 
@@ -171,6 +178,13 @@
 | `load_glossaries` | `(glossary_dir: str \| Path)` | `None` | 加载/重载术语规则 (就地修改 self.glossaries) |
 | `check` | `(text, page_index, page_label)` | `list[AuditFinding]` | 对文本执行术语检查 (含跳过去重) |
 
+数据类（同文件）:
+
+| 类 | 字段 | 说明 |
+|------|------|------|
+| `TermRule` | `pattern` / `preferred` / `context` / `severity` | 单条术语规则 (regex 编译) |
+| `TermGlossary` | `category` / `terms` | 术语表 (对应一个 YAML 文件) |
+
 ### LanguageToolClient `src/engines/languagetool.py`
 
 | 方法 | 签名 | 返回 | 说明 |
@@ -296,7 +310,7 @@
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()` |
+| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行 |
 
 ### JsonReporter `src/reporters/json_reporter.py`
 

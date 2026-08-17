@@ -435,6 +435,8 @@ with st.sidebar:
                 st.session_state.doc,
                 filtered_download,
                 title=report_title,
+                # 批量模式: 头部"文件:"行显示批量汇总而非首文件路径
+                file_label=report_title if st.session_state.get("batch_mode") else None,
             )
             st.download_button(
                 "📥 下载 HTML 报告",

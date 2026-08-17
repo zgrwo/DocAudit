@@ -17,6 +17,7 @@ def generate_html_report(
     findings: list[AuditFinding],
     title: str = "文档审查报告",
     output_path: str | Path | None = None,
+    file_label: str | None = None,
 ) -> str:
     """生成独立 HTML 审查报告。
 
@@ -25,6 +26,8 @@ def generate_html_report(
         findings: 审查发现列表
         title: 报告标题
         output_path: 可选输出文件路径 (与 JSON reporter API 对称)
+        file_label: 可选文件来源标签 (批量模式传 "批量 N 个文件"，
+                    避免头部只显示第一个文件的路径误导)
     """
 
     # 按严重度统计
@@ -81,7 +84,7 @@ def generate_html_report(
 <div class="container">
     <div class="header">
         <h1>📄 {escape(title)}</h1>
-        <p>文件: {escape(doc.source_path)} | 格式: {escape(doc.format.upper())} | 共 {len(doc.pages)} 页</p>
+        <p>文件: {escape(file_label or doc.source_path)} | 格式: {escape(doc.format.upper())} | 共 {len(doc.pages)} 页</p>
         <p>审查时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
     </div>
 

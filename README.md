@@ -212,7 +212,7 @@ for f in findings:
 
 ## 规则速览
 
-共 25 条审查规则，分 4 个类别，全部通过 `rules.md` 配置：
+共 26 条审查规则，分 4 个类别，全部通过 `rules.md` 配置：
 
 | 类别 | 规则 | 示例 |
 |------|------|------|
@@ -258,7 +258,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **158 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
+- **181 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
 - **黄金测试**：CLI = Web UI = Python API 三路径一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）

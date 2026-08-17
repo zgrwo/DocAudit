@@ -3,6 +3,15 @@
 from src.auditors.custom_rules import CustomRulesAuditor
 from src.engines.pipeline import SKIP_TO_CHECK_TYPE
 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
+from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
+
+
+def _md_doc(text: str) -> Document:
+    """构造单页纯文本文档。"""
+    page = Page(index=0, slide_number=1, elements=[
+        PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
+    ])
+    return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
 
 # StructureAuditor/FactualAuditor 的 _skip_checks 简写 → _DISPATCH check_type 反向映射
 # 单一真相来源: src/engines/pipeline.py:SKIP_TO_CHECK_TYPE (其余键名与 check_type 一致)
@@ -44,6 +53,53 @@ class TestRuleParser:
         assert config["max_english_words"] == 10
         assert config["max_chinese_chars_title"] == 40
 
+    def test_str001_min_title_font_size_extraction(self):
+        """STR-001 最小标题字号 从 rules.md 提取 (配置驱动: 曾三处硬编码 28)"""
+        rules = parse_rules_md("rules.md")
+        config = extract_auditor_config(rules)
+        assert config.get("min_title_font_size") == 28, (
+            f"Expected min_title_font_size=28, got {config.get('min_title_font_size')}"
+        )
+
+    def test_str001_malformed_min_title_font_size_falls_back(self):
+        """STR-001 非整数配置值 → 回退默认值，不崩溃"""
+        from src.engines.rule_parser import AuditRule
+        rule = AuditRule(
+            rule_id="STR-001",
+            category="structure",
+            severity="error",
+            description="必须有标题页",
+            check_type="first_slide_has_title_layout",
+            params={"最小标题字号": "not_a_number"},
+        )
+        config = extract_auditor_config([rule])
+        assert config["min_title_font_size"] == 28
+
+    def test_fmt008_config_extraction(self):
+        """FMT-008 对比度阈值从 rules.md 正确提取 (配置驱动)"""
+        rules = parse_rules_md("rules.md")
+        config = extract_auditor_config(rules)
+        assert config.get("min_contrast") == 4.5, (
+            f"Expected min_contrast=4.5, got {config.get('min_contrast')}"
+        )
+        assert config.get("large_text_min_contrast") == 3.0
+        assert config.get("large_text_threshold") == 18
+
+    def test_fmt008_malformed_contrast_falls_back(self):
+        """FMT-008 非数值配置值 → 回退默认值，不崩溃"""
+        from src.engines.rule_parser import AuditRule
+        rule = AuditRule(
+            rule_id="FMT-008",
+            category="format",
+            severity="warning",
+            description="表格文字与底色对比度",
+            check_type="table_contrast",
+            params={"最小对比度": "abc", "大字最小对比度": "xyz"},
+        )
+        config = extract_auditor_config([rule])
+        assert config["min_contrast"] == 4.5
+        assert config["large_text_min_contrast"] == 3.0
+
     def test_str004_malformed_int_falls_back_to_default(self):
         """STR-004 非整数配置值 → 回退到默认值，不崩溃"""
         from src.engines.rule_parser import AuditRule
@@ -59,6 +115,54 @@ class TestRuleParser:
         # 应回退到默认值
         assert config["max_english_words"] == 10
         assert config["max_chinese_chars_title"] == 40
+
+    def test_term003_skipped_on_pure_english_pages(self):
+        """TERM-003: 纯英文页不检查中英混排 (曾对每个英文词报 INFO 洪水)"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("This is a standard English sentence with TSV technology.")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"纯英文页不应报 TERM-003, got {len(finds)} 条"
+
+    def test_term003_flags_abbrev_without_translation(self):
+        """TERM-003: 中英混排页中无中文翻译的英文术语仍被标记"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("TSV 工艺用于先进封装。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) >= 1, "中英混排无翻译缩写应被标记"
+
+    def test_term003_abbrev_with_chinese_parens_ok(self):
+        """TERM-003: 已附 (中文) 翻译的术语不再标记"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("TSV (硅通孔) 工艺用于先进封装。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"已附翻译不应报 TERM-003, got: {finds}"
+
+    def test_term003_lowercase_function_words_skipped(self):
+        """TERM-003: 中英混排页中的全小写功能词不标记 (仅术语特征)"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("我们使用 standard 工艺，这是 a 测试。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"全小写功能词不应报 TERM-003, got: {finds}"
+
+    def test_dispatch_exception_becomes_sys_error_finding(self, monkeypatch):
+        """回归: 单条规则执行异常不再静默吞掉, 转为 SYS-ERROR finding (UI 可见)"""
+        from src.auditors.format import FormatAuditor
+
+        def boom(self, page, doc):
+            raise RuntimeError("模拟 dispatch 方法崩溃")
+
+        monkeypatch.setattr(FormatAuditor, "_check_bullet_consistency", boom)
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        findings = auditor.audit(_md_doc("bullet 测试"))
+        sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
+        assert len(sys_errors) >= 1, "规则执行异常应产生 SYS-ERROR finding"
+        assert "bullet_consistency" in (sys_errors[0].metadata or {}).get("rule_id", "") or \
+            "模拟 dispatch" in sys_errors[0].message
 
 
 class TestDispatchValidation:

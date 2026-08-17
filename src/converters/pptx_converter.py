@@ -231,7 +231,7 @@ class PptxConverter(BaseConverter):
                         if first_run.font.color and first_run.font.color.rgb:
                             font_color = _rgb_to_hex(first_run.font.color.rgb)
                     except Exception:
-                        font_color = None  # 主题色等无法取 RGB — 降级
+                        font_color = None  # bare-handler-ok — 主题色等无法取 RGB，降级
 
                 # 单元格底色 (仅 solid 纯色填充；渐变/图案/无填充 → None)
                 fill_color = None
@@ -239,7 +239,7 @@ class PptxConverter(BaseConverter):
                     if cell.fill.type == MSO_FILL_TYPE.SOLID:
                         fill_color = _rgb_to_hex(cell.fill.fore_color.rgb)
                 except Exception:
-                    fill_color = None  # 异常填充结构 — 降级
+                    fill_color = None  # bare-handler-ok — 异常填充结构，降级
 
                 cells.append(TableCell(
                     text=cell_text,

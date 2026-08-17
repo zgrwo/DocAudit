@@ -7,7 +7,25 @@ from src.auditors.factual import FactualAuditor
 from src.auditors.format import FormatAuditor
 from src.auditors.structure import StructureAuditor
 from src.converters.pptx_converter import PptxConverter
+from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import FindingSeverity
+
+
+def _heading_doc(levels: list[int]) -> Document:
+    """构造含指定标题层级的单页文档 (text_frame 段落)。"""
+    paragraphs = [Paragraph(text=f"H{lv} 标题", runs=[], level=lv) for lv in levels]
+    page = Page(index=0, slide_number=1, elements=[
+        PageElement(type="text_frame", paragraphs=paragraphs)
+    ])
+    return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
+
+
+def _text_doc(text: str) -> Document:
+    """构造单页纯文本文档。"""
+    page = Page(index=0, slide_number=1, elements=[
+        PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
+    ])
+    return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
 
 
 class TestStructureAuditor:
@@ -52,6 +70,74 @@ class TestStructureAuditor:
                 assert f.rule_id == "CON-004", f"Unexpected ERROR rule_id: {f.rule_id}"
                 assert f.message, "Finding message should not be empty"
                 assert f.page_index is not None, "Finding must have page_index"
+
+    def test_heading_levels_page_first_heading_exempt(self):
+        """STR-003: 页首标题不参与跳级比较 (修复: 按标题分页的文档页首 H2/H3 不再误报)"""
+        doc = _heading_doc([2, 3])  # 页首即 H2 (MD ### 切页场景)
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_heading_levels(doc)
+        assert len(findings) == 0, f"页首 H2 不应误报跳级, got: {findings}"
+
+    def test_heading_levels_real_skip_flagged(self):
+        """STR-003: 页内真实跳级仍被检测 (H1→H3)"""
+        doc = _heading_doc([1, 3])
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_heading_levels(doc)
+        assert len(findings) == 1
+        assert "H1" in findings[0].message and "H3" in findings[0].message
+
+    def test_heading_levels_sequential_ok(self):
+        """STR-003: 逐级递进 (H1→H2→H3) 不报"""
+        doc = _heading_doc([1, 2, 3])
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_heading_levels(doc) == []
+
+    def test_heading_levels_mid_document_skip_flagged(self):
+        """STR-003: 页内 H2→H4 仍报 (首标题豁免后保留跳级检测)"""
+        doc = _heading_doc([2, 4])
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_heading_levels(doc)
+        assert len(findings) == 1
+        assert "H2" in findings[0].message and "H4" in findings[0].message
+
+    def test_figure_numbering_within_page_order_preserved(self):
+        """STR-002: 同页内按出现次序检查 (修复: 曾按编号重排, 倒退被掩盖成跳号)"""
+        doc = _text_doc("参见图3 与图1 的对比")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 1, f"期望 1 条 STR-002, got: {findings}"
+        assert "倒退" in findings[0].message, (
+            f"图3 先于 图1 出现应为'倒退', got: {findings[0].message}"
+        )
+
+    def test_figure_numbering_cross_page_skip_flagged(self):
+        """STR-002: 跨页跳号仍被检测 (图1 → 图3)"""
+        p1 = Page(index=0, slide_number=1, elements=[
+            PageElement(type="text_frame", paragraphs=[Paragraph(text="如图1 所示", runs=[])])
+        ])
+        p2 = Page(index=1, slide_number=2, elements=[
+            PageElement(type="text_frame", paragraphs=[Paragraph(text="如图3 所示", runs=[])])
+        ])
+        doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[p1, p2])
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 1
+        assert "不连续" in findings[0].message
+
+    def test_figure_caption_format_space_insensitive(self):
+        """STR-007: 指纹对空格不敏感 ('Fig. 1:' 与 'Fig.2:' 视为同一格式)"""
+        doc = _text_doc("Fig. 1: 标题甲。\nFig.2: 标题乙。")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_caption_format(doc)
+        assert len(findings) == 0, f"空格差异不应算两种格式, got: {findings}"
+
+    def test_figure_caption_format_mixed_flagged(self):
+        """STR-007: 中英文格式混用仍被检测 ('图1：' vs 'Fig. 1:')"""
+        doc = _text_doc("图1：标题甲。\nFig. 1: 标题乙。")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_caption_format(doc)
+        assert len(findings) == 1
+        assert "2 种" in findings[0].message
 
     def test_title_length_or_condition(self):
         """STR-004: 纯中文超长标题应触发告警 — 验证 AND→OR 修复"""
@@ -165,3 +251,16 @@ class TestFactualAuditor:
                     assert word not in (f.metadata.get("abbreviation") or ""), (
                         f"Common word '{word}' should not be flagged as undefined abbreviation"
                     )
+
+    def test_abbreviation_cache_not_leaked_across_documents(self):
+        """回归: 缩写扫描缓存不得跨文档串档 (独立模式 dispatch 直调不走 audit() 的 reset)"""
+        doc1 = _text_doc("TSV 工艺用于先进封装。")
+        doc2 = _text_doc("TSV (Through Silicon Via) 是硅通孔。")
+        fa = FactualAuditor()
+        # 模拟 CustomRulesAuditor 独立模式: 直接调 dispatch 方法 (不经过 audit() 重置缓存)
+        fa._check_abbreviation_first_defined(doc1)
+        findings_doc2 = fa._check_abbreviation_first_defined(doc2)
+        # doc2 的 TSV 首次出现即带全称定义 → 不应报"首次未定义"
+        assert len(findings_doc2) == 0, (
+            f"doc2 不应复用车 doc1 的扫描结果: {findings_doc2}"
+        )

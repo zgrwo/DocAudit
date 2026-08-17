@@ -26,6 +26,21 @@ def _has_regex_chars(s: str) -> bool:
     return bool(_REGEX_SPECIAL & set(s))
 
 
+def _read_lines(path: Path) -> list[str]:
+    """读取词汇表文件行，带编码回退 (UTF-8 → GBK → replace)。
+
+    中文 Windows 用户可能以系统默认 GBK 保存词汇表；裸 read_text(utf-8)
+    会抛 UnicodeDecodeError 打穿 build_auditors (2026-08 审查实证)。
+    """
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return path.read_text(encoding=encoding).splitlines()
+        except UnicodeDecodeError:
+            continue
+    logger.warning("词汇表文件编码无法识别 (非 UTF-8/GBK)，按 UTF-8 容错读取: %s", path.name)
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+
 class Vocabulary:
     """项目级术语词汇表。
 
@@ -49,7 +64,7 @@ class Vocabulary:
         accept_path = directory / "accept.txt"
         if accept_path.exists():
             loaded = 0
-            for line in accept_path.read_text(encoding="utf-8").splitlines():
+            for line in _read_lines(accept_path):
                 line = line.strip()
                 if line and not line.startswith("#"):
                     self.accepted.add(line.lower())
@@ -59,7 +74,7 @@ class Vocabulary:
         reject_path = directory / "reject.txt"
         if reject_path.exists():
             loaded = 0
-            for line in reject_path.read_text(encoding="utf-8").splitlines():
+            for line in _read_lines(reject_path):
                 line = line.strip()
                 if line and not line.startswith("#"):
                     # 格式: "word" 或 "word # reason" (# 前空格可选)

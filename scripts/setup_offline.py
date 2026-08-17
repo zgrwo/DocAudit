@@ -165,7 +165,12 @@ def _install(root, packages, extras, label, print_cmd):
         print("[0/2] 虚拟环境已存在")
 
     print(f"[1/2] 从本地 packages/ 安装依赖 profile={label}...")
-    upg = [venv_py, "-m", "pip", "install", "--upgrade", "pip", "-q"]
+    # pip 升级必须离线 (完全离线红线): 从 packages/ 找 pip wheel,
+    # 找不到时跳过升级并继续 (现有 pip 可用)
+    upg = [
+        venv_py, "-m", "pip", "install", "--upgrade", "pip", "-q",
+        "--no-index", f"--find-links={packages}",
+    ]
     inst = [
         venv_py, "-m", "pip", "install",
         "--no-index", f"--find-links={packages}", f"{root}{extras}",
@@ -175,7 +180,8 @@ def _install(root, packages, extras, label, print_cmd):
         print("  " + " ".join(str(a) for a in upg))
         print("  " + " ".join(str(a) for a in inst))
         return 0
-    common.run(upg, cwd=root)
+    if common.run(upg, cwd=root) != 0:
+        print("[警告] pip 升级失败 (packages/ 中无 pip wheel 属正常)，使用现有 pip 继续")
     if common.run(inst, cwd=root) != 0:
         print("[错误] 依赖安装失败，请检查 packages/ 中的文件是否完整")
         return 1

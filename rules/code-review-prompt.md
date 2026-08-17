@@ -54,7 +54,7 @@
 ```
 请对 DocAudit 项目执行发版前全量深度审查，覆盖以下 10 个维度：
 
-1. **规则正确性**：25 条审查规则逻辑正确；检查覆盖范围无遗漏
+1. **规则正确性**：26 条审查规则逻辑正确；检查覆盖范围无遗漏
 2. **防御编程**：None/空值守卫；html.escape 全覆盖（message/context/suggestion/location/source_path/title）
 3. **安全**：完全离线保证（零网络调用、零数据上报）；路径沙箱；文件类型白名单
 4. **架构合规**：7 层单向依赖（UI→Reporter→Auditor→Engine→Converter→Model）；Config 横切层

@@ -135,3 +135,24 @@ def test_custom_threshold_config():
 def test_docx_format_supported():
     cell = TableCell(text="深底深字", row=0, col=0, fill_color="1E3A5F", font_color="1E3A5F")
     assert len(_check([cell], fmt="docx")) == 1
+
+
+def test_same_text_different_cells_not_deduped():
+    """回归: dedup 不得折叠同页同文本的不同单元格违规 (context 必须含行列坐标)。
+
+    曾出现: dedup_key = type|rule_id|page|context哈希, 同文本单元格被合并为一条,
+    location 只指向第一个单元格, 其余同类违规从报告消失。
+    """
+    c1 = TableCell(text="待确认", row=0, col=0, fill_color="1E3A5F", font_color="1E3A5F")
+    c2 = TableCell(text="待确认", row=1, col=0, fill_color="1E3A5F", font_color="1E3A5F")
+    doc, page = _make_doc([c1, c2])
+
+    auditor = FormatAuditor()
+    findings = auditor.audit(doc)
+    fmt8 = [f for f in findings if f.rule_id == "FMT-008"]
+    assert len(fmt8) == 2, f"期望 2 条 FMT-008 (不同单元格), 实际 {len(fmt8)}"
+    # 每条 context 必须带各自行列, 使 dedup_key 互异
+    keys = {f.dedup_key for f in fmt8}
+    assert len(keys) == 2
+    locations = sorted(f.location for f in fmt8)
+    assert "第1行" in locations[0] and "第2行" in locations[1]
