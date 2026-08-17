@@ -41,6 +41,7 @@
 | FMT-001 | format | 正文字体统一 |
 | FMT-002 | format | 正文字号范围 |
 | FMT-003 | format | 标题字体统一 |
+| FMT-008 | format | 表格底色 vs 字体色 WCAG 对比度 (深底浅字/浅底深字) |
 | CON-001 | factual | 日期格式一致 |
 | CON-002 | factual | 数字单位一致 |
 | LANG-001 | language | 术语白名单 (TERM-{category}) |
@@ -97,7 +98,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 
 ## 4. 质量规格
 
-### 4.1 测试体系（139 个用例）
+### 4.1 测试体系（158 个用例）
 
 | 文件 | 内容 |
 |------|------|

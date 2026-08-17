@@ -67,7 +67,7 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (按页+字体聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |
@@ -79,6 +79,8 @@
 | `_check_per_page_char_limit` | `(page: Page, doc: Document)` | FMT-003 | 单页文本量上限 |
 | `_check_empty_placeholders` | `(page: Page, doc: Document)` | FMT-006 | 空白占位符检测 (PPTX only) |
 | `_check_bullet_consistency` | `(page: Page, doc: Document)` | FMT-007 | 项目符号样式一致性 |
+| `_check_table_contrast` | `(page: Page, doc: Document)` | FMT-008 | 表格底色 vs 字体色 WCAG 对比度 (PPTX/DOCX) |
+| `_hex_to_rgb` / `_relative_luminance` / `_contrast_ratio` | 模块级纯函数 | — | WCAG 对比度计算 (FMT-008) |
 
 ### LanguageAuditor `src/auditors/language.py`
 
@@ -134,6 +136,7 @@
 | `per_page_char_limit` | fa | `_check_per_page_char_limit` | ✓ | ✗ |
 | `empty_placeholder` | fa | `_check_empty_placeholders` | ✓ | ✓ |
 | `bullet_consistency` | fa | `_check_bullet_consistency` | ✓ | ✗ |
+| `table_contrast` | fa | `_check_table_contrast` | ✓ | ✗ |
 | `slide_structure_consistency` | sa | `_check_slide_structure_consistency` | ✗ | ✓ |
 | `title_length` | sa | `_check_title_length` | ✗ | ✗ |
 
@@ -251,6 +254,17 @@
 | `image_blob` / `image_ext` | `bytes \| None` / `str \| None` | 图片数据 |
 | `chart_type` / `chart_data` | `str \| None` / `dict \| None` | 图表数据 |
 | `iter_flat()` | 生成器 | 递归展开自身 + 所有子孙 |
+
+### TableCell `src/models/document.py`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | `str` | 单元格文本 |
+| `row` / `col` | `int` | 行/列索引 (0-based) |
+| `rowspan` / `colspan` | `int` | 合并单元格跨度 (默认 1) |
+| `font_name` / `font_size` | `str \| None` / `float \| None` | 首 run 字体信息 (FMT-008 大字判定依据) |
+| `fill_color` | `str \| None` | 单元格底色 hex RGB (e.g. "1E3A5F")；无填充/渐变/主题色为 None |
+| `font_color` | `str \| None` | 首 run 字体色 hex RGB (e.g. "FFFFFF")；未提取到为 None |
 
 ### AuditFinding `src/models/finding.py`
 

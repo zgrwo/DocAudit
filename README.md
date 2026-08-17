@@ -217,7 +217,7 @@ for f in findings:
 | 类别 | 规则 | 示例 |
 |------|------|------|
 | **结构** (8条) | STR-001~008 | 标题页、编号连续、层级递进、标题长度/重复/标点、图表格式、结构一致性 |
-| **格式** (7条) | FMT-001~007 | 字体、字号、文本密度、段落长度、溢出、占位符、项目符号 |
+| **格式** (8条) | FMT-001~008 | 字体、字号、文本密度、段落长度、溢出、占位符、项目符号、表格对比度 |
 | **术语** (3条) | TERM-001~003 | 先进封装术语、硅通孔术语、中英混排 (regex 驱动) |
 | **内容** (7条) | CON-001~004 + 子规则 | 数值一致性、必含章节、缩写定义 + 生命周期管理、每页结论 |
 
@@ -258,7 +258,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **139 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
+- **158 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
 - **黄金测试**：CLI = Web UI = Python API 三路径一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）

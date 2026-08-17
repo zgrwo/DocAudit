@@ -43,6 +43,7 @@ class CustomRulesAuditor(BaseAuditor):
         "empty_placeholder":                ("fa",  "_check_empty_placeholders",        True, True),
         "bullet_consistency":               ("fa",  "_check_bullet_consistency",         True, False),
         "per_page_char_limit":              ("fa",  "_check_per_page_char_limit",        True, False),
+        "table_contrast":                   ("fa",  "_check_table_contrast",             True, False),
         "slide_structure_consistency":      ("sa",  "_check_slide_structure_consistency", False, True),
         "title_length":                     ("sa",  "_check_title_length",               False, False),
     }
@@ -278,6 +279,10 @@ class CustomRulesAuditor(BaseAuditor):
                 "max_english_chars": cfg.get("max_english_chars"),
                 "max_explicit_newlines": cfg.get("max_explicit_newlines"),
                 "max_chars_per_page": cfg.get("max_chars_per_page"),
+                # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
+                "min_contrast": cfg.get("min_contrast", 4.5),
+                "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
+                "large_text_threshold": cfg.get("large_text_threshold", 18),
             })
         elif key == "fca":
             return FactualAuditor(config=cfg)

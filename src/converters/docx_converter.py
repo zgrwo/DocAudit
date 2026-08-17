@@ -226,17 +226,39 @@ class DocxConverter(BaseConverter):
                     # 提取第一个段落第一个 run 的字体信息
                     font_name = None
                     font_size = None
+                    font_color = None
                     if cell.paragraphs and cell.paragraphs[0].runs:
                         first_run = cell.paragraphs[0].runs[0]
                         font_name = first_run.font.name
                         if first_run.font.size:
                             font_size = first_run.font.size.pt
+                        try:
+                            if first_run.font.color and first_run.font.color.rgb:
+                                font_color = str(first_run.font.color.rgb)
+                        except (AttributeError, ValueError):
+                            font_color = None  # 主题色等无法取 RGB — 降级
+
+                    # 单元格底色 (w:shd w:fill 直接指定的纯色；继承样式/无底色 → None)
+                    fill_color = None
+                    try:
+                        tcPr = cell._tc.tcPr
+                        if tcPr is not None:
+                            shd = tcPr.find(qn("w:shd"))
+                            if shd is not None:
+                                fill = shd.get(qn("w:fill"))
+                                if fill and fill.lower() != "auto":
+                                    fill_color = fill.upper()
+                    except Exception:
+                        fill_color = None  # 异常 XML 结构 — 降级
+
                     cells.append(TableCell(
                         text=cell_text,
                         row=row_idx,
                         col=col_idx,
                         font_name=font_name,
                         font_size=font_size,
+                        fill_color=fill_color,
+                        font_color=font_color,
                     ))
 
             nrows = len(table.rows)

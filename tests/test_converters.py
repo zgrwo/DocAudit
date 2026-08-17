@@ -111,6 +111,43 @@ class TestDocxConverter:
         assert doc.metadata.word_count is not None
         assert doc.metadata.word_count > 0
 
+    def test_table_cell_colors_extracted(self, docx_converter, tmp_path):
+        """表格单元格: w:shd 底色 + 字体色提取 (FMT-008 数据源)"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import RGBColor
+
+        doc = DocxDocument()
+        table = doc.add_table(rows=2, cols=2)
+        # 深蓝底 + 白字
+        cell = table.cell(0, 0)
+        cell.text = "深底浅字"
+        tcPr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:fill"), "1E3A5F")
+        tcPr.append(shd)
+        cell.paragraphs[0].runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        # 无底色单元格
+        table.cell(0, 1).text = "无底色"
+
+        path = tmp_path / "table_colors.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        tables = [
+            e for p in result.pages
+            for e in p.flattened_elements
+            if e.type == "table"
+        ]
+        assert tables, "应有表格元素"
+        cells = [c for row in tables[0].tables for c in row]
+        c00 = next(c for c in cells if (c.row, c.col) == (0, 0))
+        assert c00.fill_color == "1E3A5F"
+        assert c00.font_color == "FFFFFF"
+        c01 = next(c for c in cells if (c.row, c.col) == (0, 1))
+        assert c01.fill_color is None  # 无底色 → None (不误报)
+
     def test_empty_docx_no_crash(self, docx_converter, tmp_path):
         """空 DOCX 不崩溃"""
         doc = DocxDocument()
@@ -209,3 +246,44 @@ class TestPdfConverter:
         fake.write_bytes(b"%PDF-1.4 fake content")
         with pytest.raises(ImportError, match="docling"):
             PdfConverter().convert(str(fake))
+
+
+class TestPptxConverterTableColors:
+    """PPTX 表格单元格底色/字体色提取 (FMT-008 数据源)"""
+
+    def test_table_cell_colors_extracted(self, tmp_path):
+        from pptx import Presentation
+        from pptx.dml.color import RGBColor
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        shape = slide.shapes.add_table(2, 2, Inches(1), Inches(1), Inches(4), Inches(1))
+        table = shape.table
+        # 深蓝底 + 白字
+        cell = table.cell(0, 0)
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = RGBColor(0x1E, 0x3A, 0x5F)
+        cell.text = "深底浅字"
+        cell.text_frame.paragraphs[0].runs[0].font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        # 无填充单元格
+        table.cell(0, 1).text = "无填充"
+
+        path = tmp_path / "table_colors.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        tables = [
+            e for p in doc.pages
+            for e in p.flattened_elements
+            if e.type == "table"
+        ]
+        assert tables, "应有表格元素"
+        cells = [c for row in tables[0].tables for c in row]
+        c00 = next(c for c in cells if (c.row, c.col) == (0, 0))
+        assert c00.fill_color == "1E3A5F"
+        assert c00.font_color == "FFFFFF"
+        c01 = next(c for c in cells if (c.row, c.col) == (0, 1))
+        assert c01.fill_color is None  # 无填充 → None (不误报)

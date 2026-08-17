@@ -17,6 +17,39 @@ _NUMBERED_BULLET_RE = re.compile(r"^\s*(?:\d+[\.\)]\s|\(\d+\)\s|[①②③④⑤
 _LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
 
 
+# ── WCAG 对比度 (FMT-008 表格底色 vs 字体色) ────────────────────────────
+# 纯函数，无依赖，便于单元测试与配置驱动。
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """'#RRGGBB' 或 'RRGGBB' → (r, g, b) 整数元组。非法输入抛 ValueError。"""
+    h = hex_color.strip().lstrip("#")
+    if len(h) != 6:
+        raise ValueError(f"非法颜色值: {hex_color!r} (应为 6 位 hex)")
+    try:
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    except ValueError:
+        raise ValueError(f"非法颜色值: {hex_color!r} (应为 6 位 hex)") from None
+
+
+def _relative_luminance(rgb: tuple[int, int, int]) -> float:
+    """WCAG 2.x 相对亮度 (0-1)。https://www.w3.org/TR/WCAG21/#dfn-relative-luminance"""
+
+    def channel(c: int) -> float:
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = rgb
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast_ratio(color_a: str, color_b: str) -> float:
+    """两颜色 WCAG 对比度 (1-21)。参数顺序无关。"""
+    lum_a = _relative_luminance(_hex_to_rgb(color_a))
+    lum_b = _relative_luminance(_hex_to_rgb(color_b))
+    lighter, darker = max(lum_a, lum_b), min(lum_a, lum_b)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 class FormatAuditor(BaseAuditor):
     """检查文档的格式规范"""
 
@@ -29,6 +62,9 @@ class FormatAuditor(BaseAuditor):
     DEFAULT_MAX_ENGLISH_CHARS = 300         # 单段英文字符上限 (~3行×100字符/行)
     DEFAULT_MAX_EXPLICIT_NEWLINES = 3       # 单段显式换行上限
     DEFAULT_MAX_CHARS_PER_PAGE = 200        # 单页总字数上限
+    DEFAULT_MIN_CONTRAST = 4.5              # FMT-008 正文对比度阈值 (WCAG AA)
+    DEFAULT_LARGE_TEXT_MIN_CONTRAST = 3.0   # FMT-008 大字对比度阈值 (WCAG AA 大字)
+    DEFAULT_LARGE_TEXT_THRESHOLD = 18       # FMT-008 大字字号阈值 (pt)
 
     def __init__(self, config: dict | None = None):
         super().__init__(config)
@@ -45,6 +81,20 @@ class FormatAuditor(BaseAuditor):
         self.max_english_chars = cfg.get("max_english_chars", self.DEFAULT_MAX_ENGLISH_CHARS)
         self.max_explicit_newlines = cfg.get("max_explicit_newlines", self.DEFAULT_MAX_EXPLICIT_NEWLINES)
         self.max_chars_per_page = cfg.get("max_chars_per_page", self.DEFAULT_MAX_CHARS_PER_PAGE)
+        try:
+            self.min_contrast = float(cfg.get("min_contrast", self.DEFAULT_MIN_CONTRAST))
+        except (ValueError, TypeError):
+            self.min_contrast = self.DEFAULT_MIN_CONTRAST
+        try:
+            self.large_text_min_contrast = float(
+                cfg.get("large_text_min_contrast", self.DEFAULT_LARGE_TEXT_MIN_CONTRAST))
+        except (ValueError, TypeError):
+            self.large_text_min_contrast = self.DEFAULT_LARGE_TEXT_MIN_CONTRAST
+        try:
+            self.large_text_threshold = float(
+                cfg.get("large_text_threshold", self.DEFAULT_LARGE_TEXT_THRESHOLD))
+        except (ValueError, TypeError):
+            self.large_text_threshold = self.DEFAULT_LARGE_TEXT_THRESHOLD
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
 
@@ -65,6 +115,8 @@ class FormatAuditor(BaseAuditor):
                 findings.extend(self._check_element_overflow(page, doc))
             if "per_page_char_limit" not in skip:
                 findings.extend(self._check_per_page_char_limit(page))
+            if "table_contrast" not in skip:
+                findings.extend(self._check_table_contrast(page, doc))
 
         # 全局字体统计
         findings.extend(self._check_global_font_consistency(doc))
@@ -418,6 +470,66 @@ class FormatAuditor(BaseAuditor):
                 suggestion="精简文本内容或拆分为多页，确保每页信息密度合理",
                 metadata={"total_chars": total_chars, "limit": self.max_chars_per_page},
             ))
+
+        return findings
+
+    def _check_table_contrast(self, page: Page, doc: Document | None = None) -> list[AuditFinding]:
+        """检查表格单元格底色与字体颜色对比度 (FMT-008)。
+
+        规则: 深色底色配浅色文字、浅色底色配深色文字 (WCAG AA)。
+        判定: 底色 vs 字体色对比度 < 阈值 → 违规
+          - 正文 (字号 < large_text_threshold): 4.5:1
+          - 大字 (字号 >= large_text_threshold): 3.0:1
+        降级: 底色/字体色缺失 (无填充/主题色/未提取到) 或空单元格 → 跳过，不误报。
+        doc 参数仅为 CustomRulesAuditor per-page dispatch 接口一致性保留。
+        """
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index+1} 页"
+
+        for elem in page.flattened_elements:
+            if elem.type != "table":
+                continue
+            for row in elem.tables:
+                for cell in row:
+                    text = (cell.text or "").strip()
+                    if not text:
+                        continue  # 空单元格无对比度问题
+                    if not cell.fill_color or not cell.font_color:
+                        continue  # 缺色降级: 无填充/主题色/未提取到
+                    try:
+                        ratio = _contrast_ratio(cell.fill_color, cell.font_color)
+                    except ValueError:
+                        continue  # 非法颜色值 (转换器异常数据) — 跳过
+                    if cell.font_size is not None and cell.font_size >= self.large_text_threshold:
+                        threshold = self.large_text_min_contrast
+                    else:
+                        threshold = self.min_contrast
+                    if ratio >= threshold:
+                        continue
+
+                    findings.append(AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.WARNING,
+                        message=(
+                            f"表格单元格文字与底色对比度不足: {ratio:.1f}:1 "
+                            f"(阈值 {threshold}:1)"
+                        ),
+                        rule_id="FMT-008",
+                        page_index=page.index,
+                        location=f"{page_label} [表格 第{cell.row + 1}行 第{cell.col + 1}列]",
+                        context=text[:100],
+                        suggestion=(
+                            "深色底色配浅色文字、浅色底色配深色文字，"
+                            f"确保对比度不低于 {threshold}:1"
+                        ),
+                        metadata={
+                            "cell": (cell.row, cell.col),
+                            "fill_color": cell.fill_color,
+                            "font_color": cell.font_color,
+                            "ratio": round(ratio, 2),
+                            "threshold": threshold,
+                        },
+                    ))
 
         return findings
 

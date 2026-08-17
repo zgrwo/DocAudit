@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from pptx import Presentation
+from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from src.converters.base import BaseConverter
@@ -220,11 +221,25 @@ class PptxConverter(BaseConverter):
                 # 取第一个 run 的格式作为单元格格式
                 font_name = None
                 font_size = None
+                font_color = None
                 if tf.paragraphs and tf.paragraphs[0].runs:
                     first_run = tf.paragraphs[0].runs[0]
                     font_name = first_run.font.name
                     if first_run.font.size:
                         font_size = first_run.font.size / 12700
+                    try:
+                        if first_run.font.color and first_run.font.color.rgb:
+                            font_color = _rgb_to_hex(first_run.font.color.rgb)
+                    except Exception:
+                        font_color = None  # 主题色等无法取 RGB — 降级
+
+                # 单元格底色 (仅 solid 纯色填充；渐变/图案/无填充 → None)
+                fill_color = None
+                try:
+                    if cell.fill.type == MSO_FILL_TYPE.SOLID:
+                        fill_color = _rgb_to_hex(cell.fill.fore_color.rgb)
+                except Exception:
+                    fill_color = None  # 异常填充结构 — 降级
 
                 cells.append(TableCell(
                     text=cell_text,
@@ -232,6 +247,8 @@ class PptxConverter(BaseConverter):
                     col=col_idx,
                     font_name=font_name,
                     font_size=font_size,
+                    fill_color=fill_color,
+                    font_color=font_color,
                 ))
 
         # 按行分组 (单次遍历)

@@ -41,6 +41,8 @@ class TableCell:
     colspan: int = 1
     font_name: str | None = None
     font_size: float | None = None
+    fill_color: str | None = None           # 单元格底色 hex RGB (e.g. "1E3A5F")，无填充为 None
+    font_color: str | None = None           # 首 run 字体色 hex RGB (e.g. "FFFFFF")，未提取到为 None
 
 
 @dataclass

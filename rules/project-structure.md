@@ -168,7 +168,7 @@ DocAudit/
 │   │   ├── __init__.py
 │   │   ├── base.py                  #     BaseAuditor 抽象基类
 │   │   ├── structure.py             #     StructureAuditor (STR-001~008)
-│   │   ├── format.py                #     FormatAuditor (FMT-001~007)
+│   │   ├── format.py                #     FormatAuditor (FMT-001~008)
 │   │   ├── language.py              #     LanguageAuditor (语法+术语+词汇)
 │   │   ├── factual.py               #     FactualAuditor (CON-001~003-C)
 │   │   └── custom_rules.py          #     CustomRulesAuditor (中枢路由器)
@@ -187,7 +187,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (139 用例)
+└── tests/                           # 🧪 测试 (158 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -203,6 +203,7 @@ DocAudit/
     ├── test_edge_cases.py           #     边界输入
     ├── test_language_auditor.py     #     语言审计器细节
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
+    ├── test_contrast.py              #     FMT-008 WCAG 对比度算法 + 表格检查
     └── test_check_bare_handlers.py  #     裸异常检查器门禁
 ```
 
@@ -231,7 +232,7 @@ DocAudit/
 | 文件 | 关键类 | 规则 ID | 检查数 |
 |------|--------|---------|--------|
 | `structure.py` | `StructureAuditor` | STR-001~008 | 10 |
-| `format.py` | `FormatAuditor` | FMT-001~007 | 10 |
+| `format.py` | `FormatAuditor` | FMT-001~008 | 10 |
 | `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED | 语言+术语+词汇 |
 | `factual.py` | `FactualAuditor` | CON-001~003-C | 6 |
 | `custom_rules.py` | `CustomRulesAuditor` | 路由所有 check_type | 中枢路由器 |

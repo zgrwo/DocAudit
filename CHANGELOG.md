@@ -7,20 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
-  显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
-  而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
-- 文档数字漂移：CHANGELOG 测试用例数 53 → 139（实际 11 个测试文件）
-- dependabot 锁文件 bump 引入的版本约束冲突已回退：
-  pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
-  starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
-  mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
-  mail-parser/marko/typing-inspection 五个合法 bump
-
 ### Added
 
+- **FMT-008 表格文字与底色对比度规则**：深色底色配浅色文字、浅色底色配深色文字
+  （WCAG AA，正文 4.5:1 / 大字 3:1，阈值经 rules.md 配置）；覆盖 PPTX/DOCX 原生表格，
+  仅对 solid 纯色底色判定，无填充/渐变/主题色/嵌入 Excel 降级跳过不误报；
+  `TableCell` 新增 `fill_color` / `font_color` 字段，新增 `tests/test_contrast.py`（17 用例）
 - 锁定文件 `requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`
   （由 `scripts/gen_requirements_lock.py` 生成），下载步骤按锁文件解析，版本可复现
 - `tools/check_bare_handlers.py`：AST 感知的裸异常处理器检查（CI 强制），
@@ -32,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   防 dependabot 冲突 pin 合入；锁文件为 Windows 生成契约，见 tooling-pitfalls #6b-6d）
 - 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
 - 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
+
+### Fixed
+
+- 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
+  显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
+  而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
+- 文档数字漂移：CHANGELOG 测试用例数 53 → 158（实际 12 个测试文件）
+- dependabot 锁文件 bump 引入的版本约束冲突已回退：
+  pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
+  starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
+  mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
+  mail-parser/marko/typing-inspection 五个合法 bump
 
 ## [0.1.0] - 2026-07-26
 

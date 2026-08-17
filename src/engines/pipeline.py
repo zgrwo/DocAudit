@@ -95,7 +95,10 @@ def build_auditors(rules_path: str, glossary_dir: str, vocab_dir: str | None = N
         "max_english_chars": config.get("max_english_chars", 300),
         "max_explicit_newlines": config.get("max_explicit_newlines", 3),
         "max_chars_per_page": config.get("max_chars_per_page", 200),
-        "_skip_checks": ["element_overflow", "per_page_char_limit", "empty_placeholder", "bullet_consistency"],
+        "min_contrast": config.get("min_contrast", 4.5),
+        "large_text_min_contrast": config.get("large_text_min_contrast", 3.0),
+        "large_text_threshold": config.get("large_text_threshold", 18),
+        "_skip_checks": ["element_overflow", "per_page_char_limit", "empty_placeholder", "bullet_consistency", "table_contrast"],
     })
     language_auditor = LanguageAuditor(config={
         "glossary_dir": glossary_dir,

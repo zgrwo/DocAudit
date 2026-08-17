@@ -216,6 +216,9 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
         ],
         "max_english_words": 10,        # STR-004
         "max_chinese_chars_title": 40,  # STR-004
+        "min_contrast": 4.5,            # FMT-008 表格对比度阈值 (WCAG AA 正文)
+        "large_text_min_contrast": 3.0, # FMT-008 大字对比度阈值 (WCAG AA 大字)
+        "large_text_threshold": 18,     # FMT-008 大字字号阈值 (pt)
     }
 
     for rule in rules:
@@ -257,6 +260,26 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
                 except (ValueError, TypeError):
                     logger.warning("FMT-004 最大显式换行 值无效: %s，使用默认值 %d",
                                    rule.params.get("最大显式换行", rule.params.get("max_newlines")), config["max_explicit_newlines"])
+
+        elif rid.startswith("FMT-008"):
+            if "最小对比度" in rule.params:
+                try:
+                    config["min_contrast"] = float(rule.params["最小对比度"])
+                except (ValueError, TypeError):
+                    logger.warning("FMT-008 最小对比度 值无效: %s，使用默认值 %s",
+                                   rule.params["最小对比度"], config["min_contrast"])
+            if "大字最小对比度" in rule.params:
+                try:
+                    config["large_text_min_contrast"] = float(rule.params["大字最小对比度"])
+                except (ValueError, TypeError):
+                    logger.warning("FMT-008 大字最小对比度 值无效: %s，使用默认值 %s",
+                                   rule.params["大字最小对比度"], config["large_text_min_contrast"])
+            if "大字字号阈值" in rule.params:
+                try:
+                    config["large_text_threshold"] = float(rule.params["大字字号阈值"])
+                except (ValueError, TypeError):
+                    logger.warning("FMT-008 大字字号阈值 值无效: %s，使用默认值 %s",
+                                   rule.params["大字字号阈值"], config["large_text_threshold"])
 
         elif rid.startswith("STR-004"):
             if "最大英文词数" in rule.params:
