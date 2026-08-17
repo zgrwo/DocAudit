@@ -141,12 +141,16 @@ class CustomRulesAuditor(BaseAuditor):
                 # 规则执行失败不静默吞掉 — 生成 SYS-ERROR finding 保证 UI 可见
                 # (2026-08 全量审查: 曾仅 logger.warning, 报告"正常"完成但规则静默缺失)
                 logger.warning("规则 %s 执行失败: %s", rule.rule_id, e, exc_info=True)
+                # context 带错误摘要: 防止多条失败被 dedup_key 折叠为一条
+                # (dedup_key = type|rule_id|page|context 哈希, SYS-ERROR 固定
+                #  rule_id/page, 若 context 为 None 则全部碰撞)
                 findings.append(AuditFinding(
                     type=FindingType.CUSTOM,
                     severity=FindingSeverity.ERROR,
                     message=f"规则 '{rule.rule_id}' 执行失败: {e}",
                     rule_id="SYS-ERROR",
                     location="系统",
+                    context=str(e)[:120],
                     suggestion="请检查文档内容或规则配置",
                     metadata={"rule_id": rule.rule_id, "error": str(e)},
                 ))
@@ -191,13 +195,32 @@ class CustomRulesAuditor(BaseAuditor):
         for page in doc.pages:
             text = page.all_text
             # 仅中文页面: 页面无 CJK 字符时跳过 (如 TERM-003 中英混排规则对纯英文页无意义)
-            if rule.params.get("仅中文页面") and not any(
+            # 布尔解析统一: "false"/"0" 等字符串不得误判为真
+            if str(rule.params.get("仅中文页面", "")).lower() in ("true", "1", "yes") and not any(
                 "\u4e00" <= ch <= "\u9fff" for ch in text
             ):
                 continue
+            # 排除括号内匹配: 预计算 [（(]...[）)] 区间, 跳过区间内的命中
+            # (如 TERM-003 不应标记 'TSV (Through Silicon Via)' 中括号内的全称词)
+            paren_ranges: list[tuple[int, int]] = []
+            if str(rule.params.get("排除括号内", "")).lower() in ("true", "1", "yes"):
+                opens = [m.start() for m in re.finditer(r"[（(]", text)]
+                closes = [m.start() for m in re.finditer(r"[）)]", text)]
+                ci = 0
+                for op in opens:
+                    while ci < len(closes) and closes[ci] <= op:
+                        ci += 1
+                    if ci < len(closes):
+                        paren_ranges.append((op + 1, closes[ci]))
+                        ci += 1
             matches = list(compiled.finditer(text))
             if matches:
                 for match in matches:
+                    if any(
+                        match.start() >= lo and match.end() <= hi
+                        for lo, hi in paren_ranges
+                    ):
+                        continue  # 命中位于括号对内 (定义场景), 跳过
                     suggestions = rule.params.get("suggestion", "")
                     findings.append(AuditFinding(
                         type=FindingType.CUSTOM,
@@ -244,6 +267,17 @@ class CustomRulesAuditor(BaseAuditor):
                 " 检查 rules.md 中是否有拼写错误。",
                 check_type, rule.rule_id,
             )
+            # 与"失败可见性"哲学一致: 未知 check_type 转 SYS-ERROR, UI 可见
+            findings.append(AuditFinding(
+                type=FindingType.CUSTOM,
+                severity=FindingSeverity.ERROR,
+                message=f"规则 '{rule.rule_id}' 的 check_type '{check_type}' 未注册，检查未执行",
+                rule_id="SYS-ERROR",
+                location="系统",
+                context=f"check_type={check_type} rule_id={rule.rule_id}"[:120],
+                suggestion="检查 rules.md 中 '检查' 键的拼写是否与 _DISPATCH 表一致",
+                metadata={"rule_id": rule.rule_id, "check_type": check_type},
+            ))
 
         return findings
 

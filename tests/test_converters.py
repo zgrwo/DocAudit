@@ -237,8 +237,21 @@ class TestMarkdownConverter:
         assert "\ufeff" not in doc.all_text
 
 
+def _inject_fake_docling(monkeypatch, converter_cls) -> None:
+    """封闭式注入假 docling 模块到 sys.modules (不触发真实 import, CI 无依赖也可跑)。"""
+    import sys
+    import types
+
+    fake_pkg = types.ModuleType("docling")
+    fake_conv = types.ModuleType("docling.document_converter")
+    fake_conv.DocumentConverter = converter_cls
+    fake_pkg.document_converter = fake_conv
+    monkeypatch.setitem(sys.modules, "docling", fake_pkg)
+    monkeypatch.setitem(sys.modules, "docling.document_converter", fake_conv)
+
+
 class TestPdfConverter:
-    """PdfConverter 基本行为 (docling 可选依赖)"""
+    """PdfConverter 基本行为 (docling 可选依赖, 测试用封闭式 mock 不依赖安装)"""
 
     def test_can_handle(self):
         from src.converters.pdf_converter import PdfConverter
@@ -262,7 +275,7 @@ class TestPdfConverter:
             PdfConverter().convert(str(fake))
 
     def test_convert_positive_path_with_cells_api(self, tmp_path, monkeypatch):
-        """正路径: cells API 页面 → 文本完整保留 (docling mock)"""
+        """正路径: cells API 页面 → 文本完整保留 (docling mock, 封闭式注入不依赖安装)"""
         from src.converters.pdf_converter import PdfConverter
 
         class FakeCell:
@@ -288,9 +301,8 @@ class TestPdfConverter:
             def convert(self, path):
                 return FakeResult()
 
-        monkeypatch.setattr(
-            "docling.document_converter.DocumentConverter", FakeDoclingConverter
-        )
+        # 封闭式注入: 直接挂 sys.modules, 不 import 真实 docling (CI 无该依赖也通过)
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
         fake = tmp_path / "sample.pdf"
         fake.write_bytes(b"%PDF-1.4 fake")
 
@@ -300,14 +312,19 @@ class TestPdfConverter:
         assert "第一段文本" in doc.all_text
 
     def test_convert_positive_path_with_tables_api(self, tmp_path, monkeypatch):
-        """正路径: tables API + export_to_dataframe → table 元素 (docling mock)"""
-        import pandas as pd
-
+        """正路径: tables API + export_to_dataframe → table 元素 (docling/pandas mock 封闭)"""
         from src.converters.pdf_converter import PdfConverter
+
+        class FakeDataFrame:
+            """最小 iterrows 假实现, 避免依赖真实 pandas"""
+
+            def iterrows(self):
+                yield (0, ["表头A", "表头B"])
+                yield (1, ["值1", "值2"])
 
         class FakeTable:
             def export_to_dataframe(self):
-                return pd.DataFrame([["表头A", "表头B"], ["值1", "值2"]])
+                return FakeDataFrame()
 
         class FakePage:
             def __init__(self):
@@ -326,9 +343,12 @@ class TestPdfConverter:
             def convert(self, path):
                 return FakeResult()
 
-        monkeypatch.setattr(
-            "docling.document_converter.DocumentConverter", FakeDoclingConverter
-        )
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        # 假 pandas 模块: 让 _convert_docling_table 的 import pandas 检查通过
+        import sys
+        import types
+        monkeypatch.setitem(sys.modules, "pandas", types.ModuleType("pandas"))
+
         fake = tmp_path / "table.pdf"
         fake.write_bytes(b"%PDF-1.4 fake")
 

@@ -148,6 +148,57 @@ class TestRuleParser:
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
         assert len(finds) == 0, f"全小写功能词不应报 TERM-003, got: {finds}"
 
+    def test_term003_words_inside_parens_definition_skipped(self):
+        """TERM-003: 括号内的全称定义词不标记 (CON-003 推荐格式 'TSV (Through Silicon Via)' 不误报)"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("TSV (Through Silicon Via) 工艺用于先进封装。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"括号内全称词不应报 TERM-003, got: {finds}"
+
+    def test_term003_alphanumeric_compound_not_flagged(self):
+        """TERM-003: 字母数字复合词前缀不误报 ('CDMA2000' 不报 'CDMA', 'TSVstack' 不报 'TSV')"""
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("CDMA2000 与 TSVstack 技术对比。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"复合词前缀不应报 TERM-003, got: {finds}"
+
+    def test_unknown_check_type_becomes_sys_error(self):
+        """回归: 未知 check_type 不再静默跳过, 转 SYS-ERROR finding (拼写错误 UI 可见)"""
+        from src.engines.rule_parser import AuditRule
+        rule = AuditRule(
+            rule_id="FMT-999",
+            category="format",
+            severity="warning",
+            description="测试规则",
+            check_type="table_contras",  # 拼写错误
+            params={},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        findings = auditor._execute_rule(rule, _md_doc("测试"))
+        sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
+        assert len(sys_errors) == 1, f"未知 check_type 应产生 SYS-ERROR, got: {findings}"
+        assert "table_contras" in sys_errors[0].message
+
+    def test_only_chinese_page_false_string_not_truthy(self):
+        """回归: 仅中文页面='false' (字符串) 不得误开启过滤器"""
+        from src.engines.rule_parser import AuditRule
+        rule = AuditRule(
+            rule_id="TERM-999",
+            category="terminology",
+            severity="info",
+            description="测试",
+            check_type="",
+            params={"pattern": r"[A-Z]{2,8}", "仅中文页面": "false"},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        doc = _md_doc("THIS IS ENGLISH ONLY")
+        findings = [f for f in auditor._execute_rule(rule, doc) if f.rule_id == "TERM-999"]
+        assert len(findings) >= 1, f"'false' 不应开启仅中文页面过滤, got: {findings}"
+
     def test_dispatch_exception_becomes_sys_error_finding(self, monkeypatch):
         """回归: 单条规则执行异常不再静默吞掉, 转为 SYS-ERROR finding (UI 可见)"""
         from src.auditors.format import FormatAuditor
@@ -163,6 +214,30 @@ class TestRuleParser:
         assert len(sys_errors) >= 1, "规则执行异常应产生 SYS-ERROR finding"
         assert "bullet_consistency" in (sys_errors[0].metadata or {}).get("rule_id", "") or \
             "模拟 dispatch" in sys_errors[0].message
+
+    def test_multiple_sys_errors_not_deduped(self, monkeypatch):
+        """回归: 多条规则同时失败时 SYS-ERROR 不得被 deduplicate 折叠为一条"""
+        from src.auditors.factual import FactualAuditor
+        from src.auditors.format import FormatAuditor
+        from src.models.finding import AuditFinding
+
+        def boom_fmt(self, page, doc):
+            raise RuntimeError("FMT 崩溃")
+
+        def boom_fca(self, doc):
+            raise RuntimeError("FCA 崩溃")
+
+        monkeypatch.setattr(FormatAuditor, "_check_bullet_consistency", boom_fmt)
+        monkeypatch.setattr(FactualAuditor, "_check_numeric_consistency", boom_fca)
+        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor.load_rules()
+        findings = AuditFinding.deduplicate(auditor.audit(_md_doc("测试")))
+        sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
+        assert len(sys_errors) == 2, (
+            f"两条规则失败应保留 2 条 SYS-ERROR, 实际 {len(sys_errors)}: {sys_errors}"
+        )
+        msgs = " | ".join(f.message for f in sys_errors)
+        assert "FMT 崩溃" in msgs and "FCA 崩溃" in msgs, f"两条失败信息都应保留: {msgs}"
 
 
 class TestDispatchValidation:

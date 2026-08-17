@@ -295,7 +295,7 @@
 | `location` | `str \| None` | 人类可读位置 (如 "第 3 页") |
 | `metadata` | `dict` | 额外元数据 |
 | `id` | `str` | 自动生成 12 位 hex UUID |
-| `dedup_key` (属性) | `str` | 去重键: `"{type}\|{rule_id}\|{page}\|{context}"` |
+| `dedup_key` (属性) | `str` | 去重键: `"{type}\|{rule_id}\|{page}\|{context 前 120 字符的 md5 哈希}"` |
 | `to_dict()` | `dict` | 序列化 |
 | `from_dict(data)` (classmethod) | `AuditFinding` | 反序列化 |
 | `deduplicate(findings)` (static) | `list[AuditFinding]` | 去重 (保留最高严重度) |

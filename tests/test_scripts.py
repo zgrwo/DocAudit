@@ -90,6 +90,16 @@ def test_download_commands_fallback_without_lockfile(tmp_path):
     assert "--dry-run" in check and "--no-index" in check
 
 
+def test_install_upgrade_command_is_offline():
+    """回归: 离线安装的 pip 升级必须 --no-index (完全离线红线, 曾联网尝试)"""
+    packages = Path("fake/packages")
+    cmd = setup_offline._install_upgrade_command("venv-python", packages)
+    assert cmd[0] == "venv-python" and "-m" in cmd and "pip" in cmd
+    assert "--upgrade" in cmd and "pip" in cmd
+    assert "--no-index" in cmd
+    assert f"--find-links={packages}" in cmd
+
+
 # ── gen_requirements_lock.py ──────────────────────────────────────────────
 
 def test_parse_would_install():

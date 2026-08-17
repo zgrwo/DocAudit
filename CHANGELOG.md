@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **第二轮 max level 全量审查修复批次**（2026-08，HEAD d0637ff 复审）：
+  - PDF mock 测试封闭化（sys.modules 注入假 docling/pandas，CI 无 pdf extra 也通过；
+    原实现依赖真实安装，CI 必红）
+  - SYS-ERROR 多条失败不再被 deduplicate 折叠（context 带错误摘要进 dedup_key）
+  - STR-002 章节式编号（图1-1/表2-2）不再误报"编号重复"
+  - TERM-003 边界收紧：字母数字复合词前缀（CDMA2000/TSVstack）不误报；
+    括号内全称定义词（TSV (Through Silicon Via)）不误报；仅中文页面参数
+    布尔解析统一（"false" 字符串不再误判为真）
+  - 未知 check_type 转 SYS-ERROR finding（rules.md 拼写错误 UI 可见）
+  - setup_offline 离线 pip 升级命令提为纯函数 + 回归测试
+  - api-reference dedup_key 描述修正；code-review-prompt 测试数同步
+
 - **两轮 max level 审查（diff + 全量）修复批次**（2026-08，code-review-prompt + deep-code-review 模板）：
   - STR-003 页首标题不再误报跳级（按标题分页的 MD/DOCX 每页页首 H2/H3 曾必报假阳性）
   - TERM-003 中英混排规则降噪：纯英文页跳过 + 仅标记术语特征（全大写缩写/首字母大写词）+
@@ -27,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 离线安装：`setup_offline` 下载步骤不再产出"装不上的 packages/" —
   显式补下载构建依赖 `setuptools` / `wheel`（`pip download` 不会保存它们，
   而离线安装本地项目必需），并新增下载后 dry-run 自检，在联网端拦截不完整包集
-- 文档数字漂移：CHANGELOG 测试用例数 53 → 181（实际 12 个测试文件）
+- 文档数字漂移：CHANGELOG 测试用例数 53 → 189（实际 12 个测试文件）
 - dependabot 锁文件 bump 引入的版本约束冲突已回退：
   pyarrow 25（streamlit 要求 <25）、typer 0.27（docling-core 要求 <0.27）、
   starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、

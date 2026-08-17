@@ -168,9 +168,10 @@ class StructureAuditor(BaseAuditor):
         """检查图/表编号是否连续"""
         findings: list[AuditFinding] = []
 
-        # 提取所有图/表编号
+        # 提取所有图/表编号 (排除章节式编号 "图1-1": 数字后跟 [-–—]数字 跳过,
+        # 避免 "图1-1/图1-2" 被误解析为重复的 "图1")
         fig_pattern = re.compile(
-            r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)",
+            r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)(?![-–—]\d)",
             re.IGNORECASE,
         )
         all_numbers: list[tuple[int, int, str]] = []  # (page_index, number, match_text)

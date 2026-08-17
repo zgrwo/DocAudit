@@ -157,6 +157,7 @@ def run_auditors(
                 message=f"审计器 '{name}' 执行失败: {e}",
                 rule_id="SYS-ERROR",
                 location="系统",
+                context=str(e)[:120],  # 错误摘要进 dedup_key, 多条失败不折叠
                 suggestion="请检查相关依赖是否正常（如 LanguageTool 服务、Java 环境等）",
                 metadata={"auditor": name, "error": str(e)},
             ))

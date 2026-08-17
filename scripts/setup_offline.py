@@ -148,6 +148,14 @@ def _download(root, packages, extras, label, print_cmd):
     return 0
 
 
+def _install_upgrade_command(venv_py, packages):
+    """构建离线 pip 升级命令 (纯函数): 完全离线红线 — 必须 --no-index 从 packages/ 取 pip wheel。"""
+    return [
+        venv_py, "-m", "pip", "install", "--upgrade", "pip", "-q",
+        "--no-index", f"--find-links={packages}",
+    ]
+
+
 def _install(root, packages, extras, label, print_cmd):
     if not packages.exists():
         print("[错误] packages/ 文件夹不存在，请先在有网机器上运行:")
@@ -167,10 +175,7 @@ def _install(root, packages, extras, label, print_cmd):
     print(f"[1/2] 从本地 packages/ 安装依赖 profile={label}...")
     # pip 升级必须离线 (完全离线红线): 从 packages/ 找 pip wheel,
     # 找不到时跳过升级并继续 (现有 pip 可用)
-    upg = [
-        venv_py, "-m", "pip", "install", "--upgrade", "pip", "-q",
-        "--no-index", f"--find-links={packages}",
-    ]
+    upg = _install_upgrade_command(venv_py, packages)
     inst = [
         venv_py, "-m", "pip", "install",
         "--no-index", f"--find-links={packages}", f"{root}{extras}",

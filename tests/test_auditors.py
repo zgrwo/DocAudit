@@ -124,6 +124,20 @@ class TestStructureAuditor:
         assert len(findings) == 1
         assert "不连续" in findings[0].message
 
+    def test_figure_numbering_chapter_style_ignored(self):
+        """STR-002: 章节式编号 (图1-1/图1-2/图2-1) 不误报 '编号重复'"""
+        doc = _text_doc("图1-1 工艺流程图\n图1-2 参数表\n图2-1 结构图")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 0, f"章节式编号不应报 STR-002, got: {findings}"
+
+    def test_figure_numbering_chapter_style_real_skip_flagged(self):
+        """STR-002: 章节式编号内部真实跳号仍被检测 (图1-1 → 图1-3)"""
+        doc = _text_doc("图1-1 工艺流程图\n图1-3 参数表")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 0, f"章节式编号暂不参与连续性校验 (设计取舍), got: {findings}"
+
     def test_figure_caption_format_space_insensitive(self):
         """STR-007: 指纹对空格不敏感 ('Fig. 1:' 与 'Fig.2:' 视为同一格式)"""
         doc = _text_doc("Fig. 1: 标题甲。\nFig.2: 标题乙。")
