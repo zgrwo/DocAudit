@@ -51,8 +51,12 @@ logs/
 # Cache
 .docaudit_cache.json
 
-# Qoder harness 生成的审查报告（平台资产 skills/ 除外）
+# Qoder 平台本地资产: skills/ 入库 (平台注册机制), 其余 (prompts/审查报告) 不入库
 .qoder/better-harness/
+.qoder/prompts/
+
+# Claude Code 本地配置 (含本机路径白名单, 不入库)
+.claude/
 
 # LanguageTool ngrams 数据（docker-compose 挂载）
 languagetool-data/

@@ -11,7 +11,7 @@
 | `rules/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
 | `rules/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
 | `rules/project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
-| `rules/code-review-prompt.md` | AI 审查 | "如何系统性审查？" | 审查维度演进 |
+| `.qoder/prompts/code-review-prompt.md` | AI 审查 | "如何系统性审查？" | 审查维度演进 (平台本地资产, 不入库) |
 | `skills/*.md` | AI 编码 | "Python 有什么陷阱？" | 发现新陷阱 |
 
 ## 禁止事项

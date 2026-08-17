@@ -100,7 +100,6 @@ DocAudit/
 │   ├── api-reference.md             #   函数签名速查 — 唯一信源
 │   ├── user-manual.md               #   用户手册 — 场景驱动配方
 │   ├── refactoring-plan.md          #   重构计划
-│   ├── code-review-prompt.md        #   深度代码审查 Prompt
 │   ├── documentation.md             #   文档职责规范
 │   ├── tooling-pitfalls.md          #   工具/脚本坑位清单 (cmd/bat/pip/git)
 │   └── falsy-pitfalls.md            #   Python falsy 值误判检查清单
@@ -109,8 +108,12 @@ DocAudit/
 │   ├── python-SKILL.md              #   Python 开发规范
 │   ├── refactoring-guardian.md      #   重构守卫专家
 │   ├── architecture-reviewer.md     #   架构审查专家
-│   ├── project-plan-review.md       #   规划评审专家
-│   └── deep-code-review.prompt.md   #   深度审查 Prompt 模板
+│   └── project-plan-review.md       #   规划评审专家
+│
+├── .qoder/                          # 🤖 Qoder 平台目录 (skills/ 入库, 其余不入库)
+│   ├── skills/                      #   平台注册 Skill (入库, 与 skills/ 源同步)
+│   ├── prompts/                     #   Prompt 源文件 (不入库: code-review/deep-code-review)
+│   └── better-harness/              #   审查报告生成物 (不入库)
 │
 ├── tools/                           # 🔧 CI 门禁工具
 │   ├── check_bare_handlers.py       #   裸异常处理器检查 (AST 感知)

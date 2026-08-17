@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **5S 整理：Prompt/审查报告归位 .qoder（平台本地资产，不入库）**：
+  - `rules/code-review-prompt.md`、`skills/deep-code-review.prompt.md` 移至
+    `.qoder/prompts/`（git rm --cached + gitignore；prompt 修改后同步 `.qoder/skills/` 注册副本）
+  - `.claude/` 本地配置加入 gitignore（本机路径白名单不入库）
+  - 文档引用同步（AGENTS/CLAUDE/documentation/project-structure），check_doc_numbers 白名单移除已迁移文件
 - **第二轮 max level 全量审查修复批次**（2026-08，HEAD d0637ff 复审）：
   - PDF mock 测试封闭化（sys.modules 注入假 docling/pandas，CI 无 pdf extra 也通过；
     原实现依赖真实安装，CI 必红）

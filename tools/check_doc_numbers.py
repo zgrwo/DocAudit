@@ -32,7 +32,6 @@ CHECKED_FILES = [
     "rules/api-reference.md",
     "rules/project-structure.md",
     "rules/specification.md",
-    "rules/code-review-prompt.md",
     "CHANGELOG.md",  # 仅 Unreleased 区 (历史区在 extract 时截断)
 ]
 

@@ -44,13 +44,13 @@
 ## 技能加载
 
 > 以下 Skill 已注册为平台资产（`.qoder/skills/`），代理可通过平台机制自动发现和加载。
-> 规范源文件保留在 `skills/` 目录，修改后需同步到 `.qoder/skills/`。
+> Prompt 源文件保留在 `.qoder/prompts/`（平台本地资产，不入库），修改后需同步到 `.qoder/skills/` 注册副本。
 
 | 范围 | Skill | 内容 |
 | :--- | :--- | :--- |
 | 编写/审查 Python 代码 | `python` | 编码规范、陷阱 |
 | 新增/修改审查规则 | `rules.md` | 规则声明格式 |
-| 深度审查 | `deep-code-review` | 审查 Prompt 模板 |
+| 深度审查 | `deep-code-review` | 审查 Prompt 模板（源: `.qoder/prompts/deep-code-review.prompt.md`） |
 
 ### 专家 Skill（重构生命周期）
 
@@ -75,6 +75,7 @@
 
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
+- [ ] `.qoder/prompts/`、`.qoder/better-harness/` 是平台本地资产（不入库）；prompt 修改后需同步 `.qoder/skills/` 注册副本
 - [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（200 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
@@ -281,8 +282,8 @@ DocAudit/
 | [context.md](rules/context.md) | 术语表 |
 | [project-structure.md](rules/project-structure.md) | 结构地图 |
 | [documentation.md](rules/documentation.md) | 文档职责 |
-| [code-review-prompt.md](rules/code-review-prompt.md) | 审查模板 |
-| [deep-code-review.prompt.md](skills/deep-code-review.prompt.md) | 深度审查 Prompt |
+| [code-review-prompt.md](.qoder/prompts/code-review-prompt.md) | 审查模板（平台本地资产，不入库） |
+| [deep-code-review.prompt.md](.qoder/prompts/deep-code-review.prompt.md) | 深度审查 Prompt（平台本地资产，不入库） |
 | [refactoring-plan.md](rules/refactoring-plan.md) | 重构计划 |
 | [tooling-pitfalls.md](rules/tooling-pitfalls.md) | 工具/脚本坑位清单 |
 | [falsy-pitfalls.md](rules/falsy-pitfalls.md) | Python falsy 值误判清单 |
