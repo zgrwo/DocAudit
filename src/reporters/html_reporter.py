@@ -18,6 +18,7 @@ def generate_html_report(
     title: str = "文档审查报告",
     output_path: str | Path | None = None,
     file_label: str | None = None,
+    page_count: int | None = None,
 ) -> str:
     """生成独立 HTML 审查报告。
 
@@ -28,6 +29,8 @@ def generate_html_report(
         output_path: 可选输出文件路径 (与 JSON reporter API 对称)
         file_label: 可选文件来源标签 (批量模式传 "批量 N 个文件"，
                     避免头部只显示第一个文件的路径误导)
+        page_count: 可选总页数覆盖 (批量模式传聚合页数 sum(len(d.pages))；
+                    None 时保持现状取 len(doc.pages)，向后兼容)
     """
 
     # 按严重度统计
@@ -42,6 +45,9 @@ def generate_html_report(
         type_counts[type_name] = type_counts.get(type_name, 0) + 1
 
     findings_html = _render_findings(findings, doc)
+
+    # P6: page_count 覆盖总页数 (批量模式传聚合页数)，None 时保持现状取 len(doc.pages)
+    total_pages = len(doc.pages) if page_count is None else page_count
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -84,7 +90,7 @@ def generate_html_report(
 <div class="container">
     <div class="header">
         <h1>📄 {escape(title)}</h1>
-        <p>文件: {escape(file_label or doc.source_path)} | 格式: {escape(doc.format.upper())} | 共 {len(doc.pages)} 页</p>
+        <p>文件: {escape(file_label or doc.source_path)} | 格式: {escape(doc.format.upper())} | 共 {total_pages} 页</p>
         <p>审查时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
     </div>
 

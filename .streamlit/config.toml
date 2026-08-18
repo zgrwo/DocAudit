@@ -6,6 +6,8 @@ textColor = "#262730"
 font = "sans serif"
 
 [server]
+# 安全红线: 仅绑定本机回环地址，禁止默认 0.0.0.0 未认证暴露到内网
+address = "localhost"
 port = 8501
 headless = true
 enableCORS = false

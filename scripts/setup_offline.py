@@ -7,6 +7,7 @@
 profile: core（默认）| pdf | full
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,8 +37,18 @@ PROFILES = {
 }
 
 
+def ensure_offline_env() -> None:
+    """设置离线红线环境变量 HF_HUB_OFFLINE=1（未设置时）。
+
+    防止 docling 等组件首次运行尝试联网下载模型/词典；
+    在 main() 最先调用，使后续所有 pip 子进程继承该环境。
+    """
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+
 def main(argv):
     common.reconfigure_utf8()
+    ensure_offline_env()
     print_cmd = "--print-cmd" in argv
     args = [a for a in argv if not a.startswith("--")]
 
@@ -87,30 +98,62 @@ def _download_commands(root, packages, extras, profile):
     lock = root / f"requirements-{profile}.txt"
     if lock.exists():
         dl = [
-            sys.executable, "-m", "pip", "download",
-            "-r", str(lock), "-d", str(packages),
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            "-r",
+            str(lock),
+            "-d",
+            str(packages),
         ]
         check = [
-            sys.executable, "-m", "pip", "install",
-            "--dry-run", "--ignore-installed", "--no-index",
-            f"--find-links={packages}", "-r", str(lock), str(root),
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--dry-run",
+            "--ignore-installed",
+            "--no-index",
+            f"--find-links={packages}",
+            "-r",
+            str(lock),
+            str(root),
         ]
         warn = None
     else:
         dl = [
-            sys.executable, "-m", "pip", "download",
-            f"{root}{extras}", "-d", str(packages),
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            f"{root}{extras}",
+            "-d",
+            str(packages),
         ]
         check = [
-            sys.executable, "-m", "pip", "install",
-            "--dry-run", "--ignore-installed", "--no-index",
-            f"--find-links={packages}", f"{root}{extras}",
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--dry-run",
+            "--ignore-installed",
+            "--no-index",
+            f"--find-links={packages}",
+            f"{root}{extras}",
         ]
-        warn = (f"[警告] 未找到 requirements-{profile}.txt，"
-                "回退到 pyproject 声明解析（结果不可复现）")
+        warn = (
+            f"[警告] 未找到 requirements-{profile}.txt，回退到 pyproject 声明解析（结果不可复现）"
+        )
     build = [
-        sys.executable, "-m", "pip", "download",
-        "setuptools", "wheel", "-d", str(packages),
+        sys.executable,
+        "-m",
+        "pip",
+        "download",
+        "setuptools",
+        "wheel",
+        "-d",
+        str(packages),
     ]
     return [dl, build, check], warn
 
@@ -130,8 +173,10 @@ def _download(root, packages, extras, label, print_cmd):
     for idx, cmd in enumerate(commands, start=1):
         if common.run(cmd, cwd=root) != 0:
             if idx == 3:
-                print("[错误] 离线自检失败：packages/ 不完整，"
-                      "请勿将其拷贝到离线机器（缺少 wheel 或构建依赖）")
+                print(
+                    "[错误] 离线自检失败：packages/ 不完整，"
+                    "请勿将其拷贝到离线机器（缺少 wheel 或构建依赖）"
+                )
             else:
                 print("[错误] 下载失败，请检查网络连接")
             return 1
@@ -151,8 +196,15 @@ def _download(root, packages, extras, label, print_cmd):
 def _install_upgrade_command(venv_py, packages):
     """构建离线 pip 升级命令 (纯函数): 完全离线红线 — 必须 --no-index 从 packages/ 取 pip wheel。"""
     return [
-        venv_py, "-m", "pip", "install", "--upgrade", "pip", "-q",
-        "--no-index", f"--find-links={packages}",
+        venv_py,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "pip",
+        "-q",
+        "--no-index",
+        f"--find-links={packages}",
     ]
 
 
@@ -177,8 +229,13 @@ def _install(root, packages, extras, label, print_cmd):
     # 找不到时跳过升级并继续 (现有 pip 可用)
     upg = _install_upgrade_command(venv_py, packages)
     inst = [
-        venv_py, "-m", "pip", "install",
-        "--no-index", f"--find-links={packages}", f"{root}{extras}",
+        venv_py,
+        "-m",
+        "pip",
+        "install",
+        "--no-index",
+        f"--find-links={packages}",
+        f"{root}{extras}",
     ]
     if print_cmd:
         print("将执行:")
@@ -193,7 +250,8 @@ def _install(root, packages, extras, label, print_cmd):
 
     print("[2/2] 验证安装...")
     verify = [
-        venv_py, "-c",
+        venv_py,
+        "-c",
         "import streamlit; from src.converters import PptxConverter; "
         "from src.auditors import StructureAuditor; print('        核心模块导入成功')",
     ]

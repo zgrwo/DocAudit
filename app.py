@@ -24,36 +24,42 @@ from src.reporters.html_reporter import generate_html_report
 from src.reporters.json_reporter import generate_json_report
 
 
-def _apply_filters(findings: list[AuditFinding]) -> list[AuditFinding]:
-    """根据 session_state 中的过滤器设置，返回过滤后的 findings 列表。"""
+def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFinding]:
+    """根据会话状态中的过滤器设置，返回过滤后的 findings 列表。
+
+    state: 可选状态字典 (便于单测)；为 None 时读取 st.session_state。
+    """
+    ss = st.session_state if state is None else state
+
     # 严重度过滤
     severity_active = []
-    if st.session_state.get("filter_error", True):
+    if ss.get("filter_error", True):
         severity_active.append(FindingSeverity.ERROR)
-    if st.session_state.get("filter_warning", True):
+    if ss.get("filter_warning", True):
         severity_active.append(FindingSeverity.WARNING)
-    if st.session_state.get("filter_info", False):
+    if ss.get("filter_info", False):
         severity_active.append(FindingSeverity.INFO)
 
     # 规则豁免
-    excluded_rules = set(st.session_state.get("excluded_rules", []))
+    excluded_rules = set(ss.get("excluded_rules", []))
 
     # 页面豁免
-    excluded_page_labels = st.session_state.get("excluded_pages", [])
+    excluded_page_labels = ss.get("excluded_pages", [])
     excluded_page_nums = set()
     for label in excluded_page_labels:
-        m = re.search(r'\d+', label)
+        m = re.search(r"\d+", label)
         if m:
             excluded_page_nums.add(int(m.group()))
 
     # 单条豁免
-    exempted_ids = st.session_state.get("exempted_finding_ids", set())
+    exempted_ids = ss.get("exempted_finding_ids", set())
 
     # 类型过滤
-    type_filter = st.session_state.get("filter_types", [])
+    type_filter = ss.get("filter_types", [])
 
     return [
-        f for f in findings
+        f
+        for f in findings
         if f.severity in severity_active
         and (not type_filter or f.type.value in type_filter)
         and (f.rule_id not in excluded_rules)
@@ -91,11 +97,8 @@ if "batch_docs" not in st.session_state:
 if "batch_findings" not in st.session_state:
     st.session_state.batch_findings = {}  # filename → list[findings]
 
-# ── 预计算过滤结果 (sidebar + main area 共享，避免双次计算) ──
-if st.session_state.get("findings"):
-    _filtered_cache = _apply_filters(st.session_state.findings)
-else:
-    _filtered_cache = []
+# 注: 过滤结果在 sidebar 过滤器 widget 渲染完成后计算并存入 session_state["_filtered_cache"]
+# (P5 修复: 预计算会导致 checkbox 勾选"滞后一拍"，主区显示旧结果)
 
 
 def convert_file(uploaded_file) -> Document | None:
@@ -113,6 +116,7 @@ def convert_file(uploaded_file) -> Document | None:
     except Exception as e:
         st.error(f"转换失败: {e}")
         import traceback
+
         st.code(traceback.format_exc())
         return None
     finally:
@@ -129,15 +133,19 @@ def convert_file_path(file_path: str | Path) -> Document | None:
 
 
 def scan_folder(folder_path: str) -> list[Path]:
-    """扫描文件夹，返回所有支持的文件路径。"""
+    """扫描文件夹，返回所有支持的文件路径。
+
+    安全 (路径沙箱): 拒绝包含 ".." 路径段 (Path.parts 判断) 与非目录路径；
+    仅扫描单层，不递归子目录。
+    """
     from src.engines.pipeline import SUPPORTED_EXTENSIONS
+
     folder = Path(folder_path)
-    if not folder.is_dir():
+    if ".." in folder.parts or not folder.is_dir():
         return []
     # 先过滤再排序，避免对非文档条目排序
     files = sorted(
-        f for f in folder.iterdir()
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
     )
     return files
 
@@ -156,8 +164,20 @@ def _reset_batch_state() -> None:
     st.session_state.filter_types = []
 
 
+def _exempt_ids(ids) -> None:
+    """豁免指定 finding id 列表 — 整体赋值 session_state (保持一致风格，避免原地 update)。"""
+    st.session_state.exempted_finding_ids = set(
+        st.session_state.get("exempted_finding_ids", set())
+    ) | set(ids)
+
+
+@st.cache_resource(show_spinner=False)
 def _get_auditors():
-    """构建全部审计器 (app.py 和批量审查共用)。"""
+    """构建全部审计器 (app.py 和批量审查共用)。
+
+    使用 @st.cache_resource 缓存 (key 基于函数参数 rules.md/glossary/vocab 路径)，
+    避免每次 rerun 重新解析 rules.md/glossary/vocab。
+    """
     from src.engines.pipeline import build_auditors
 
     base = Path(__file__).parent
@@ -166,6 +186,22 @@ def _get_auditors():
         str(base / "glossary"),
         str(base / "vocab"),
     )
+
+
+def _batch_file_key(f, index: int, used_keys: set[str]) -> str:
+    """生成批量文件的唯一字典 key (P8 防同名覆盖)。
+
+    - Path 对象: 用完整路径 str(path)
+    - 上传文件: 用文件名，同名冲突时加序号兜底 (name#index)
+    used_keys: 已使用 key 集合 (调用方维护，用于同名检测)。
+    """
+    if hasattr(f, "getvalue"):
+        base = getattr(f, "name", f"上传文件{index + 1}")
+        key = base if base not in used_keys else f"{base}#{index + 1}"
+    else:
+        key = str(Path(f))
+    used_keys.add(key)
+    return key
 
 
 def _run_batch_audit(files: list) -> None:
@@ -177,46 +213,43 @@ def _run_batch_audit(files: list) -> None:
     progress_bar = st.empty().progress(0, "批量审查中...")
     docs = []
     all_findings_dict: dict[str, list] = {}
+    used_keys: set[str] = set()
 
     for i, f in enumerate(files):
-        # 获取文件名
-        if hasattr(f, 'name'):
-            fname = f.name
-        else:
-            fname = Path(f).name
+        # 文件唯一 key: Path 用完整路径，上传文件用 name+序号兜底 (P8 防同名覆盖)
+        fkey = _batch_file_key(f, i, used_keys)
+        display_name = Path(fkey).name
 
         progress_bar.progress(
-            (i + 0.3) / len(files),
-            f"解析: {fname} ({i+1}/{len(files)})"
+            (i + 0.3) / len(files), f"解析: {display_name} ({i + 1}/{len(files)})"
         )
 
         # 转换
         try:
-            if hasattr(f, 'getvalue'):
+            if hasattr(f, "getvalue"):
                 doc = convert_file(f)
             else:
                 doc = convert_file_path(f)
         except Exception as e:
-            st.warning(f"转换失败: {fname} — {e}")
+            st.warning(f"转换失败: {display_name} — {e}")
             continue
 
         if doc is None:
-            st.warning(f"不支持的文件: {fname}")
+            st.warning(f"不支持的文件: {display_name}")
             continue
 
         docs.append(doc)
 
         # 审查
         progress_bar.progress(
-            (i + 0.6) / len(files),
-            f"审查: {fname} ({i+1}/{len(files)})"
+            (i + 0.6) / len(files), f"审查: {display_name} ({i + 1}/{len(files)})"
         )
         try:
             findings = run_auditors(doc, auditors)
-            all_findings_dict[fname] = findings
+            all_findings_dict[fkey] = findings
         except Exception as e:
-            st.warning(f"审查失败: {fname} — {e}")
-            all_findings_dict[fname] = []
+            st.warning(f"审查失败: {display_name} — {e}")
+            all_findings_dict[fkey] = []
 
         progress_bar.progress((i + 1) / len(files))
 
@@ -227,16 +260,18 @@ def _run_batch_audit(files: list) -> None:
     # 汇总所有 findings 到一个列表（主视图使用）
     # 使用 dataclasses.replace 创建新实例，避免共享可变状态
     from dataclasses import replace as _dc_replace
+
     combined = []
-    for fname, findings in all_findings_dict.items():
+    for fkey, findings in all_findings_dict.items():
         for fd in findings:
-            new_location = f"[{fname}] {fd.location}" if fd.location else f"[{fname}]"
+            new_location = f"[{fkey}] {fd.location}" if fd.location else f"[{fkey}]"
             combined.append(_dc_replace(fd, location=new_location))
     st.session_state.findings = combined
     st.session_state.doc = docs[0] if docs else None
 
 
 # ── 审查执行 ────────────────────────────────────────────────
+
 
 def run_audit(doc: Document) -> list[AuditFinding]:
     """执行全部审查器，返回发现列表"""
@@ -247,7 +282,7 @@ def run_audit(doc: Document) -> list[AuditFinding]:
         if name == "完成":
             progress_bar.progress(1.0, "审查完成 ✓")
         else:
-            progress_bar.progress((i + 0.5) / total, f"正在执行: {name} ({i+1}/{total})")
+            progress_bar.progress((i + 0.5) / total, f"正在执行: {name} ({i + 1}/{total})")
 
     findings = run_auditors(doc, auditors, on_progress=on_progress)
     progress_bar.empty()  # 清除进度条
@@ -296,20 +331,27 @@ with st.sidebar:
             "📁 本地文件夹路径",
             placeholder="例如: D:\\docs\\reports",
             help="输入包含文档的文件夹路径，将审查其中所有支持的文件",
+            key="folder_path",
         )
         if folder_path:
-            # 安全提示: 本地离线使用，如需部署为内网服务请添加路径沙箱
-            if ".." in folder_path:
-                st.warning("路径包含 '..'，请确认要访问的目录")
-            folder_files = scan_folder(folder_path)
-            if folder_files:
-                st.caption(f"发现 {len(folder_files)} 个文件:")
-                for f in folder_files[:20]:
-                    st.caption(f"  • {f.name}")
-                if len(folder_files) > 20:
-                    st.caption(f"  ... 还有 {len(folder_files) - 20} 个")
+            # 路径沙箱: 拒绝 ".." 路径段 (Path.parts 判断，非子串判断) 与非目录路径，
+            # 防止任意路径读取 (原实现仅 warning 不阻止)
+            folder_files: list = []
+            path_obj = Path(folder_path)
+            if ".." in path_obj.parts:
+                st.error("路径包含 '..'（上层目录跳转），已阻止访问。请使用不含 '..' 的路径。")
+            elif not path_obj.is_dir():
+                st.error(f"文件夹不存在或不是目录: {folder_path}")
             else:
-                st.caption("未找到支持的文档文件")
+                folder_files = scan_folder(folder_path)
+                if folder_files:
+                    st.caption(f"发现 {len(folder_files)} 个文件:")
+                    for f in folder_files[:20]:
+                        st.caption(f"  • {f.name}")
+                    if len(folder_files) > 20:
+                        st.caption(f"  ... 还有 {len(folder_files) - 20} 个")
+                else:
+                    st.caption("未找到支持的文档文件")
 
         st.divider()
         st.caption("或")
@@ -343,7 +385,9 @@ with st.sidebar:
     if st.session_state.findings:
         st.subheader("📊 审查结果")
         errors = sum(1 for f in st.session_state.findings if f.severity == FindingSeverity.ERROR)
-        warnings = sum(1 for f in st.session_state.findings if f.severity == FindingSeverity.WARNING)
+        warnings = sum(
+            1 for f in st.session_state.findings if f.severity == FindingSeverity.WARNING
+        )
         infos = sum(1 for f in st.session_state.findings if f.severity == FindingSeverity.INFO)
 
         st.metric("🔴 严重问题", errors)
@@ -353,7 +397,7 @@ with st.sidebar:
         st.divider()
 
         st.subheader("🎛️ 过滤器")
-        # 严重度 — 即时生效 (checkbox 体验好)
+        # 严重度 — 即时生效 (checkbox 体验好)；显式 key: 用户勾选后 session_state 立即同步
         for key, label, default in [
             ("filter_error", "严重 (Error)", True),
             ("filter_warning", "警告 (Warning)", True),
@@ -361,20 +405,17 @@ with st.sidebar:
         ]:
             if key not in st.session_state:
                 st.session_state[key] = default
-            st.session_state[key] = st.checkbox(label, value=st.session_state[key])
+            st.checkbox(label, key=key)
 
         # ── 豁免设置 (表单批量提交) ──────────────────────
         st.divider()
         st.subheader("🛡️ 豁免")
         st.caption("选择后点击「应用」生效，避免反复刷新")
 
-        all_rule_ids = sorted(set(
-            f.rule_id for f in st.session_state.findings if f.rule_id
-        ))
-        all_page_nums = sorted(set(
-            (f.page_index + 1) for f in st.session_state.findings
-            if f.page_index is not None
-        ))
+        all_rule_ids = sorted(set(f.rule_id for f in st.session_state.findings if f.rule_id))
+        all_page_nums = sorted(
+            set((f.page_index + 1) for f in st.session_state.findings if f.page_index is not None)
+        )
         all_types = sorted(set(f.type.value for f in st.session_state.findings))
         page_labels = [f"第 {p} 页" for p in all_page_nums]
 
@@ -386,57 +427,65 @@ with st.sidebar:
             st.session_state.filter_types = all_types
 
         with st.form("exemption_form", clear_on_submit=False):
-            # 类型过滤
-            type_selection = st.multiselect(
+            # 显式 key (P7): 提交时自动同步 session_state，清除按钮可重置 widget 状态；
+            # 初始值由上方 state-init 经 session_state 提供 (传 default 会与 key 冲突告警)
+            st.multiselect(
                 "按类型筛选",
                 all_types,
-                default=st.session_state.filter_types,
                 placeholder="选择要显示的类型...",
+                key="filter_types",
             )
-            # 规则豁免
-            rule_selection = st.multiselect(
+            st.multiselect(
                 "排除规则",
                 all_rule_ids,
-                default=st.session_state.excluded_rules,
                 help="选中规则的结果将被隐藏",
                 placeholder="选择要排除的规则...",
+                key="excluded_rules",
             )
-            # 页面豁免
-            page_selection = st.multiselect(
+            st.multiselect(
                 "排除页面",
                 page_labels,
-                default=st.session_state.excluded_pages,
                 help="选中页面的所有问题将被隐藏",
                 placeholder="选择要排除的页面...",
+                key="excluded_pages",
             )
 
             applied = st.form_submit_button("✅ 应用过滤器", use_container_width=True)
             if applied:
-                st.session_state.filter_types = type_selection
-                st.session_state.excluded_rules = rule_selection
-                st.session_state.excluded_pages = page_selection
+                # 显式 key 的 form widget 提交时自动同步 session_state，无需手动赋值
+                # (手动赋值会触发 "cannot be modified after the widget is instantiated" 异常)
                 st.rerun()
+
+        # ── 过滤计算 (widget 渲染之后，勾选/提交立即生效；结果存 session_state 避免重复计算) ──
+        st.session_state["_filtered_cache"] = (
+            _apply_filters(st.session_state.findings) if st.session_state.get("findings") else []
+        )
 
         st.divider()
 
         # ── 下载报告 (使用当前过滤器) ──────────────────────
-        filtered_download = _filtered_cache
+        filtered_download = st.session_state.get("_filtered_cache", [])
         # 防御性守卫: doc 为 None 时跳过报告生成 (正常流不可达，防止 session_state 异常)
         if st.session_state.doc is None:
             st.warning("文档对象不可用，无法生成报告")
         else:
-            # 批量模式使用专用标题，避免仅显示第一个文件的元数据
+            # 批量模式使用聚合元数据: 页数=sum(len(d.pages))，file_label=批量汇总
+            # (P6 修复: 原实现取 docs[0] 的页数与 source，与合并 findings 不符)
             if st.session_state.get("batch_mode") and st.session_state.get("batch_docs"):
                 n_docs = len(st.session_state.batch_docs)
                 report_title = f"批量文档审查报告 ({n_docs} 个文件)"
+                page_count = sum(len(d.pages) for d in st.session_state.batch_docs)
+                file_label = f"批量 {n_docs} 个文件"
             else:
                 report_title = "文档审查报告"
+                page_count = None
+                file_label = None
             html = generate_html_report(
                 st.session_state.doc,
                 filtered_download,
                 title=report_title,
-                # 批量模式: 头部"文件:"行显示批量汇总而非首文件路径
-                file_label=report_title if st.session_state.get("batch_mode") else None,
+                file_label=file_label,
+                page_count=page_count,
             )
             st.download_button(
                 "📥 下载 HTML 报告",
@@ -459,10 +508,17 @@ with st.sidebar:
             )
 
         # ── 清除豁免 ─────────────────────────────────────
-        if st.button("🔄 清除全部豁免", use_container_width=True,
-                     help="恢复所有被豁免的规则、页面和问题"):
-            st.session_state.excluded_rules = []
-            st.session_state.excluded_pages = []
+        if st.button(
+            "🔄 清除全部豁免",
+            use_container_width=True,
+            help="恢复所有被豁免的规则、页面和问题，并重置类型筛选",
+        ):
+            # 与 _reset_batch_state 同步重置对应 session_state key (含多选 widget 显式 key)。
+            # 注意: 显式 key 的 widget 已实例化后不可用赋值重置 (会抛异常)，
+            # 改用 del 使其回落到 state-init 的默认值 (空/全部类型)。
+            for _k in ("excluded_rules", "excluded_pages", "filter_types"):
+                if _k in st.session_state:
+                    del st.session_state[_k]
             st.session_state.exempted_finding_ids = set()
             st.rerun()
 
@@ -528,8 +584,8 @@ if st.session_state.audit_run and st.session_state.doc and not st.session_state.
 if st.session_state.doc and st.session_state.findings:
     doc = st.session_state.doc
 
-    # ── 过滤逻辑 ──
-    filtered = _filtered_cache
+    # ── 过滤逻辑 (结果由 sidebar 计算并存入 session_state，P5 修复) ──
+    filtered = st.session_state.get("_filtered_cache", [])
 
     # 文档概览
     # ── 文档概览 ──
@@ -608,13 +664,15 @@ if st.session_state.doc and st.session_state.findings:
         st.subheader("📊 按文件汇总")
         batch_data = []
         for fname, findings in st.session_state.batch_findings.items():
-            batch_data.append({
-                "文件": fname,
-                "🔴 Error": sum(1 for f in findings if f.severity == FindingSeverity.ERROR),
-                "🟡 Warning": sum(1 for f in findings if f.severity == FindingSeverity.WARNING),
-                "🔵 Info": sum(1 for f in findings if f.severity == FindingSeverity.INFO),
-                "总计": len(findings),
-            })
+            batch_data.append(
+                {
+                    "文件": fname,
+                    "🔴 Error": sum(1 for f in findings if f.severity == FindingSeverity.ERROR),
+                    "🟡 Warning": sum(1 for f in findings if f.severity == FindingSeverity.WARNING),
+                    "🔵 Info": sum(1 for f in findings if f.severity == FindingSeverity.INFO),
+                    "总计": len(findings),
+                }
+            )
         if batch_data:
             st.dataframe(
                 batch_data,
@@ -636,20 +694,23 @@ if st.session_state.doc and st.session_state.findings:
 
         bc1, bc2, bc3, bc4 = st.columns(4)
         with bc1:
-            if info_ids and st.button(f"🟢 豁免全部 Info ({len(info_ids)})",
-                                       use_container_width=True):
-                st.session_state.exempted_finding_ids.update(info_ids)
+            if info_ids and st.button(
+                f"🟢 豁免全部 Info ({len(info_ids)})", use_container_width=True
+            ):
+                _exempt_ids(info_ids)
                 st.rerun()
         with bc2:
-            if warning_ids and st.button(f"🟡 豁免全部 Warning ({len(warning_ids)})",
-                                          use_container_width=True):
-                st.session_state.exempted_finding_ids.update(warning_ids)
+            if warning_ids and st.button(
+                f"🟡 豁免全部 Warning ({len(warning_ids)})", use_container_width=True
+            ):
+                _exempt_ids(warning_ids)
                 st.rerun()
         with bc3:
             all_visible = [f.id for f in filtered]
-            if all_visible and st.button(f"📋 豁免全部可见 ({len(all_visible)})",
-                                          use_container_width=True):
-                st.session_state.exempted_finding_ids.update(all_visible)
+            if all_visible and st.button(
+                f"📋 豁免全部可见 ({len(all_visible)})", use_container_width=True
+            ):
+                _exempt_ids(all_visible)
                 st.rerun()
         with bc4:
             # 按类型批量豁免
@@ -668,7 +729,7 @@ if st.session_state.doc and st.session_state.findings:
                 chosen_type = type_choice.split(" (")[0]
                 chosen_ids = type_ids.get(chosen_type, [])
                 if chosen_ids:
-                    st.session_state.exempted_finding_ids.update(chosen_ids)
+                    _exempt_ids(chosen_ids)
                     st.rerun()
 
         # 按严重度排序: error → warning → info
@@ -680,8 +741,12 @@ if st.session_state.doc and st.session_state.findings:
                 finding.severity.value, "⚪"
             )
             type_label = {
-                "structure": "结构", "format": "格式", "language": "语言",
-                "terminology": "术语", "factual": "事实", "custom": "自定义",
+                "structure": "结构",
+                "format": "格式",
+                "language": "语言",
+                "terminology": "术语",
+                "factual": "事实",
+                "custom": "自定义",
             }.get(finding.type.value, finding.type.value)
 
             with st.expander(
@@ -703,16 +768,14 @@ if st.session_state.doc and st.session_state.findings:
                     st.caption(f"类型: {type_label}")
                     st.caption(f"严重度: {finding.severity.value}")
                     # 单条豁免按钮
-                    if st.button("🚫 豁免", key=f"exempt_{finding.id}",
-                                 help="从结果中隐藏此问题"):
-                        exempted = st.session_state.exempted_finding_ids
-                        exempted.add(finding.id)
-                        st.session_state.exempted_finding_ids = exempted
+                    if st.button("🚫 豁免", key=f"exempt_{finding.id}", help="从结果中隐藏此问题"):
+                        _exempt_ids([finding.id])
                         st.rerun()
 
         # 豁免计数（循环外统一显示一次）
         exempted_from_display = sum(
-            1 for f in st.session_state.findings
+            1
+            for f in st.session_state.findings
             if f.id in st.session_state.get("exempted_finding_ids", set())
         )
         if exempted_from_display > 0:
@@ -722,6 +785,8 @@ if st.session_state.doc and st.session_state.findings:
             )
 
     st.divider()
-    st.caption(f"审查时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-               f"格式: {doc.format.upper()} | "
-               f"工具: DocAudit v{__version__}")
+    st.caption(
+        f"审查时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"格式: {doc.format.upper()} | "
+        f"工具: DocAudit v{__version__}"
+    )
