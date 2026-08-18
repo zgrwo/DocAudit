@@ -19,14 +19,18 @@ def _make_doc(text: str, fmt: str = "pptx") -> Document:
         source_path="test.pptx",
         format=fmt,
         metadata=DocumentMetadata(),
-        pages=[Page(
-            index=0,
-            elements=[PageElement(
-                type="text_frame",
-                paragraphs=[Paragraph(text=text)],
-            )],
-            slide_number=1,
-        )],
+        pages=[
+            Page(
+                index=0,
+                elements=[
+                    PageElement(
+                        type="text_frame",
+                        paragraphs=[Paragraph(text=text)],
+                    )
+                ],
+                slide_number=1,
+            )
+        ],
     )
 
 
@@ -39,10 +43,12 @@ def auditor(tmp_path):
     (vocab_dir / "reject.txt").write_text(
         "kind of # 非正式用语\n利用 # 建议使用'使用'\n", encoding="utf-8"
     )
-    return LanguageAuditor(config={
-        "glossary_dir": None,
-        "vocab_dir": str(vocab_dir),
-    })
+    return LanguageAuditor(
+        config={
+            "glossary_dir": None,
+            "vocab_dir": str(vocab_dir),
+        }
+    )
 
 
 class TestMixedFormatting:

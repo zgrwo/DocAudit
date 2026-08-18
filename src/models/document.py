@@ -29,7 +29,9 @@ class Paragraph:
 
     text: str  # 完整文本 (拼接所有 Run)
     runs: list[Run] = field(default_factory=list)
-    level: int | None = None  # 层级 (三格式语义不同，0-based): DOCX=outlineLvl (0=H1), MD=标题深度-1 (H1→0), PPTX=缩进级别 (0=无缩进)
+    level: int | None = (
+        None  # 层级 (三格式语义不同，0-based): DOCX=outlineLvl (0=H1), MD=标题深度-1 (H1→0), PPTX=缩进级别 (0=无缩进)
+    )
     alignment: str | None = None  # "left" | "center" | "right" | "justify"
     space_before: float | None = None  # 段前间距 (pt)
     space_after: float | None = None  # 段后间距 (pt)

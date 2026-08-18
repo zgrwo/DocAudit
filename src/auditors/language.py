@@ -37,7 +37,8 @@ class LanguageAuditor(BaseAuditor):
         super().__init__(config)
         self.lt_client = LanguageToolClient(
             base_url=config.get("languagetool_url", "http://localhost:8010/v2")
-            if config else "http://localhost:8010/v2"
+            if config
+            else "http://localhost:8010/v2"
         )
         glossary_dir = config.get("glossary_dir") if config else None
         self.terminology = TerminologyChecker(glossary_dir)
@@ -54,15 +55,18 @@ class LanguageAuditor(BaseAuditor):
             if not page_text.strip():
                 continue
 
-            page_label = f"第 {page.slide_number or page.index+1} 页"
+            page_label = f"第 {page.slide_number or page.index + 1} 页"
 
             # 0. 预处理: 收集并过滤白名单术语 (便于调试 + 确认 accept.txt 功能生效)
-            page_terms = set(w.lower() for w in re.findall(r'[a-zA-Z]{3,}', page_text))
+            page_terms = set(w.lower() for w in re.findall(r"[a-zA-Z]{3,}", page_text))
             if page_terms:
                 accepted_on_page = self.vocabulary.filter_accepted(page_terms)
                 if accepted_on_page:
-                    logger.debug("第 %d 页白名单术语: %s", page.index,
-                                 ", ".join(sorted(accepted_on_page)[:10]))
+                    logger.debug(
+                        "第 %d 页白名单术语: %s",
+                        page.index,
+                        ", ".join(sorted(accepted_on_page)[:10]),
+                    )
 
             # 1. 中英混合分段检查 (LanguageTool)
             findings.extend(self._check_text(page_text, page.index, page_label))
@@ -78,20 +82,19 @@ class LanguageAuditor(BaseAuditor):
 
             # 5. 演讲者备注也检查
             if page.notes:
-                findings.extend(self.terminology.check(page.notes, page.index,
-                                                       f"{page_label} (备注)"))
+                findings.extend(
+                    self.terminology.check(page.notes, page.index, f"{page_label} (备注)")
+                )
 
         return findings
 
-    def _check_text(
-        self, text: str, page_index: int, page_label: str
-    ) -> list[AuditFinding]:
+    def _check_text(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
         """提交 LanguageTool 检查"""
         findings: list[AuditFinding] = []
 
         if not self.lt_client.is_available:
             # LanguageTool 不可用时跳过 (仅警告一次)
-            if not getattr(self, '_lt_unavailable_warned', False):
+            if not getattr(self, "_lt_unavailable_warned", False):
                 logger.warning(
                     "LanguageTool 不可用，语言检查已跳过。"
                     "安装 pyspellchecker 可启用基础检查，或启动 Docker/Java 服务获得完整功能。"
@@ -133,24 +136,26 @@ class LanguageAuditor(BaseAuditor):
                     ctx_offset = ctx.get("offset", 0)
                     ctx_length = ctx.get("length", 0)
                     if ctx_length > 0 and 0 <= ctx_offset < len(ctx_text):
-                        matched_word = ctx_text[ctx_offset:ctx_offset + ctx_length]
+                        matched_word = ctx_text[ctx_offset : ctx_offset + ctx_length]
                         if matched_word and self.vocabulary.is_accepted(matched_word):
                             continue
 
-                findings.append(AuditFinding(
-                    type=FindingType.LANGUAGE,
-                    severity=self._map_severity(rule.get("issueType", "")),
-                    message=msg,
-                    rule_id=rule.get("id", ""),
-                    page_index=page_index,
-                    location=page_label,
-                    context=context_text[:120] if context_text else None,
-                    suggestion=suggestion,
-                    metadata={
-                        "language": seg_lang,
-                        "category": rule.get("category", {}).get("id", ""),
-                    },
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.LANGUAGE,
+                        severity=self._map_severity(rule.get("issueType", "")),
+                        message=msg,
+                        rule_id=rule.get("id", ""),
+                        page_index=page_index,
+                        location=page_label,
+                        context=context_text[:120] if context_text else None,
+                        suggestion=suggestion,
+                        metadata={
+                            "language": seg_lang,
+                            "category": rule.get("category", {}).get("id", ""),
+                        },
+                    )
+                )
 
         return findings
 
@@ -192,8 +197,9 @@ class LanguageAuditor(BaseAuditor):
             segments.append((current_text, current_lang or "zh"))
 
         # 合并过短的连续同语言段
-        def _append_or_merge(buf_text: str, buf_lang: str | None,
-                             target: list[tuple[str, str]]) -> None:
+        def _append_or_merge(
+            buf_text: str, buf_lang: str | None, target: list[tuple[str, str]]
+        ) -> None:
             """短段 (len < 10) 尝试与前段合并，否则直接追加。仅同语言时合并。"""
             if len(buf_text) < 10 and target and target[-1][1] == buf_lang:
                 target[-1] = (target[-1][0] + buf_text, target[-1][1])
@@ -230,12 +236,30 @@ class LanguageAuditor(BaseAuditor):
 
         # 使用共享的预编译正则 (来自 text_utils)，避免重复编译
         checks = [
-            (LATIN_CJK_BOUNDARY, "英文和中文之间建议加空格", "FMT-MIXED-001",
-             FindingSeverity.INFO, lambda m: f"「{m.group(1)+m.group(2)}」→ 「{m.group(1)} {m.group(2)}」", 10),
-            (CJK_LATIN_BOUNDARY, "中文和英文之间建议加空格", "FMT-MIXED-002",
-             FindingSeverity.INFO, lambda m: f"「{m.group(1)+m.group(2)}」→ 「{m.group(1)} {m.group(2)}」", 10),
-            (_LATIN_CHINESE_PUNCT, "英文后不应使用中文标点符号", "FMT-MIXED-003",
-             FindingSeverity.WARNING, lambda m: f"将「{m.group(2)}」改为对应的英文标点", 5),
+            (
+                LATIN_CJK_BOUNDARY,
+                "英文和中文之间建议加空格",
+                "FMT-MIXED-001",
+                FindingSeverity.INFO,
+                lambda m: f"「{m.group(1) + m.group(2)}」→ 「{m.group(1)} {m.group(2)}」",
+                10,
+            ),
+            (
+                CJK_LATIN_BOUNDARY,
+                "中文和英文之间建议加空格",
+                "FMT-MIXED-002",
+                FindingSeverity.INFO,
+                lambda m: f"「{m.group(1) + m.group(2)}」→ 「{m.group(1)} {m.group(2)}」",
+                10,
+            ),
+            (
+                _LATIN_CHINESE_PUNCT,
+                "英文后不应使用中文标点符号",
+                "FMT-MIXED-003",
+                FindingSeverity.WARNING,
+                lambda m: f"将「{m.group(2)}」改为对应的英文标点",
+                5,
+            ),
         ]
 
         for pattern, msg, rule_id, severity, suggest_fn, ctx_radius in checks:
@@ -251,23 +275,24 @@ class LanguageAuditor(BaseAuditor):
                 continue
 
             ctx_parts = [
-                text[max(0, m.start() - ctx_radius):m.end() + ctx_radius]
-                for m in examples
+                text[max(0, m.start() - ctx_radius) : m.end() + ctx_radius] for m in examples
             ]
             suggestions = list(dict.fromkeys(suggest_fn(m) for m in examples))  # dedup
             context_text = " | ".join(ctx_parts)
 
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=severity,
-                message=f"{msg} ({total} 处)",
-                rule_id=rule_id,
-                page_index=page_index,
-                location=page_label,
-                context=context_text[:150],
-                suggestion="; ".join(suggestions[:3]),
-                metadata={"match_count": total, "rule": rule_id},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=severity,
+                    message=f"{msg} ({total} 处)",
+                    rule_id=rule_id,
+                    page_index=page_index,
+                    location=page_label,
+                    context=context_text[:150],
+                    suggestion="; ".join(suggestions[:3]),
+                    metadata={"match_count": total, "rule": rule_id},
+                )
+            )
 
         return findings
 
@@ -278,16 +303,18 @@ class LanguageAuditor(BaseAuditor):
         findings: list[AuditFinding] = []
         hits = self.vocabulary.should_reject(text)
         for word, reason in hits:
-            findings.append(AuditFinding(
-                type=FindingType.LANGUAGE,
-                severity=FindingSeverity.WARNING,
-                message=f"使用了应避免的词汇: 「{word}」— {reason}",
-                rule_id="VOCAB-REJECT",
-                page_index=page_index,
-                location=page_label,
-                context=word[:150],
-                suggestion="请使用更正式或更准确的表达",
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.LANGUAGE,
+                    severity=FindingSeverity.WARNING,
+                    message=f"使用了应避免的词汇: 「{word}」— {reason}",
+                    rule_id="VOCAB-REJECT",
+                    page_index=page_index,
+                    location=page_label,
+                    context=word[:150],
+                    suggestion="请使用更正式或更准确的表达",
+                )
+            )
         return findings
 
     def reset(self):

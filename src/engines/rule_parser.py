@@ -14,13 +14,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AuditRule:
     """单条审查规则"""
+
     rule_id: str
-    category: str                      # "structure" | "format" | "terminology" | "content"
-    severity: str                      # "error" | "warning" | "info"
+    category: str  # "structure" | "format" | "terminology" | "content"
+    severity: str  # "error" | "warning" | "info"
     description: str
-    check_type: str                    # 检查类型标识
+    check_type: str  # 检查类型标识
     params: dict[str, Any] = field(default_factory=dict)
-    raw_text: str = ""                 # 原始 Markdown 文本 (调试用)
+    raw_text: str = ""  # 原始 Markdown 文本 (调试用)
 
     def to_dict(self) -> dict:
         return {
@@ -88,14 +89,16 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
             rule_desc = m.group(2).strip()
 
             # 创建规则对象
-            rules.append(AuditRule(
-                rule_id=rule_id,
-                category=current_section,
-                severity="warning",  # 默认值，后续解析覆盖
-                description=rule_desc,
-                check_type="",
-                raw_text="",
-            ))
+            rules.append(
+                AuditRule(
+                    rule_id=rule_id,
+                    category=current_section,
+                    severity="warning",  # 默认值，后续解析覆盖
+                    description=rule_desc,
+                    check_type="",
+                    raw_text="",
+                )
+            )
             continue
 
         # 三级标题 → 子规则 (如 TERM-001: xxx)
@@ -104,14 +107,16 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
             rule_id = m.group(1).strip()
             rule_desc = m.group(2).strip()
 
-            rules.append(AuditRule(
-                rule_id=rule_id,
-                category=current_section,
-                severity="warning",
-                description=rule_desc,
-                check_type="",
-                raw_text="",
-            ))
+            rules.append(
+                AuditRule(
+                    rule_id=rule_id,
+                    category=current_section,
+                    severity="warning",
+                    description=rule_desc,
+                    check_type="",
+                    raw_text="",
+                )
+            )
             continue
 
         # 属性行 (- key: value)
@@ -139,8 +144,9 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
                 elif key == "模式" or key == "pattern":
                     # strip surrounding quotes
                     value = value.strip()
-                    if (value.startswith('"') and value.endswith('"')) or \
-                       (value.startswith("'") and value.endswith("'")):
+                    if (value.startswith('"') and value.endswith('"')) or (
+                        value.startswith("'") and value.endswith("'")
+                    ):
                         value = value[1:-1]
                     rule.params["pattern"] = value
                 elif key == "章节" or key == "sections":
@@ -211,15 +217,25 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
         "max_explicit_newlines": 3,
         "max_chars_per_page": 200,
         "conclusion_keywords": [
-            "结论", "小结", "总结", "要点", "关键", "建议", "展望",
-            "Summary", "Conclusion", "Key", "Takeaway", "Recommend",
+            "结论",
+            "小结",
+            "总结",
+            "要点",
+            "关键",
+            "建议",
+            "展望",
+            "Summary",
+            "Conclusion",
+            "Key",
+            "Takeaway",
+            "Recommend",
         ],
-        "max_english_words": 10,        # STR-004
+        "max_english_words": 10,  # STR-004
         "max_chinese_chars_title": 40,  # STR-004
-        "min_title_font_size": 28,      # STR-001 标题页大号标题文本判定阈值
-        "min_contrast": 4.5,            # FMT-008 表格对比度阈值 (WCAG AA 正文)
-        "large_text_min_contrast": 3.0, # FMT-008 大字对比度阈值 (WCAG AA 大字)
-        "large_text_threshold": 18,     # FMT-008 大字字号阈值 (pt)
+        "min_title_font_size": 28,  # STR-001 标题页大号标题文本判定阈值
+        "min_contrast": 4.5,  # FMT-008 表格对比度阈值 (WCAG AA 正文)
+        "large_text_min_contrast": 3.0,  # FMT-008 大字对比度阈值 (WCAG AA 大字)
+        "large_text_threshold": 18,  # FMT-008 大字字号阈值 (pt)
     }
 
     for rule in rules:
@@ -239,70 +255,106 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
                 try:
                     config["max_chars_per_page"] = int(rule.params["max_chars"])
                 except (ValueError, TypeError):
-                    logger.warning("FMT-003 最大字数 值无效: %s，使用默认值 %d",
-                                   rule.params["max_chars"], config["max_chars_per_page"])
+                    logger.warning(
+                        "FMT-003 最大字数 值无效: %s，使用默认值 %d",
+                        rule.params["max_chars"],
+                        config["max_chars_per_page"],
+                    )
 
         elif rid.startswith("FMT-004"):
             if "max_chinese" in rule.params or "中文上限" in rule.params:
                 try:
-                    config["max_chinese_chars"] = int(rule.params.get("中文上限", rule.params.get("max_chinese", 150)))
+                    config["max_chinese_chars"] = int(
+                        rule.params.get("中文上限", rule.params.get("max_chinese", 150))
+                    )
                 except (ValueError, TypeError):
-                    logger.warning("FMT-004 中文上限 值无效: %s，使用默认值 %d",
-                                   rule.params.get("中文上限", rule.params.get("max_chinese")), config["max_chinese_chars"])
+                    logger.warning(
+                        "FMT-004 中文上限 值无效: %s，使用默认值 %d",
+                        rule.params.get("中文上限", rule.params.get("max_chinese")),
+                        config["max_chinese_chars"],
+                    )
             if "max_english" in rule.params or "英文上限" in rule.params:
                 try:
-                    config["max_english_chars"] = int(rule.params.get("英文上限", rule.params.get("max_english", 300)))
+                    config["max_english_chars"] = int(
+                        rule.params.get("英文上限", rule.params.get("max_english", 300))
+                    )
                 except (ValueError, TypeError):
-                    logger.warning("FMT-004 英文上限 值无效: %s，使用默认值 %d",
-                                   rule.params.get("英文上限", rule.params.get("max_english")), config["max_english_chars"])
+                    logger.warning(
+                        "FMT-004 英文上限 值无效: %s，使用默认值 %d",
+                        rule.params.get("英文上限", rule.params.get("max_english")),
+                        config["max_english_chars"],
+                    )
             if "max_newlines" in rule.params or "最大显式换行" in rule.params:
                 try:
-                    config["max_explicit_newlines"] = int(rule.params.get("最大显式换行", rule.params.get("max_newlines", 3)))
+                    config["max_explicit_newlines"] = int(
+                        rule.params.get("最大显式换行", rule.params.get("max_newlines", 3))
+                    )
                 except (ValueError, TypeError):
-                    logger.warning("FMT-004 最大显式换行 值无效: %s，使用默认值 %d",
-                                   rule.params.get("最大显式换行", rule.params.get("max_newlines")), config["max_explicit_newlines"])
+                    logger.warning(
+                        "FMT-004 最大显式换行 值无效: %s，使用默认值 %d",
+                        rule.params.get("最大显式换行", rule.params.get("max_newlines")),
+                        config["max_explicit_newlines"],
+                    )
 
         elif rid.startswith("FMT-008"):
             if "最小对比度" in rule.params:
                 try:
                     config["min_contrast"] = float(rule.params["最小对比度"])
                 except (ValueError, TypeError):
-                    logger.warning("FMT-008 最小对比度 值无效: %s，使用默认值 %s",
-                                   rule.params["最小对比度"], config["min_contrast"])
+                    logger.warning(
+                        "FMT-008 最小对比度 值无效: %s，使用默认值 %s",
+                        rule.params["最小对比度"],
+                        config["min_contrast"],
+                    )
             if "大字最小对比度" in rule.params:
                 try:
                     config["large_text_min_contrast"] = float(rule.params["大字最小对比度"])
                 except (ValueError, TypeError):
-                    logger.warning("FMT-008 大字最小对比度 值无效: %s，使用默认值 %s",
-                                   rule.params["大字最小对比度"], config["large_text_min_contrast"])
+                    logger.warning(
+                        "FMT-008 大字最小对比度 值无效: %s，使用默认值 %s",
+                        rule.params["大字最小对比度"],
+                        config["large_text_min_contrast"],
+                    )
             if "大字字号阈值" in rule.params:
                 try:
                     config["large_text_threshold"] = float(rule.params["大字字号阈值"])
                 except (ValueError, TypeError):
-                    logger.warning("FMT-008 大字字号阈值 值无效: %s，使用默认值 %s",
-                                   rule.params["大字字号阈值"], config["large_text_threshold"])
+                    logger.warning(
+                        "FMT-008 大字字号阈值 值无效: %s，使用默认值 %s",
+                        rule.params["大字字号阈值"],
+                        config["large_text_threshold"],
+                    )
 
         elif rid.startswith("STR-001"):
             if "最小标题字号" in rule.params:
                 try:
                     config["min_title_font_size"] = int(rule.params["最小标题字号"])
                 except (ValueError, TypeError):
-                    logger.warning("STR-001 最小标题字号 值无效: %s，使用默认值 %s",
-                                   rule.params["最小标题字号"], config["min_title_font_size"])
+                    logger.warning(
+                        "STR-001 最小标题字号 值无效: %s，使用默认值 %s",
+                        rule.params["最小标题字号"],
+                        config["min_title_font_size"],
+                    )
 
         elif rid.startswith("STR-004"):
             if "最大英文词数" in rule.params:
                 try:
                     config["max_english_words"] = int(rule.params["最大英文词数"])
                 except (ValueError, TypeError):
-                    logger.warning("STR-004 最大英文词数 值无效: %s，使用默认值 %d",
-                                   rule.params["最大英文词数"], config["max_english_words"])
+                    logger.warning(
+                        "STR-004 最大英文词数 值无效: %s，使用默认值 %d",
+                        rule.params["最大英文词数"],
+                        config["max_english_words"],
+                    )
             if "最大中文字数" in rule.params:
                 try:
                     config["max_chinese_chars_title"] = int(rule.params["最大中文字数"])
                 except (ValueError, TypeError):
-                    logger.warning("STR-004 最大中文字数 值无效: %s，使用默认值 %d",
-                                   rule.params["最大中文字数"], config["max_chinese_chars_title"])
+                    logger.warning(
+                        "STR-004 最大中文字数 值无效: %s，使用默认值 %d",
+                        rule.params["最大中文字数"],
+                        config["max_chinese_chars_title"],
+                    )
 
         elif rid.startswith("CON-002") and "required_sections" in rule.params:
             config["required_sections"] = rule.params["required_sections"]

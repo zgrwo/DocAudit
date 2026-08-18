@@ -9,6 +9,7 @@ from typing import Any
 
 class FindingSeverity(str, Enum):
     """审查发现严重度"""
+
     ERROR = "error"
     WARNING = "warning"
     INFO = "info"
@@ -16,12 +17,13 @@ class FindingSeverity(str, Enum):
 
 class FindingType(str, Enum):
     """审查发现类型"""
-    STRUCTURE = "structure"      # 结构问题
-    FORMAT = "format"            # 格式问题
-    LANGUAGE = "language"        # 语言问题
+
+    STRUCTURE = "structure"  # 结构问题
+    FORMAT = "format"  # 格式问题
+    LANGUAGE = "language"  # 语言问题
     TERMINOLOGY = "terminology"  # 术语问题
-    FACTUAL = "factual"          # 事实精准问题
-    CUSTOM = "custom"            # 自定义规则
+    FACTUAL = "factual"  # 事实精准问题
+    CUSTOM = "custom"  # 自定义规则
 
 
 @dataclass
@@ -31,12 +33,12 @@ class AuditFinding:
     type: FindingType
     severity: FindingSeverity
     message: str
-    rule_id: str | None = None            # 规则 ID (如 "STR-001")
-    page_index: int | None = None         # 所在页/幻灯片 (0-indexed)
-    element_index: int | None = None      # 所在页内元素索引
-    context: str | None = None            # 相关原文摘录
-    suggestion: str | None = None         # 修改建议
-    location: str | None = None           # 人类可读位置描述 (如 "Slide 3, 文本框 2")
+    rule_id: str | None = None  # 规则 ID (如 "STR-001")
+    page_index: int | None = None  # 所在页/幻灯片 (0-indexed)
+    element_index: int | None = None  # 所在页内元素索引
+    context: str | None = None  # 相关原文摘录
+    suggestion: str | None = None  # 修改建议
+    location: str | None = None  # 人类可读位置描述 (如 "Slide 3, 文本框 2")
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # 内部唯一标识
@@ -77,7 +79,9 @@ class AuditFinding:
         for f in findings:
             key = f.dedup_key
             # sev_rank missing key → -1 确保未知严重度不会被错误保留
-            if key not in seen or sev_rank.get(f.severity, -1) > sev_rank.get(seen[key].severity, -1):
+            if key not in seen or sev_rank.get(f.severity, -1) > sev_rank.get(
+                seen[key].severity, -1
+            ):
                 seen[key] = f
         return list(seen.values())
 

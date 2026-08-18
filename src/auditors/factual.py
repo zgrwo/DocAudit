@@ -9,22 +9,97 @@ from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
 # 常见英语大写单词 (非技术缩写)，出现在文档中时不应标记为“未定义缩写”
-_COMMON_UPPERCASE_WORDS = frozenset({
-    # 2 字母常见词 (扩展匹配范围后需排除)
-    "OK", "AM", "PM", "GO", "DO", "IS", "IT", "WE", "HE", "MY",
-    "BY", "TO", "IF", "OR", "SO", "NO", "UP", "ON", "IN", "AT",
-    "OF", "AS", "BE", "AN", "ME", "US",
-    # 3 字母
-    "THE", "AND", "FOR", "ALL", "BUT", "NOT", "CAN", "ARE", "WAS",
-    "HAS", "HAD", "NEW", "SET", "END", "TOP", "ONE", "TWO", "VIA",
-    "MAY", "ANY", "NOW", "OUR", "USE", "GET", "LET", "SEE", "WAY",
-    # 4 字母
-    "THAT", "THIS", "THAN", "THEN", "WITH", "WHEN", "FROM", "HAVE",
-    "BEEN", "WILL", "ALSO", "USED", "EACH", "SOME", "MORE", "ONLY",
-    "VERY", "JUST", "WHAT", "WHICH", "THEIR", "THESE", "WHERE",
-    # 5+ 字母
-    "WOULD", "COULD", "SHOULD", "THERE", "THEIR", "ABOUT", "WHICH",
-})
+_COMMON_UPPERCASE_WORDS = frozenset(
+    {
+        # 2 字母常见词 (扩展匹配范围后需排除)
+        "OK",
+        "AM",
+        "PM",
+        "GO",
+        "DO",
+        "IS",
+        "IT",
+        "WE",
+        "HE",
+        "MY",
+        "BY",
+        "TO",
+        "IF",
+        "OR",
+        "SO",
+        "NO",
+        "UP",
+        "ON",
+        "IN",
+        "AT",
+        "OF",
+        "AS",
+        "BE",
+        "AN",
+        "ME",
+        "US",
+        # 3 字母
+        "THE",
+        "AND",
+        "FOR",
+        "ALL",
+        "BUT",
+        "NOT",
+        "CAN",
+        "ARE",
+        "WAS",
+        "HAS",
+        "HAD",
+        "NEW",
+        "SET",
+        "END",
+        "TOP",
+        "ONE",
+        "TWO",
+        "VIA",
+        "MAY",
+        "ANY",
+        "NOW",
+        "OUR",
+        "USE",
+        "GET",
+        "LET",
+        "SEE",
+        "WAY",
+        # 4 字母
+        "THAT",
+        "THIS",
+        "THAN",
+        "THEN",
+        "WITH",
+        "WHEN",
+        "FROM",
+        "HAVE",
+        "BEEN",
+        "WILL",
+        "ALSO",
+        "USED",
+        "EACH",
+        "SOME",
+        "MORE",
+        "ONLY",
+        "VERY",
+        "JUST",
+        "WHAT",
+        "WHICH",
+        "THEIR",
+        "THESE",
+        "WHERE",
+        # 5+ 字母
+        "WOULD",
+        "COULD",
+        "SHOULD",
+        "THERE",
+        "THEIR",
+        "ABOUT",
+        "WHICH",
+    }
+)
 
 # 数值提取正则 — 仅匹配数值+可选单位，上下文通过文本切片获取
 # 避免上下文捕获组吞噬相邻数值
@@ -103,26 +178,27 @@ class FactualAuditor(BaseAuditor):
                 # 发现不一致
                 entries_sorted = sorted(entries, key=lambda e: e["page_index"])
                 occurrences = "\n".join(
-                    f"  - 第 {e['page_number']} 页: {e['match_text']}"
-                    for e in entries_sorted
+                    f"  - 第 {e['page_number']} 页: {e['match_text']}" for e in entries_sorted
                 )
-                findings.append(AuditFinding(
-                    type=FindingType.FACTUAL,
-                    severity=FindingSeverity.ERROR,
-                    message="数值不一致: 相同指标在不同位置出现不同的数值",
-                    rule_id="CON-001",
-                    page_index=entries_sorted[0]["page_index"],
-                    location=f"第 {entries_sorted[0]['page_number']} 页等多处",
-                    context=entries_sorted[0]["context"][:100],
-                    suggestion=f"请确认正确的数值并统一修改:\n{occurrences}",
-                    metadata={
-                        "values": list(values),
-                        "occurrences": [
-                            {"page": e["page_number"], "value": e["value"]}
-                            for e in entries_sorted
-                        ],
-                    },
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.ERROR,
+                        message="数值不一致: 相同指标在不同位置出现不同的数值",
+                        rule_id="CON-001",
+                        page_index=entries_sorted[0]["page_index"],
+                        location=f"第 {entries_sorted[0]['page_number']} 页等多处",
+                        context=entries_sorted[0]["context"][:100],
+                        suggestion=f"请确认正确的数值并统一修改:\n{occurrences}",
+                        metadata={
+                            "values": list(values),
+                            "occurrences": [
+                                {"page": e["page_number"], "value": e["value"]}
+                                for e in entries_sorted
+                            ],
+                        },
+                    )
+                )
 
         return findings
 
@@ -138,8 +214,8 @@ class FactualAuditor(BaseAuditor):
                 end = m.end()
 
                 # 提取上下文 (前后各 30 字符，避免跨越其他数值)
-                prefix = text[max(0, start - 30):start].strip()
-                suffix = text[end:end + 30].strip()
+                prefix = text[max(0, start - 30) : start].strip()
+                suffix = text[end : end + 30].strip()
                 context = f"{prefix} {value_str} {suffix}"
 
                 # 页码/图表编号跳过检测: 紧邻前缀 (10 字符) + 值为纯整数
@@ -147,7 +223,7 @@ class FactualAuditor(BaseAuditor):
                 # 但 _NUMERIC_VALUE_RE 只匹配数值本身，前缀从不含数字，
                 # 导致 N 永不存在 → 页码不过滤 + 远处 "Page N" 污染后续值前缀。
                 # 新逻辑: 紧邻前缀含页码/图表关键词 + 值为无单位的纯整数 → 跳过。
-                _narrow_prefix = text[max(0, start - 10):start].lower().strip()
+                _narrow_prefix = text[max(0, start - 10) : start].lower().strip()
                 if re.match(r"^\d+$", value_str) and re.search(
                     r"(?:page|slide|fig|figure|table|tab|图|表|第)\s*\.?\s*$",
                     _narrow_prefix,
@@ -162,13 +238,15 @@ class FactualAuditor(BaseAuditor):
                 except ValueError:
                     continue
 
-                entries.append({
-                    "page_index": page.index,
-                    "page_number": page.slide_number or page.index + 1,
-                    "context": context.strip(),
-                    "value": value_float,
-                    "match_text": value_str,
-                })
+                entries.append(
+                    {
+                        "page_index": page.index,
+                        "page_number": page.slide_number or page.index + 1,
+                        "context": context.strip(),
+                        "value": value_float,
+                        "match_text": value_str,
+                    }
+                )
 
         return entries
 
@@ -208,19 +286,16 @@ class FactualAuditor(BaseAuditor):
                 abbr_end = m.end()
 
                 # 检测是否为定义位置
-                before_short = text[max(0, pos - 4):pos].strip()
+                before_short = text[max(0, pos - 4) : pos].strip()
                 is_def_before = before_short.startswith("(")
 
-                after_window = text[abbr_end:abbr_end + 80]
-                is_def_after = bool(re.match(
-                    r"[\s]*\([^)]+\)", after_window
-                ))
+                after_window = text[abbr_end : abbr_end + 80]
+                is_def_after = bool(re.match(r"[\s]*\([^)]+\)", after_window))
 
-                before_window = text[max(0, pos - 120):pos]
-                is_full_before = bool(re.search(
-                    r"\([^)]*" + re.escape(abbr) + r"[^)]*\)",
-                    before_window
-                ))
+                before_window = text[max(0, pos - 120) : pos]
+                is_full_before = bool(
+                    re.search(r"\([^)]*" + re.escape(abbr) + r"[^)]*\)", before_window)
+                )
 
                 is_defined = is_def_before or is_def_after or is_full_before
 
@@ -228,7 +303,7 @@ class FactualAuditor(BaseAuditor):
                     "page_index": page.index,
                     "page_number": page.slide_number or page.index + 1,
                     "position": pos,
-                    "context": text[max(0, pos - 20):abbr_end + 20],
+                    "context": text[max(0, pos - 20) : abbr_end + 20],
                     "is_definition": is_defined,
                 }
 
@@ -249,9 +324,7 @@ class FactualAuditor(BaseAuditor):
         for abbr, data in scan_result.items():
             data["occurrences"].sort(key=lambda o: (o["page_index"], o["position"]))
             data["first_is_definition"] = (
-                data["occurrences"][0]["is_definition"]
-                if data["occurrences"]
-                else False
+                data["occurrences"][0]["is_definition"] if data["occurrences"] else False
             )
 
         self._abbr_scan_cache = (id(doc), scan_result)
@@ -267,17 +340,19 @@ class FactualAuditor(BaseAuditor):
         for abbr, data in scan.items():
             if not data["first_is_definition"]:
                 first_occ = data["occurrences"][0]
-                findings.append(AuditFinding(
-                    type=FindingType.FACTUAL,
-                    severity=FindingSeverity.WARNING,
-                    message=f"缩写「{abbr}」首次出现时未给出全称",
-                    rule_id="CON-003",
-                    page_index=first_occ["page_index"],
-                    location=f"第 {first_occ['page_number']} 页",
-                    context=first_occ["context"][:120],
-                    suggestion=f"建议首次出现时写为「{abbr} (全称)」格式",
-                    metadata={"total_occurrences": data["total_count"]},
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.WARNING,
+                        message=f"缩写「{abbr}」首次出现时未给出全称",
+                        rule_id="CON-003",
+                        page_index=first_occ["page_index"],
+                        location=f"第 {first_occ['page_number']} 页",
+                        context=first_occ["context"][:120],
+                        suggestion=f"建议首次出现时写为「{abbr} (全称)」格式",
+                        metadata={"total_occurrences": data["total_count"]},
+                    )
+                )
 
         return findings
 
@@ -298,18 +373,22 @@ class FactualAuditor(BaseAuditor):
             # 总出现次数 <= 定义次数 → 定义后未再使用
             if data["total_count"] <= data["definition_count"]:
                 first_occ = data["occurrences"][0]
-                findings.append(AuditFinding(
-                    type=FindingType.FACTUAL,
-                    severity=FindingSeverity.INFO,
-                    message=f"缩写「{abbr}」已定义但未再次使用，定义可能是多余的",
-                    rule_id="CON-003-A",
-                    page_index=first_occ["page_index"],
-                    location=f"第 {first_occ['page_number']} 页",
-                    context=first_occ["context"][:120],
-                    suggestion="如果该缩写不再出现，可考虑移除其定义；或检查是否有遗漏的使用场景",
-                    metadata={"total_occurrences": data["total_count"],
-                              "definition_count": data["definition_count"]},
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.INFO,
+                        message=f"缩写「{abbr}」已定义但未再次使用，定义可能是多余的",
+                        rule_id="CON-003-A",
+                        page_index=first_occ["page_index"],
+                        location=f"第 {first_occ['page_number']} 页",
+                        context=first_occ["context"][:120],
+                        suggestion="如果该缩写不再出现，可考虑移除其定义；或检查是否有遗漏的使用场景",
+                        metadata={
+                            "total_occurrences": data["total_count"],
+                            "definition_count": data["definition_count"],
+                        },
+                    )
+                )
 
         return findings
 
@@ -325,21 +404,23 @@ class FactualAuditor(BaseAuditor):
             if data["definition_count"] >= 2:
                 # 找到所有定义位置
                 def_sites = [occ for occ in data["occurrences"] if occ["is_definition"]]
-                pages_str = "、".join(
-                    f"第 {occ['page_number']} 页" for occ in def_sites
+                pages_str = "、".join(f"第 {occ['page_number']} 页" for occ in def_sites)
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.WARNING,
+                        message=f"缩写「{abbr}」被重复定义了 {data['definition_count']} 次",
+                        rule_id="CON-003-B",
+                        page_index=def_sites[0]["page_index"],
+                        location=pages_str,
+                        context=def_sites[0]["context"][:120],
+                        suggestion="建议仅保留首次定义，后续出现时直接使用缩写",
+                        metadata={
+                            "definition_count": data["definition_count"],
+                            "definition_pages": [occ["page_number"] for occ in def_sites],
+                        },
+                    )
                 )
-                findings.append(AuditFinding(
-                    type=FindingType.FACTUAL,
-                    severity=FindingSeverity.WARNING,
-                    message=f"缩写「{abbr}」被重复定义了 {data['definition_count']} 次",
-                    rule_id="CON-003-B",
-                    page_index=def_sites[0]["page_index"],
-                    location=pages_str,
-                    context=def_sites[0]["context"][:120],
-                    suggestion="建议仅保留首次定义，后续出现时直接使用缩写",
-                    metadata={"definition_count": data["definition_count"],
-                              "definition_pages": [occ["page_number"] for occ in def_sites]},
-                ))
 
         return findings
 
@@ -364,17 +445,21 @@ class FactualAuditor(BaseAuditor):
                     None,
                 )
                 def_page = def_occ["page_number"] if def_occ else "?"
-                findings.append(AuditFinding(
-                    type=FindingType.FACTUAL,
-                    severity=FindingSeverity.WARNING,
-                    message=f"缩写「{abbr}」在第 {first_occ['page_number']} 页使用，但在第 {def_page} 页才给出定义",
-                    rule_id="CON-003-C",
-                    page_index=first_occ["page_index"],
-                    location=f"第 {first_occ['page_number']} 页 (使用) → 第 {def_page} 页 (定义)",
-                    context=first_occ["context"][:120],
-                    suggestion="建议将缩写定义移至首次出现处，写为「全称 (ABBR)」格式",
-                    metadata={"first_use_page": first_occ["page_number"],
-                              "definition_page": def_page},
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.WARNING,
+                        message=f"缩写「{abbr}」在第 {first_occ['page_number']} 页使用，但在第 {def_page} 页才给出定义",
+                        rule_id="CON-003-C",
+                        page_index=first_occ["page_index"],
+                        location=f"第 {first_occ['page_number']} 页 (使用) → 第 {def_page} 页 (定义)",
+                        context=first_occ["context"][:120],
+                        suggestion="建议将缩写定义移至首次出现处，写为「全称 (ABBR)」格式",
+                        metadata={
+                            "first_use_page": first_occ["page_number"],
+                            "definition_page": def_page,
+                        },
+                    )
+                )
 
         return findings

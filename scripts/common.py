@@ -45,9 +45,7 @@ def venv_python() -> Path:
 
 def run(cmd, cwd=None) -> int:
     """运行子进程并继承标准输入输出（日志与 Ctrl+C 自然生效）。"""
-    return subprocess.run(
-        [str(a) for a in cmd], cwd=str(cwd) if cwd else None
-    ).returncode
+    return subprocess.run([str(a) for a in cmd], cwd=str(cwd) if cwd else None).returncode
 
 
 def run_quiet(cmd, cwd=None) -> bool:
@@ -88,7 +86,11 @@ def _python_install_bases():
     for env in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
         base = os.environ.get(env)
         if base:
-            bases.append(Path(base) / "Programs" / "Python" if env == "LOCALAPPDATA" else Path(base) / "Python")
+            bases.append(
+                Path(base) / "Programs" / "Python"
+                if env == "LOCALAPPDATA"
+                else Path(base) / "Python"
+            )
     return bases
 
 
@@ -119,9 +121,7 @@ def find_python():
     py = shutil.which("py")
     if py:
         try:
-            r = subprocess.run(
-                [py, "--list-paths"], capture_output=True, text=True, timeout=15
-            )
+            r = subprocess.run([py, "--list-paths"], capture_output=True, text=True, timeout=15)
             out = (r.stdout or "") + (r.stderr or "")
         except Exception:
             out = ""
@@ -129,7 +129,7 @@ def find_python():
             m = re.search(r"-V:(\d+\.\d+)", line)
             if not m:
                 continue
-            path = line[m.end():].lstrip("* ").strip()
+            path = line[m.end() :].lstrip("* ").strip()
             if path:
                 consider(path, m.group(1))
 

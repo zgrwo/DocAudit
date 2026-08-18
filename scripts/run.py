@@ -30,7 +30,7 @@ def main(argv):
             print("  [X] 未找到 Python 3.10+")
             print()
             print("      请从 https://www.python.org/downloads/ 下载安装 Python 3.10+")
-            print("      安装时请勾选 \"Add Python to PATH\" 选项")
+            print('      安装时请勾选 "Add Python to PATH" 选项')
             print()
             print("      如已安装但未被检测到，请将 Python 加入系统 PATH 后重试")
             common.pause()

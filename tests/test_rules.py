@@ -8,10 +8,13 @@ from src.models.document import Document, DocumentMetadata, Page, PageElement, P
 
 def _md_doc(text: str) -> Document:
     """构造单页纯文本文档。"""
-    page = Page(index=0, slide_number=1, elements=[
-        PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
-    ])
+    page = Page(
+        index=0,
+        slide_number=1,
+        elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])],
+    )
     return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
+
 
 # StructureAuditor/FactualAuditor 的 _skip_checks 简写 → _DISPATCH check_type 反向映射
 # 单一真相来源: src/engines/pipeline.py:SKIP_TO_CHECK_TYPE (其余键名与 check_type 一致)
@@ -64,6 +67,7 @@ class TestRuleParser:
     def test_str001_malformed_min_title_font_size_falls_back(self):
         """STR-001 非整数配置值 → 回退默认值，不崩溃"""
         from src.engines.rule_parser import AuditRule
+
         rule = AuditRule(
             rule_id="STR-001",
             category="structure",
@@ -88,6 +92,7 @@ class TestRuleParser:
     def test_fmt008_malformed_contrast_falls_back(self):
         """FMT-008 非数值配置值 → 回退默认值，不崩溃"""
         from src.engines.rule_parser import AuditRule
+
         rule = AuditRule(
             rule_id="FMT-008",
             category="format",
@@ -103,6 +108,7 @@ class TestRuleParser:
     def test_str004_malformed_int_falls_back_to_default(self):
         """STR-004 非整数配置值 → 回退到默认值，不崩溃"""
         from src.engines.rule_parser import AuditRule
+
         rule = AuditRule(
             rule_id="STR-004",
             category="structure",
@@ -167,6 +173,7 @@ class TestRuleParser:
     def test_unknown_check_type_becomes_sys_error(self):
         """回归: 未知 check_type 不再静默跳过, 转 SYS-ERROR finding (拼写错误 UI 可见)"""
         from src.engines.rule_parser import AuditRule
+
         rule = AuditRule(
             rule_id="FMT-999",
             category="format",
@@ -185,6 +192,7 @@ class TestRuleParser:
     def test_only_chinese_page_false_string_not_truthy(self):
         """回归: 仅中文页面='false' (字符串) 不得误开启过滤器"""
         from src.engines.rule_parser import AuditRule
+
         rule = AuditRule(
             rule_id="TERM-999",
             category="terminology",
@@ -212,8 +220,10 @@ class TestRuleParser:
         findings = auditor.audit(_md_doc("bullet 测试"))
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
         assert len(sys_errors) >= 1, "规则执行异常应产生 SYS-ERROR finding"
-        assert "bullet_consistency" in (sys_errors[0].metadata or {}).get("rule_id", "") or \
-            "模拟 dispatch" in sys_errors[0].message
+        assert (
+            "bullet_consistency" in (sys_errors[0].metadata or {}).get("rule_id", "")
+            or "模拟 dispatch" in sys_errors[0].message
+        )
 
     def test_multiple_sys_errors_not_deduped(self, monkeypatch):
         """回归: 多条规则同时失败时 SYS-ERROR 不得被 deduplicate 折叠为一条"""
@@ -249,16 +259,20 @@ class TestDispatchValidation:
     def test_skip_checks_standalone_mode(self):
         """独立模式（无 _skip_checks 参数）→ 所有检查执行"""
         from src.auditors.structure import StructureAuditor
+
         sa = StructureAuditor(config={"required_sections": []})
         assert sa._skip_checks == set()
 
     def test_skip_checks_pipeline_mode(self):
         """流水线模式 → _skip_checks 包含 dispatched 检查"""
         from src.auditors.structure import StructureAuditor
-        sa = StructureAuditor(config={
-            "required_sections": [],
-            "_skip_checks": ["title_slide", "heading_levels"],
-        })
+
+        sa = StructureAuditor(
+            config={
+                "required_sections": [],
+                "_skip_checks": ["title_slide", "heading_levels"],
+            }
+        )
         assert "title_slide" in sa._skip_checks
         assert "heading_levels" in sa._skip_checks
 
@@ -270,10 +284,7 @@ class TestDispatchValidation:
         """
         rules = parse_rules_md("rules.md")
         declared = {r.check_type for r in rules if r.check_type}
-        missing = [
-            ct for ct in CustomRulesAuditor._DISPATCH
-            if ct not in declared
-        ]
+        missing = [ct for ct in CustomRulesAuditor._DISPATCH if ct not in declared]
         assert not missing, (
             f"以下 check_type 在 _DISPATCH 中但 rules.md 未声明 (规则静默失效风险): {missing}"
         )
@@ -310,20 +321,26 @@ class TestDispatchValidation:
         from src.engines.pipeline import build_auditors, run_auditors
         from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 
-        long_title = "这是一个非常非常长的中文标题用来测试标题长度限制规则是否会正常触发告警超过四十个字"
+        long_title = (
+            "这是一个非常非常长的中文标题用来测试标题长度限制规则是否会正常触发告警超过四十个字"
+        )
         doc = Document(
             source_path="str004_repro.pptx",
             format="pptx",
             metadata=DocumentMetadata(),
-            pages=[Page(
-                index=0,
-                slide_number=1,
-                elements=[PageElement(
-                    type="text_frame",
-                    is_title=True,
-                    paragraphs=[Paragraph(text=long_title, runs=[])],
-                )],
-            )],
+            pages=[
+                Page(
+                    index=0,
+                    slide_number=1,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            is_title=True,
+                            paragraphs=[Paragraph(text=long_title, runs=[])],
+                        )
+                    ],
+                )
+            ],
         )
         auditors = build_auditors("rules.md", "glossary", "vocab")
         findings = run_auditors(doc, auditors)

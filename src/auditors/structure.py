@@ -22,13 +22,32 @@ class StructureAuditor(BaseAuditor):
             self.keywords = cfg["keywords"]
         else:
             self.keywords = [
-                "结论", "小结", "总结", "要点", "关键", "建议", "展望",
-                "Summary", "Conclusion", "Key", "Takeaway", "Recommend",
+                "结论",
+                "小结",
+                "总结",
+                "要点",
+                "关键",
+                "建议",
+                "展望",
+                "Summary",
+                "Conclusion",
+                "Key",
+                "Takeaway",
+                "Recommend",
             ]
         # 标题页豁免版式 (默认对齐 rules.md CON-004，可配置覆盖)
-        self.exempt_layouts = cfg.get("exempt_layouts", [
-            "标题幻灯片", "Title Slide", "Title", "Titelfolie", "封面", "タイトル", "Cover",
-        ])
+        self.exempt_layouts = cfg.get(
+            "exempt_layouts",
+            [
+                "标题幻灯片",
+                "Title Slide",
+                "Title",
+                "Titelfolie",
+                "封面",
+                "タイトル",
+                "Cover",
+            ],
+        )
         # STR-004 标题长度阈值 (从 rules.md 配置，支持动态调整)
         try:
             self.max_english_words = int(cfg.get("max_english_words", 10))
@@ -106,9 +125,7 @@ class StructureAuditor(BaseAuditor):
             return findings
 
         # 方案2: 检查是否有标题占位符
-        has_title_placeholder = any(
-            elem.is_title for elem in first_page.flattened_elements
-        )
+        has_title_placeholder = any(elem.is_title for elem in first_page.flattened_elements)
         if has_title_placeholder:
             return findings
 
@@ -125,15 +142,17 @@ class StructureAuditor(BaseAuditor):
                         return findings  # 找到大号文本 = 算标题
 
         # 都没找到 → 告警 (严重度对齐 rules.md STR-001: error)
-        findings.append(AuditFinding(
-            type=FindingType.STRUCTURE,
-            severity=FindingSeverity.ERROR,
-            message='未检测到标题页（第一页版式不是"标题幻灯片"，也无标题占位符或大号标题文本）',
-            rule_id="STR-001",
-            page_index=0,
-            location=f"第 1 页 [{first_page.layout_name or '未知版式'}]",
-            suggestion='建议第一页使用"标题幻灯片"版式，包含文档标题和作者信息',
-        ))
+        findings.append(
+            AuditFinding(
+                type=FindingType.STRUCTURE,
+                severity=FindingSeverity.ERROR,
+                message='未检测到标题页（第一页版式不是"标题幻灯片"，也无标题占位符或大号标题文本）',
+                rule_id="STR-001",
+                page_index=0,
+                location=f"第 1 页 [{first_page.layout_name or '未知版式'}]",
+                suggestion='建议第一页使用"标题幻灯片"版式，包含文档标题和作者信息',
+            )
+        )
         return findings
 
     def _check_heading_levels(self, doc: Document) -> list[AuditFinding]:
@@ -150,16 +169,18 @@ class StructureAuditor(BaseAuditor):
                         continue
                     current_level = para.level
                     if prev_level is not None and current_level > prev_level + 1:
-                        findings.append(AuditFinding(
-                            type=FindingType.STRUCTURE,
-                            severity=FindingSeverity.WARNING,
-                            message=f"标题层级跳级: 从 H{prev_level} 跳到 H{current_level}",
-                            rule_id="STR-003",
-                            page_index=page.index,
-                            location=f"第 {page.slide_number or page.index+1} 页",
-                            context=para.text[:100],
-                            suggestion=f"建议在 H{prev_level} 和 H{current_level} 之间插入 H{prev_level+1} 级别的标题",
-                        ))
+                        findings.append(
+                            AuditFinding(
+                                type=FindingType.STRUCTURE,
+                                severity=FindingSeverity.WARNING,
+                                message=f"标题层级跳级: 从 H{prev_level} 跳到 H{current_level}",
+                                rule_id="STR-003",
+                                page_index=page.index,
+                                location=f"第 {page.slide_number or page.index + 1} 页",
+                                context=para.text[:100],
+                                suggestion=f"建议在 H{prev_level} 和 H{current_level} 之间插入 H{prev_level + 1} 级别的标题",
+                            )
+                        )
                     prev_level = current_level
 
         return findings
@@ -186,10 +207,10 @@ class StructureAuditor(BaseAuditor):
             return findings
 
         # 分别检查 "图" 和 "表" 的编号连续性
-        fig_nums = [(p, n, t) for p, n, t in all_numbers
-                     if re.match(r"图|Fig", t, re.IGNORECASE)]
-        tab_nums = [(p, n, t) for p, n, t in all_numbers
-                     if re.match(r"表|Table|Tab", t, re.IGNORECASE)]
+        fig_nums = [(p, n, t) for p, n, t in all_numbers if re.match(r"图|Fig", t, re.IGNORECASE)]
+        tab_nums = [
+            (p, n, t) for p, n, t in all_numbers if re.match(r"表|Table|Tab", t, re.IGNORECASE)
+        ]
 
         findings.extend(self._validate_sequence(fig_nums, "图", doc))
         findings.extend(self._validate_sequence(tab_nums, "表", doc))
@@ -214,15 +235,17 @@ class StructureAuditor(BaseAuditor):
         for page_idx, num, text, _ in ordered:
             # 检测重复编号
             if num in seen_numbers:
-                findings.append(AuditFinding(
-                    type=FindingType.STRUCTURE,
-                    severity=FindingSeverity.WARNING,
-                    message=f"{label}编号重复: {text} 出现多次",
-                    rule_id="STR-002",
-                    page_index=page_idx,
-                    location=f"第 {doc.pages[page_idx].slide_number or page_idx+1} 页",
-                    context=text[:150],
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.STRUCTURE,
+                        severity=FindingSeverity.WARNING,
+                        message=f"{label}编号重复: {text} 出现多次",
+                        rule_id="STR-002",
+                        page_index=page_idx,
+                        location=f"第 {doc.pages[page_idx].slide_number or page_idx + 1} 页",
+                        context=text[:150],
+                    )
+                )
                 prev_num = num
                 continue
             seen_numbers.add(num)
@@ -230,26 +253,30 @@ class StructureAuditor(BaseAuditor):
             expected = prev_num + 1
             if num != expected:
                 if num > expected:
-                    findings.append(AuditFinding(
-                        type=FindingType.STRUCTURE,
-                        severity=FindingSeverity.ERROR,
-                        message=f"{label}编号不连续: 期望 {label}{expected}，实际 {text}（跳过了 {num - expected} 个编号）",
-                        rule_id="STR-002",
-                        page_index=page_idx,
-                        location=f"第 {doc.pages[page_idx].slide_number or page_idx+1} 页",
-                        context=text[:150],
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.STRUCTURE,
+                            severity=FindingSeverity.ERROR,
+                            message=f"{label}编号不连续: 期望 {label}{expected}，实际 {text}（跳过了 {num - expected} 个编号）",
+                            rule_id="STR-002",
+                            page_index=page_idx,
+                            location=f"第 {doc.pages[page_idx].slide_number or page_idx + 1} 页",
+                            context=text[:150],
+                        )
+                    )
                 else:
                     # num < expected: 编号倒退
-                    findings.append(AuditFinding(
-                        type=FindingType.STRUCTURE,
-                        severity=FindingSeverity.ERROR,
-                        message=f"{label}编号倒退: 期望 ≥ {label}{expected}，实际 {text}",
-                        rule_id="STR-002",
-                        page_index=page_idx,
-                        location=f"第 {doc.pages[page_idx].slide_number or page_idx+1} 页",
-                        context=text[:150],
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.STRUCTURE,
+                            severity=FindingSeverity.ERROR,
+                            message=f"{label}编号倒退: 期望 ≥ {label}{expected}，实际 {text}",
+                            rule_id="STR-002",
+                            page_index=page_idx,
+                            location=f"第 {doc.pages[page_idx].slide_number or page_idx + 1} 页",
+                            context=text[:150],
+                        )
+                    )
                 prev_num = num  # 继续用实际值
             else:
                 prev_num = num
@@ -292,19 +319,19 @@ class StructureAuditor(BaseAuditor):
         # 如果存在多种格式 → 报告
         if len(fingerprints) >= 2:
             fp_list = sorted(fingerprints.keys())
-            examples = " | ".join(
-                fingerprints[fp][0] for fp in fp_list
+            examples = " | ".join(fingerprints[fp][0] for fp in fp_list)
+            findings.append(
+                AuditFinding(
+                    type=FindingType.STRUCTURE,
+                    severity=FindingSeverity.WARNING,
+                    message=f"检测到 {len(fingerprints)} 种不同的图表标题格式: {', '.join(fp_list)}",
+                    rule_id="STR-007",
+                    location="全文",
+                    context=examples[:150],
+                    suggestion="建议统一图表标题格式，全文使用同一种格式（如'图N：'或'Fig. N: '）",
+                    metadata={"format_count": len(fingerprints), "formats": fp_list},
+                )
             )
-            findings.append(AuditFinding(
-                type=FindingType.STRUCTURE,
-                severity=FindingSeverity.WARNING,
-                message=f"检测到 {len(fingerprints)} 种不同的图表标题格式: {', '.join(fp_list)}",
-                rule_id="STR-007",
-                location="全文",
-                context=examples[:150],
-                suggestion="建议统一图表标题格式，全文使用同一种格式（如'图N：'或'Fig. N: '）",
-                metadata={"format_count": len(fingerprints), "formats": fp_list},
-            ))
 
         return findings
 
@@ -343,14 +370,16 @@ class StructureAuditor(BaseAuditor):
             # 策略 2: 全文回退（兼容无标题结构的文档）
             if section_lower in all_text_lower:
                 continue
-            findings.append(AuditFinding(
-                type=FindingType.STRUCTURE,
-                severity=FindingSeverity.ERROR,
-                message=f"缺少必须的章节: {section}",
-                rule_id="CON-002",
-                location="全文",
-                suggestion=f"建议添加「{section}」章节",
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.STRUCTURE,
+                    severity=FindingSeverity.ERROR,
+                    message=f"缺少必须的章节: {section}",
+                    rule_id="CON-002",
+                    location="全文",
+                    suggestion=f"建议添加「{section}」章节",
+                )
+            )
 
         return findings
 
@@ -366,15 +395,17 @@ class StructureAuditor(BaseAuditor):
         # 检查版式使用是否合理
         if len(layout_counter) == 1 and "未知" not in layout_counter:
             # 所有幻灯片使用同一版式 → 不太合理
-            findings.append(AuditFinding(
-                type=FindingType.STRUCTURE,
-                severity=FindingSeverity.INFO,
-                message=f"所有幻灯片使用同一版式「{list(layout_counter.keys())[0]}」，建议根据内容类型使用不同版式",
-                rule_id="STR-008",
-                location="全文",
-                context=f"共 {len(doc.pages)} 页，版式: {list(layout_counter.keys())[0]}",
-                suggestion="建议根据内容类型使用不同版式（如标题页、内容页、章节页等）",
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.STRUCTURE,
+                    severity=FindingSeverity.INFO,
+                    message=f"所有幻灯片使用同一版式「{list(layout_counter.keys())[0]}」，建议根据内容类型使用不同版式",
+                    rule_id="STR-008",
+                    location="全文",
+                    context=f"共 {len(doc.pages)} 页，版式: {list(layout_counter.keys())[0]}",
+                    suggestion="建议根据内容类型使用不同版式（如标题页、内容页、章节页等）",
+                )
+            )
 
         return findings
 
@@ -391,7 +422,7 @@ class StructureAuditor(BaseAuditor):
         keywords = self.keywords
 
         for page in doc.pages:
-            page_label = f"第 {page.slide_number or page.index+1} 页"
+            page_label = f"第 {page.slide_number or page.index + 1} 页"
 
             # 标题页豁免：精确匹配 + 子串匹配（子串从 exempt_layouts 导出）
             if page.layout_name:
@@ -426,16 +457,18 @@ class StructureAuditor(BaseAuditor):
                 has_conclusion = True
 
             if not has_conclusion:
-                findings.append(AuditFinding(
-                    type=FindingType.STRUCTURE,
-                    severity=FindingSeverity.ERROR,
-                    message="该页缺少结论或关键要点",
-                    rule_id="CON-004",
-                    page_index=page.index,
-                    location=page_label,
-                    context=page.all_text[:100] if page.all_text.strip() else "(空白页)",
-                    suggestion="每页应包含明确的结论句或 Key Takeaway，或确保有足够的内容元素",
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.STRUCTURE,
+                        severity=FindingSeverity.ERROR,
+                        message="该页缺少结论或关键要点",
+                        rule_id="CON-004",
+                        page_index=page.index,
+                        location=page_label,
+                        context=page.all_text[:100] if page.all_text.strip() else "(空白页)",
+                        suggestion="每页应包含明确的结论句或 Key Takeaway，或确保有足够的内容元素",
+                    )
+                )
 
         return findings
 
@@ -453,9 +486,11 @@ class StructureAuditor(BaseAuditor):
         en_word_re = re.compile(r"[a-zA-Z]+(?:'[a-z]+)?")
 
         for page in doc.pages:
-            page_label = f"第 {page.slide_number or page.index+1} 页"
+            page_label = f"第 {page.slide_number or page.index + 1} 页"
             for elem in page.flattened_elements:
-                if not elem.is_title and not (elem.shape_name and "title" in str(elem.shape_name).lower()):
+                if not elem.is_title and not (
+                    elem.shape_name and "title" in str(elem.shape_name).lower()
+                ):
                     continue
                 for para in elem.paragraphs:
                     title_text = para.text.strip()
@@ -466,17 +501,22 @@ class StructureAuditor(BaseAuditor):
                     chinese_count = sum(1 for c in title_text if _is_cjk_char(c))
 
                     if english_words > max_en or chinese_count > max_zh:
-                        findings.append(AuditFinding(
-                            type=FindingType.STRUCTURE,
-                            severity=FindingSeverity.WARNING,
-                            message=f"标题过长: {english_words} 英文词 / {chinese_count} 中文字",
-                            rule_id="STR-004",
-                            page_index=page.index,
-                            location=page_label,
-                            context=title_text[:100],
-                            suggestion=f"建议标题控制在 {max_en} 英文词或 {max_zh} 中文字以内",
-                            metadata={"english_words": english_words, "chinese_chars": chinese_count},
-                        ))
+                        findings.append(
+                            AuditFinding(
+                                type=FindingType.STRUCTURE,
+                                severity=FindingSeverity.WARNING,
+                                message=f"标题过长: {english_words} 英文词 / {chinese_count} 中文字",
+                                rule_id="STR-004",
+                                page_index=page.index,
+                                location=page_label,
+                                context=title_text[:100],
+                                suggestion=f"建议标题控制在 {max_en} 英文词或 {max_zh} 中文字以内",
+                                metadata={
+                                    "english_words": english_words,
+                                    "chinese_chars": chinese_count,
+                                },
+                            )
+                        )
 
         return findings
 
@@ -486,12 +526,14 @@ class StructureAuditor(BaseAuditor):
         标题不应以句号、逗号等标点结尾。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
         # 匹配标题末尾的标点符号
         trailing_re = re.compile(r"[。，、.!,;；：…—]+$")
 
         for elem in page.flattened_elements:
-            if not elem.is_title and not (elem.shape_name and "title" in str(elem.shape_name).lower()):
+            if not elem.is_title and not (
+                elem.shape_name and "title" in str(elem.shape_name).lower()
+            ):
                 continue
             for para in elem.paragraphs:
                 title_text = para.text.strip()
@@ -500,17 +542,19 @@ class StructureAuditor(BaseAuditor):
                 match = trailing_re.search(title_text)
                 if match:
                     punct = match.group(0)
-                    findings.append(AuditFinding(
-                        type=FindingType.STRUCTURE,
-                        severity=FindingSeverity.INFO,
-                        message=f"标题末尾含有多余标点: 「{punct}」",
-                        rule_id="STR-006",
-                        page_index=page.index,
-                        location=page_label,
-                        context=title_text[:100],
-                        suggestion="标题末尾不应使用标点符号，建议删除末尾的标点",
-                        metadata={"trailing_punctuation": punct},
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.STRUCTURE,
+                            severity=FindingSeverity.INFO,
+                            message=f"标题末尾含有多余标点: 「{punct}」",
+                            rule_id="STR-006",
+                            page_index=page.index,
+                            location=page_label,
+                            context=title_text[:100],
+                            suggestion="标题末尾不应使用标点符号，建议删除末尾的标点",
+                            metadata={"trailing_punctuation": punct},
+                        )
+                    )
 
         return findings
 
@@ -531,19 +575,20 @@ class StructureAuditor(BaseAuditor):
         for title, page_indices in title_pages.items():
             if len(page_indices) > 1:
                 pages_str = ", ".join(
-                    f"第 {doc.pages[i].slide_number or i+1} 页"
-                    for i in page_indices
+                    f"第 {doc.pages[i].slide_number or i + 1} 页" for i in page_indices
                 )
-                findings.append(AuditFinding(
-                    type=FindingType.STRUCTURE,
-                    severity=FindingSeverity.ERROR,
-                    message=f"重复标题: 「{title[:50]}」在 {len(page_indices)} 张幻灯片中出现",
-                    rule_id="STR-005",
-                    page_index=page_indices[0],
-                    location=pages_str,
-                    context=title[:80],
-                    suggestion="每张幻灯片的标题应独一无二，建议添加副标题或编号加以区分",
-                    metadata={"pages": page_indices},
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.STRUCTURE,
+                        severity=FindingSeverity.ERROR,
+                        message=f"重复标题: 「{title[:50]}」在 {len(page_indices)} 张幻灯片中出现",
+                        rule_id="STR-005",
+                        page_index=page_indices[0],
+                        location=pages_str,
+                        context=title[:80],
+                        suggestion="每张幻灯片的标题应独一无二，建议添加副标题或编号加以区分",
+                        metadata={"pages": page_indices},
+                    )
+                )
 
         return findings

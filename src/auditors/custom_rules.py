@@ -27,25 +27,40 @@ class CustomRulesAuditor(BaseAuditor):
     # NOTE: "la" (LanguageAuditor) 故意排除 — 语言检查依赖 lt_client/vocabulary/terminology
     # 有状态实例，始终直接运行，不走 dispatch 委托机制。
     _DISPATCH = {
-        "first_slide_has_title_layout":     ("sa",  "_check_title_slide",               False, True),
-        "figure_numbering_sequential":      ("sa",  "_check_figure_numbering",          False, False),
-        "heading_level_sequential":         ("sa",  "_check_heading_levels",            False, False),
-        "numeric_cross_reference":          ("fca", "_check_numeric_consistency",       False, False),
-        "abbreviation_first_defined":       ("fca", "_check_abbreviation_first_defined",False, False),
-        "abbreviation_defined_never_used":  ("fca", "_check_abbreviation_defined_never_used", False, False),
-        "abbreviation_multiply_defined":    ("fca", "_check_abbreviation_multiply_defined", False, False),
-        "abbreviation_used_before_defined": ("fca", "_check_abbreviation_used_before_defined", False, False),
-        "every_slide_has_conclusion":       ("sa",  "_check_every_slide_has_conclusion",False, False),
-        "duplicate_title":                  ("sa",  "_check_duplicate_title",           False, False),
-        "title_trailing_punctuation":       ("sa",  "_check_title_trailing_punctuation", True, False),
-        "figure_caption_format":            ("sa",  "_check_figure_caption_format",      False, False),
-        "element_overflow":                 ("fa",  "_check_element_overflow",           True, False),
-        "empty_placeholder":                ("fa",  "_check_empty_placeholders",        True, True),
-        "bullet_consistency":               ("fa",  "_check_bullet_consistency",         True, False),
-        "per_page_char_limit":              ("fa",  "_check_per_page_char_limit",        True, False),
-        "table_contrast":                   ("fa",  "_check_table_contrast",             True, False),
-        "slide_structure_consistency":      ("sa",  "_check_slide_structure_consistency", False, True),
-        "title_length":                     ("sa",  "_check_title_length",               False, False),
+        "first_slide_has_title_layout": ("sa", "_check_title_slide", False, True),
+        "figure_numbering_sequential": ("sa", "_check_figure_numbering", False, False),
+        "heading_level_sequential": ("sa", "_check_heading_levels", False, False),
+        "numeric_cross_reference": ("fca", "_check_numeric_consistency", False, False),
+        "abbreviation_first_defined": ("fca", "_check_abbreviation_first_defined", False, False),
+        "abbreviation_defined_never_used": (
+            "fca",
+            "_check_abbreviation_defined_never_used",
+            False,
+            False,
+        ),
+        "abbreviation_multiply_defined": (
+            "fca",
+            "_check_abbreviation_multiply_defined",
+            False,
+            False,
+        ),
+        "abbreviation_used_before_defined": (
+            "fca",
+            "_check_abbreviation_used_before_defined",
+            False,
+            False,
+        ),
+        "every_slide_has_conclusion": ("sa", "_check_every_slide_has_conclusion", False, False),
+        "duplicate_title": ("sa", "_check_duplicate_title", False, False),
+        "title_trailing_punctuation": ("sa", "_check_title_trailing_punctuation", True, False),
+        "figure_caption_format": ("sa", "_check_figure_caption_format", False, False),
+        "element_overflow": ("fa", "_check_element_overflow", True, False),
+        "empty_placeholder": ("fa", "_check_empty_placeholders", True, True),
+        "bullet_consistency": ("fa", "_check_bullet_consistency", True, False),
+        "per_page_char_limit": ("fa", "_check_per_page_char_limit", True, False),
+        "table_contrast": ("fa", "_check_table_contrast", True, False),
+        "slide_structure_consistency": ("sa", "_check_slide_structure_consistency", False, True),
+        "title_length": ("sa", "_check_title_length", False, False),
     }
 
     # ── Severity mapping ───────────────────────────────────────
@@ -77,14 +92,11 @@ class CustomRulesAuditor(BaseAuditor):
         for check_type, (key, method_name, _per_page, _pptx_only) in cls._DISPATCH.items():
             auditor_cls = AUDITOR_CLS_MAP.get(key)
             if auditor_cls is None:
-                errors.append(
-                    f"_DISPATCH['{check_type}']: unknown auditor key '{key}'"
-                )
+                errors.append(f"_DISPATCH['{check_type}']: unknown auditor key '{key}'")
                 continue
             if not hasattr(auditor_cls, method_name):
                 errors.append(
-                    f"_DISPATCH['{check_type}']: {auditor_cls.__name__}"
-                    f".{method_name}() not found"
+                    f"_DISPATCH['{check_type}']: {auditor_cls.__name__}.{method_name}() not found"
                 )
         return errors
 
@@ -144,16 +156,18 @@ class CustomRulesAuditor(BaseAuditor):
                 # context 带错误摘要: 防止多条失败被 dedup_key 折叠为一条
                 # (dedup_key = type|rule_id|page|context 哈希, SYS-ERROR 固定
                 #  rule_id/page, 若 context 为 None 则全部碰撞)
-                findings.append(AuditFinding(
-                    type=FindingType.CUSTOM,
-                    severity=FindingSeverity.ERROR,
-                    message=f"规则 '{rule.rule_id}' 执行失败: {e}",
-                    rule_id="SYS-ERROR",
-                    location="系统",
-                    context=str(e)[:120],
-                    suggestion="请检查文档内容或规则配置",
-                    metadata={"rule_id": rule.rule_id, "error": str(e)},
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.CUSTOM,
+                        severity=FindingSeverity.ERROR,
+                        message=f"规则 '{rule.rule_id}' 执行失败: {e}",
+                        rule_id="SYS-ERROR",
+                        location="系统",
+                        context=str(e)[:120],
+                        suggestion="请检查文档内容或规则配置",
+                        metadata={"rule_id": rule.rule_id, "error": str(e)},
+                    )
+                )
 
         return findings
 
@@ -216,22 +230,21 @@ class CustomRulesAuditor(BaseAuditor):
             matches = list(compiled.finditer(text))
             if matches:
                 for match in matches:
-                    if any(
-                        match.start() >= lo and match.end() <= hi
-                        for lo, hi in paren_ranges
-                    ):
+                    if any(match.start() >= lo and match.end() <= hi for lo, hi in paren_ranges):
                         continue  # 命中位于括号对内 (定义场景), 跳过
                     suggestions = rule.params.get("suggestion", "")
-                    findings.append(AuditFinding(
-                        type=FindingType.CUSTOM,
-                        severity=severity,
-                        message=rule.description,
-                        rule_id=rule.rule_id,
-                        page_index=page.index,
-                        location=f"第 {page.slide_number or page.index+1} 页",
-                        context=match.group(0)[:100],
-                        suggestion=suggestions,
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.CUSTOM,
+                            severity=severity,
+                            message=rule.description,
+                            rule_id=rule.rule_id,
+                            page_index=page.index,
+                            location=f"第 {page.slide_number or page.index + 1} 页",
+                            context=match.group(0)[:100],
+                            suggestion=suggestions,
+                        )
+                    )
 
         return findings
 
@@ -265,19 +278,22 @@ class CustomRulesAuditor(BaseAuditor):
             logger.warning(
                 "未知的 check_type '%s' (规则 %s) — 不在 _DISPATCH 表中，已跳过。"
                 " 检查 rules.md 中是否有拼写错误。",
-                check_type, rule.rule_id,
+                check_type,
+                rule.rule_id,
             )
             # 与"失败可见性"哲学一致: 未知 check_type 转 SYS-ERROR, UI 可见
-            findings.append(AuditFinding(
-                type=FindingType.CUSTOM,
-                severity=FindingSeverity.ERROR,
-                message=f"规则 '{rule.rule_id}' 的 check_type '{check_type}' 未注册，检查未执行",
-                rule_id="SYS-ERROR",
-                location="系统",
-                context=f"check_type={check_type} rule_id={rule.rule_id}"[:120],
-                suggestion="检查 rules.md 中 '检查' 键的拼写是否与 _DISPATCH 表一致",
-                metadata={"rule_id": rule.rule_id, "check_type": check_type},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.CUSTOM,
+                    severity=FindingSeverity.ERROR,
+                    message=f"规则 '{rule.rule_id}' 的 check_type '{check_type}' 未注册，检查未执行",
+                    rule_id="SYS-ERROR",
+                    location="系统",
+                    context=f"check_type={check_type} rule_id={rule.rule_id}"[:120],
+                    suggestion="检查 rules.md 中 '检查' 键的拼写是否与 _DISPATCH 表一致",
+                    metadata={"rule_id": rule.rule_id, "check_type": check_type},
+                )
+            )
 
         return findings
 
@@ -315,29 +331,33 @@ class CustomRulesAuditor(BaseAuditor):
         cfg = self._resolve_auditor_config()
 
         if key == "sa":
-            return StructureAuditor(config={
-                "required_sections": cfg.get("required_sections", []),
-                "conclusion_keywords": cfg.get("conclusion_keywords", []),
-                "exempt_layouts": cfg.get("exempt_layouts", []),
-                "max_english_words": cfg.get("max_english_words", 10),
-                "max_chinese_chars_title": cfg.get("max_chinese_chars_title", 40),
-                # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
-                "min_title_font_size": cfg.get("min_title_font_size", 28),
-            })
+            return StructureAuditor(
+                config={
+                    "required_sections": cfg.get("required_sections", []),
+                    "conclusion_keywords": cfg.get("conclusion_keywords", []),
+                    "exempt_layouts": cfg.get("exempt_layouts", []),
+                    "max_english_words": cfg.get("max_english_words", 10),
+                    "max_chinese_chars_title": cfg.get("max_chinese_chars_title", 40),
+                    # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
+                    "min_title_font_size": cfg.get("min_title_font_size", 28),
+                }
+            )
         elif key == "fa":
-            return FormatAuditor(config={
-                "allowed_fonts": cfg.get("allowed_fonts", []),
-                "title_size_range": cfg.get("title_size_range"),
-                "body_size_range": cfg.get("body_size_range"),
-                "max_chinese_chars": cfg.get("max_chinese_chars"),
-                "max_english_chars": cfg.get("max_english_chars"),
-                "max_explicit_newlines": cfg.get("max_explicit_newlines"),
-                "max_chars_per_page": cfg.get("max_chars_per_page"),
-                # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
-                "min_contrast": cfg.get("min_contrast", 4.5),
-                "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
-                "large_text_threshold": cfg.get("large_text_threshold", 18),
-            })
+            return FormatAuditor(
+                config={
+                    "allowed_fonts": cfg.get("allowed_fonts", []),
+                    "title_size_range": cfg.get("title_size_range"),
+                    "body_size_range": cfg.get("body_size_range"),
+                    "max_chinese_chars": cfg.get("max_chinese_chars"),
+                    "max_english_chars": cfg.get("max_english_chars"),
+                    "max_explicit_newlines": cfg.get("max_explicit_newlines"),
+                    "max_chars_per_page": cfg.get("max_chars_per_page"),
+                    # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
+                    "min_contrast": cfg.get("min_contrast", 4.5),
+                    "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
+                    "large_text_threshold": cfg.get("large_text_threshold", 18),
+                }
+            )
         elif key == "fca":
             return FactualAuditor(config=cfg)
         else:
@@ -348,6 +368,7 @@ class CustomRulesAuditor(BaseAuditor):
         if self._auditor_cfg_cache is not None:
             return self._auditor_cfg_cache
         from src.engines.rule_parser import extract_auditor_config
+
         cfg = extract_auditor_config(self.rules)
         if self.config:
             for k, v in self.config.items():

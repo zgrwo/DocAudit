@@ -41,7 +41,8 @@ def test_check_test_count_ok():
         "tests/ # 189 个用例（12 个文件，含黄金测试）",
     )
     errors = check_declarations(
-        [("AGENTS.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("AGENTS.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert errors == []
 
@@ -49,7 +50,8 @@ def test_check_test_count_ok():
 def test_check_test_count_mismatch():
     doc = "全量 pytest tests/ -v（188 用例）"
     errors = check_declarations(
-        [("AGENTS.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("AGENTS.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert len(errors) == 1
     assert "AGENTS.md" in errors[0]
@@ -59,7 +61,8 @@ def test_check_test_count_mismatch():
 def test_check_rule_count_mismatch():
     doc = "本地离线文档审查系统：PPTX/DOCX/PDF/MD → 25 条规则"
     errors = check_declarations(
-        [("AGENTS.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("AGENTS.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert len(errors) == 1
     assert "规则数" in errors[0] and "26" in errors[0]
@@ -68,7 +71,8 @@ def test_check_rule_count_mismatch():
 def test_check_file_count_mismatch():
     doc = "189 个用例，11 个文件："
     errors = check_declarations(
-        [("AGENTS.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("AGENTS.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert len(errors) == 1
     assert "测试文件数" in errors[0] and "12" in errors[0]
@@ -93,7 +97,8 @@ def test_rule_count_variants_detected():
         "26 条配置驱动规则",
     )
     errors = check_declarations(
-        [("README.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("README.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert errors == []
 
@@ -107,7 +112,8 @@ def test_changelog_historical_section_ignored():
         "- 119 个测试用例（模型/审计器/引擎/规则/集成）",
     )
     errors = check_declarations(
-        [("CHANGELOG.md", doc)], {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11}
+        [("CHANGELOG.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
     )
     assert errors == []
 

@@ -48,7 +48,9 @@ def find_converter(file_path: str) -> Any | None:
     return None
 
 
-def build_auditors(rules_path: str, glossary_dir: str, vocab_dir: str | None = None) -> list[tuple[str, BaseAuditor]]:
+def build_auditors(
+    rules_path: str, glossary_dir: str, vocab_dir: str | None = None
+) -> list[tuple[str, BaseAuditor]]:
     """从 rules.md 构建配置好的审计器列表。
 
     Returns: list of (name, auditor) tuples.
@@ -64,51 +66,84 @@ def build_auditors(rules_path: str, glossary_dir: str, vocab_dir: str | None = N
         vocab_dir = str(derived)
 
     # 构建各审计器实例 (使用 .get() 防御，避免 extract_auditor_config 未来重构时 KeyError)
-    structure_auditor = StructureAuditor(config={
-        "required_sections": config.get("required_sections", []),
-        "conclusion_keywords": config.get("conclusion_keywords", [
-            "结论", "小结", "总结", "要点", "关键", "建议", "展望",
-            "Summary", "Conclusion", "Key", "Takeaway", "Recommend",
-        ]),
-        "exempt_layouts": config.get("exempt_layouts", []),
-        "max_english_words": config.get("max_english_words", 10),
-        "max_chinese_chars_title": config.get("max_chinese_chars_title", 40),
-        "min_title_font_size": config.get("min_title_font_size", 28),
-        # 跳过已由 CustomRulesAuditor dispatch 的检查，避免双重执行
-        "_skip_checks": [
-            "title_slide",
-            "heading_levels",
-            "figure_numbering",
-            "every_slide_conclusion",
-            "duplicate_title",
-            "title_trailing_punctuation",
-            "figure_caption_format",
-            "slide_structure_consistency",
-            "title_length",
-        ],
-    })
-    format_auditor = FormatAuditor(config={
-        "allowed_fonts": config.get("allowed_fonts", ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]),
-        "title_size_range": config.get("title_size_range", (28, 40)),
-        "body_size_range": config.get("body_size_range", (12, 22)),
-        "max_chinese_chars": config.get("max_chinese_chars", 150),
-        "max_english_chars": config.get("max_english_chars", 300),
-        "max_explicit_newlines": config.get("max_explicit_newlines", 3),
-        "max_chars_per_page": config.get("max_chars_per_page", 200),
-        "min_contrast": config.get("min_contrast", 4.5),
-        "large_text_min_contrast": config.get("large_text_min_contrast", 3.0),
-        "large_text_threshold": config.get("large_text_threshold", 18),
-        "_skip_checks": ["element_overflow", "per_page_char_limit", "empty_placeholder", "bullet_consistency", "table_contrast"],
-    })
-    language_auditor = LanguageAuditor(config={
-        "glossary_dir": glossary_dir,
-        "vocab_dir": vocab_dir,
-    })
-    factual_auditor = FactualAuditor(config={
-        "_skip_checks": ["numeric_consistency", "abbreviation_first_defined",
-                         "abbreviation_defined_never_used", "abbreviation_multiply_defined",
-                         "abbreviation_used_before_defined"],
-    })
+    structure_auditor = StructureAuditor(
+        config={
+            "required_sections": config.get("required_sections", []),
+            "conclusion_keywords": config.get(
+                "conclusion_keywords",
+                [
+                    "结论",
+                    "小结",
+                    "总结",
+                    "要点",
+                    "关键",
+                    "建议",
+                    "展望",
+                    "Summary",
+                    "Conclusion",
+                    "Key",
+                    "Takeaway",
+                    "Recommend",
+                ],
+            ),
+            "exempt_layouts": config.get("exempt_layouts", []),
+            "max_english_words": config.get("max_english_words", 10),
+            "max_chinese_chars_title": config.get("max_chinese_chars_title", 40),
+            "min_title_font_size": config.get("min_title_font_size", 28),
+            # 跳过已由 CustomRulesAuditor dispatch 的检查，避免双重执行
+            "_skip_checks": [
+                "title_slide",
+                "heading_levels",
+                "figure_numbering",
+                "every_slide_conclusion",
+                "duplicate_title",
+                "title_trailing_punctuation",
+                "figure_caption_format",
+                "slide_structure_consistency",
+                "title_length",
+            ],
+        }
+    )
+    format_auditor = FormatAuditor(
+        config={
+            "allowed_fonts": config.get(
+                "allowed_fonts", ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
+            ),
+            "title_size_range": config.get("title_size_range", (28, 40)),
+            "body_size_range": config.get("body_size_range", (12, 22)),
+            "max_chinese_chars": config.get("max_chinese_chars", 150),
+            "max_english_chars": config.get("max_english_chars", 300),
+            "max_explicit_newlines": config.get("max_explicit_newlines", 3),
+            "max_chars_per_page": config.get("max_chars_per_page", 200),
+            "min_contrast": config.get("min_contrast", 4.5),
+            "large_text_min_contrast": config.get("large_text_min_contrast", 3.0),
+            "large_text_threshold": config.get("large_text_threshold", 18),
+            "_skip_checks": [
+                "element_overflow",
+                "per_page_char_limit",
+                "empty_placeholder",
+                "bullet_consistency",
+                "table_contrast",
+            ],
+        }
+    )
+    language_auditor = LanguageAuditor(
+        config={
+            "glossary_dir": glossary_dir,
+            "vocab_dir": vocab_dir,
+        }
+    )
+    factual_auditor = FactualAuditor(
+        config={
+            "_skip_checks": [
+                "numeric_consistency",
+                "abbreviation_first_defined",
+                "abbreviation_defined_never_used",
+                "abbreviation_multiply_defined",
+                "abbreviation_used_before_defined",
+            ],
+        }
+    )
     custom_rules_auditor = CustomRulesAuditor(config={"rules_path": rules_path})
 
     # 将主流水线审计器注入 CustomRulesAuditor，消除重复创建和重复执行
@@ -151,16 +186,18 @@ def run_auditors(
         except Exception as e:
             logger.warning("%s 执行失败: %s", name, e, exc_info=True)
             # 生成 error-level AuditFinding 确保 UI 层可见
-            all_findings.append(AuditFinding(
-                type=FindingType.CUSTOM,
-                severity=FindingSeverity.ERROR,
-                message=f"审计器 '{name}' 执行失败: {e}",
-                rule_id="SYS-ERROR",
-                location="系统",
-                context=str(e)[:120],  # 错误摘要进 dedup_key, 多条失败不折叠
-                suggestion="请检查相关依赖是否正常（如 LanguageTool 服务、Java 环境等）",
-                metadata={"auditor": name, "error": str(e)},
-            ))
+            all_findings.append(
+                AuditFinding(
+                    type=FindingType.CUSTOM,
+                    severity=FindingSeverity.ERROR,
+                    message=f"审计器 '{name}' 执行失败: {e}",
+                    rule_id="SYS-ERROR",
+                    location="系统",
+                    context=str(e)[:120],  # 错误摘要进 dedup_key, 多条失败不折叠
+                    suggestion="请检查相关依赖是否正常（如 LanguageTool 服务、Java 环境等）",
+                    metadata={"auditor": name, "error": str(e)},
+                )
+            )
     # 全部完成回调
     if on_progress:
         on_progress("完成", total, total)

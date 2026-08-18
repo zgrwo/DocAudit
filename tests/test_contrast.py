@@ -19,6 +19,7 @@ from src.models.document import Document, DocumentMetadata, Page, PageElement, T
 
 # ── 算法纯函数 ──────────────────────────────────────────────────────────
 
+
 def test_hex_to_rgb():
     assert _hex_to_rgb("1E3A5F") == (0x1E, 0x3A, 0x5F)
     assert _hex_to_rgb("#FFFFFF") == (255, 255, 255)
@@ -55,6 +56,7 @@ def test_contrast_ratio_gray_white_between_3_and_4_5():
 
 
 # ── 检查器 ──────────────────────────────────────────────────────────────
+
 
 def _make_doc(cells: list[TableCell], fmt: str = "pptx") -> tuple[Document, Page]:
     elem = PageElement(type="table", tables=[cells])
@@ -115,18 +117,21 @@ def test_empty_cell_skipped():
 
 def test_large_text_uses_lower_threshold():
     """#808080 底 + 白字: 对比度≈3.95 — 大字(18pt+) 通过 3.0 阈值, 正文不通过 4.5"""
-    large = TableCell(text="大字", row=0, col=0, fill_color="808080",
-                      font_color="FFFFFF", font_size=18)
+    large = TableCell(
+        text="大字", row=0, col=0, fill_color="808080", font_color="FFFFFF", font_size=18
+    )
     assert _check([large]) == []
-    body = TableCell(text="正文", row=0, col=0, fill_color="808080",
-                     font_color="FFFFFF", font_size=12)
+    body = TableCell(
+        text="正文", row=0, col=0, fill_color="808080", font_color="FFFFFF", font_size=12
+    )
     assert len(_check([body])) == 1
 
 
 def test_custom_threshold_config():
     """配置驱动: 阈值可从 auditor config 覆盖"""
-    cell = TableCell(text="正文", row=0, col=0, fill_color="808080",
-                     font_color="FFFFFF", font_size=12)
+    cell = TableCell(
+        text="正文", row=0, col=0, fill_color="808080", font_color="FFFFFF", font_size=12
+    )
     doc, page = _make_doc([cell])
     auditor = FormatAuditor(config={"min_contrast": 3.0})
     assert auditor._check_table_contrast(page, doc) == []

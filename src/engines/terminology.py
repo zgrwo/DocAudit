@@ -22,11 +22,12 @@ _SEVERITY_MAP = {
 @dataclass
 class TermRule:
     """单个术语规则"""
-    pattern: str                       # 正则表达式
-    preferred: str                     # 推荐写法
-    context: str = ""                  # 术语说明
-    severity: str = "error"            # error | warning | info
-    compiled: re.Pattern | None = None # 编译后的正则
+
+    pattern: str  # 正则表达式
+    preferred: str  # 推荐写法
+    context: str = ""  # 术语说明
+    severity: str = "error"  # error | warning | info
+    compiled: re.Pattern | None = None  # 编译后的正则
 
     def __post_init__(self):
         try:
@@ -39,14 +40,13 @@ class TermRule:
 @dataclass
 class TermGlossary:
     """术语表"""
+
     category: str
     version: str
     terms: list[TermRule] = field(default_factory=list)
 
 
-def _already_preferred(
-    text: str, match_start: int, match_end: int, preferred: str
-) -> bool:
+def _already_preferred(text: str, match_start: int, match_end: int, preferred: str) -> bool:
     """检查匹配位置附近是否已使用推荐的术语形式。
 
     策略：
@@ -70,9 +70,7 @@ def _already_preferred(
     window_start = max(0, match_start - 60)
     window_end = min(len(text), match_end + 60)
     window = text[window_start:window_end]
-    return bool(re.search(
-        r"\b" + re.escape(search_term) + r"\b", window, re.IGNORECASE
-    ))
+    return bool(re.search(r"\b" + re.escape(search_term) + r"\b", window, re.IGNORECASE))
 
 
 class TerminologyChecker:
@@ -93,8 +91,9 @@ class TerminologyChecker:
                 glossary = self._parse_glossary(data)
                 if glossary:
                     self.glossaries.append(glossary)
-                    logger.info("加载术语表: %s (%d 条规则)",
-                                glossary.category, len(glossary.terms))
+                    logger.info(
+                        "加载术语表: %s (%d 条规则)", glossary.category, len(glossary.terms)
+                    )
             except Exception as e:
                 logger.warning("术语表加载失败: %s — %s", yaml_file.name, e)
 
@@ -111,12 +110,14 @@ class TerminologyChecker:
             if not pattern:
                 continue
 
-            rules.append(TermRule(
-                pattern=pattern,
-                preferred=item.get("preferred", ""),
-                context=item.get("context", ""),
-                severity=item.get("severity", "warning"),
-            ))
+            rules.append(
+                TermRule(
+                    pattern=pattern,
+                    preferred=item.get("preferred", ""),
+                    context=item.get("context", ""),
+                    severity=item.get("severity", "warning"),
+                )
+            )
 
         return TermGlossary(
             category=data.get("category", "未分类"),
@@ -144,19 +145,21 @@ class TerminologyChecker:
 
                     severity = _SEVERITY_MAP.get(rule.severity, FindingSeverity.INFO)
 
-                    findings.append(AuditFinding(
-                        type=FindingType.TERMINOLOGY,
-                        severity=severity,
-                        message=f"术语用法不规范: 「{matched_text}」",
-                        rule_id=f"TERM-{glossary.category}",
-                        page_index=page_index,
-                        location=page_label or f"第 {page_index+1} 页",
-                        context=matched_text[:150],
-                        suggestion=rule.preferred or rule.context,
-                        metadata={
-                            "glossary": glossary.category,
-                            "context_note": rule.context,
-                        },
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.TERMINOLOGY,
+                            severity=severity,
+                            message=f"术语用法不规范: 「{matched_text}」",
+                            rule_id=f"TERM-{glossary.category}",
+                            page_index=page_index,
+                            location=page_label or f"第 {page_index + 1} 页",
+                            context=matched_text[:150],
+                            suggestion=rule.preferred or rule.context,
+                            metadata={
+                                "glossary": glossary.category,
+                                "context_note": rule.context,
+                            },
+                        )
+                    )
 
         return findings

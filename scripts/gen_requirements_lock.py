@@ -55,9 +55,15 @@ def parse_would_install(text: str) -> list[str]:
 def resolve_profile(root: Path, packages: Path, extras: str) -> list[str]:
     """离线 dry-run 解析一个 profile，返回钉死依赖列表。"""
     cmd = [
-        sys.executable, "-m", "pip", "install",
-        "--dry-run", "--ignore-installed", "--no-index",
-        f"--find-links={packages}", f"{root}{extras}",
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--dry-run",
+        "--ignore-installed",
+        "--no-index",
+        f"--find-links={packages}",
+        f"{root}{extras}",
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:

@@ -4,6 +4,7 @@ import re
 
 # ── CJK 字符检测 ────────────────────────────────────────────
 
+
 def is_cjk_char(c: str) -> bool:
     """判断单个字符是否为 CJK 汉字 (含扩展 A 和兼容区)。
 
@@ -20,7 +21,7 @@ def is_cjk_char(c: str) -> bool:
         raise ValueError(f"is_cjk_char 需要单个字符，收到 {len(c)} 个字符: {c!r}")
     cp = ord(c)
     return (
-        0x3400 <= cp <= 0x4DBF    # CJK Extension A
+        0x3400 <= cp <= 0x4DBF  # CJK Extension A
         or 0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs
         or 0xF900 <= cp <= 0xFAFF  # CJK Compatibility Ideographs
     )
@@ -37,19 +38,13 @@ CJK_RE = re.compile(_CJK_CHAR_CLASS)
 # ── CJK-Latin 混排格式预编译正则 ────────────────────────────
 # 供 language.py 的中英混排检查 和 autofix.py 的空格修复共用
 
-CJK_LATIN_BOUNDARY = re.compile(
-    rf"({_CJK_CHAR_CLASS})([a-zA-Z0-9])"
-)
+CJK_LATIN_BOUNDARY = re.compile(rf"({_CJK_CHAR_CLASS})([a-zA-Z0-9])")
 """CJK 字符后紧接拉丁/数字 — 应加空格"""
 
-LATIN_CJK_BOUNDARY = re.compile(
-    rf"([a-zA-Z0-9])({_CJK_CHAR_CLASS})"
-)
+LATIN_CJK_BOUNDARY = re.compile(rf"([a-zA-Z0-9])({_CJK_CHAR_CLASS})")
 """拉丁/数字后紧接 CJK 字符 — 应加空格"""
 
-LATIN_CHINESE_PUNCT = re.compile(
-    r"([a-zA-Z0-9])([，。；：！？])"
-)
+LATIN_CHINESE_PUNCT = re.compile(r"([a-zA-Z0-9])([，。；：！？])")
 """英文/数字后使用中文标点符号 — 应改为英文标点"""
 
 # ── 英文词提取与分类 ────────────────────────────────────────

@@ -42,7 +42,8 @@ def main():
 
     print("[3/3] 验证安装...")
     verify = [
-        venv_py, "-c",
+        venv_py,
+        "-c",
         "import streamlit; from src.converters import PptxConverter; "
         "from src.auditors import StructureAuditor; print('  [OK] 核心模块导入成功')",
     ]

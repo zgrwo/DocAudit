@@ -91,25 +91,20 @@ class Vocabulary:
                     try:
                         if _has_regex_chars(word):
                             pattern = re.compile(word, re.IGNORECASE)
-                        elif any('\u4e00' <= c <= '\u9fff' for c in word):
+                        elif any("\u4e00" <= c <= "\u9fff" for c in word):
                             # CJK 词: \b 对中文字符无效，直接匹配
                             pattern = re.compile(re.escape(word), re.IGNORECASE)
                         else:
-                            pattern = re.compile(
-                                rf"\b{re.escape(word)}\b", re.IGNORECASE
-                            )
+                            pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
                         self._rejected_patterns.append((word, pattern, reason))
                     except re.error as e:
-                        logger.debug(
-                            "reject 条目正则编译失败，回退到字面匹配: %s — %s", word, e
-                        )
-                        pattern = re.compile(
-                            rf"\b{re.escape(word)}\b", re.IGNORECASE
-                        )
+                        logger.debug("reject 条目正则编译失败，回退到字面匹配: %s — %s", word, e)
+                        pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
                         self._rejected_patterns.append((word, pattern, reason))
                     loaded += 1
-            logger.info("加载黑名单: %d 个禁用术语 (预编译 %d 个模式)",
-                        loaded, len(self._rejected_patterns))
+            logger.info(
+                "加载黑名单: %d 个禁用术语 (预编译 %d 个模式)", loaded, len(self._rejected_patterns)
+            )
 
     def is_accepted(self, word: str) -> bool:
         """检查术语是否在白名单中（应被接受）"""

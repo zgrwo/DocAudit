@@ -6,6 +6,7 @@
 - download 三步：运行时依赖 → 构建依赖（setuptools/wheel）→ 离线 dry-run 自检
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import setup_offline  # noqa: E402
 from gen_requirements_lock import parse_would_install  # noqa: E402
 
 # ── common.py ─────────────────────────────────────────────────────────────
+
 
 def test_version_tuple():
     assert common._version_tuple("Python 3.12.5") == (3, 12)
@@ -51,6 +53,7 @@ def test_banner(capsys):
 
 
 # ── setup_offline.py ──────────────────────────────────────────────────────
+
 
 def test_profiles_mapping():
     assert setup_offline.PROFILES == {"core": "", "pdf": "[pdf]", "full": "[all]"}
@@ -100,7 +103,31 @@ def test_install_upgrade_command_is_offline():
     assert f"--find-links={packages}" in cmd
 
 
+def test_ensure_offline_env_sets_hf_hub_offline(monkeypatch):
+    """离线红线: 下载/安装的 pip 子进程必须携带 HF_HUB_OFFLINE=1 (防 docling 首次运行联网)。"""
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    setup_offline.ensure_offline_env()
+    assert os.environ.get("HF_HUB_OFFLINE") == "1"
+    # setdefault 语义: 用户已显式设置时保持原值
+    os.environ["HF_HUB_OFFLINE"] = "0"
+    setup_offline.ensure_offline_env()
+    assert os.environ.get("HF_HUB_OFFLINE") == "0"
+
+
+def test_main_sets_offline_env(monkeypatch, tmp_path):
+    """main() 必须在任何子进程执行前设置离线环境，download 与 install 两条路径均覆盖。"""
+    calls = []
+    monkeypatch.setattr(setup_offline, "ensure_offline_env", lambda: calls.append(1))
+    packages = tmp_path / "packages"
+    packages.mkdir()
+    monkeypatch.setattr(setup_offline.common, "packages_dir", lambda: packages)
+    assert setup_offline.main(["download", "core", "--print-cmd"]) == 0
+    assert setup_offline.main(["install", "core", "--print-cmd"]) == 0
+    assert len(calls) == 2
+
+
 # ── gen_requirements_lock.py ──────────────────────────────────────────────
+
 
 def test_parse_would_install():
     text = (
