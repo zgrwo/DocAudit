@@ -76,7 +76,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `.qoder/prompts/`、`.qoder/better-harness/` 是平台本地资产（不入库）；prompt 修改后需同步 `.qoder/skills/` 注册副本
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（343 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（411 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
 
@@ -100,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 343 个用例（21 个文件，含黄金测试）
+├── tests/                            # 411 个用例（22 个文件，含黄金测试）
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
 ├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync / check_skill_sync）
@@ -160,7 +160,7 @@ DocAudit/
 
 ## 测试
 
-343 个用例，21 个文件：
+411 个用例，22 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -174,6 +174,7 @@ DocAudit/
 | test_html_report_security.py | HTML 转义红线（XSS 载荷注入） |
 | test_app_ui.py | app.py 过滤器/扫描器纯函数 + AppTest 冒烟 |
 | test_cli_exit_codes.py | CLI 退出码契约（损坏文件/干净/含 error/路径不存在） |
+| test_cli_direct.py | CLI 直接单测（audit_file/print_summary/--fix 链路） |
 | test_autofix.py | AutoFixer 修复链路 |
 | test_converters.py | 四格式转换器 |
 | test_edge_cases.py | 边界输入 |
@@ -221,6 +222,9 @@ DocAudit/
 | 幻影规格 | 1 | specification.md 规则清单语义与 rules.md 错位（数字对、语义全错，数字门禁检测不到）；2026-08 以 rules.md 重写 |
 | 黄金测试名不副实 | 1 | 旧"三路径"实为同一函数参数变体；2026-08 升级为真实 CLI subprocess + AppTest WebUI 比对 |
 | Windows pytest 清理 symlink 报错 | 1 | %TEMP% 下 pytest-current 清理 PermissionError 致退出码 1（环境性）；CI ubuntu 不受影响 |
+| DOCX 标题层级盲区 | 1 | python-docx add_heading 只写样式定义（styles.xml outlineLvl），段落级 w:pPr 为空 → level=None → 标题类检查/语义分页对样式型标题静默失效；2026-08 补样式级回退 + 样式名正则 |
+| 脚本双轨制失配 | 1 | setup_offline.sh 独立重写未同步 .py 的项目根语义（路径指向 scripts/）且零测试 → macOS/Linux 离线流程失败；2026-08 补 PROJECT_DIR 派生 |
+| 运行时离线环境缺失 | 1 | HF_HUB_OFFLINE/CACHE 只在安装脚本设置，运行时入口（pdf_converter）未注入 → 离线 PDF 转换尝试联网；2026-08 在 convert() 注入 |
 
 ### 关键设计决策
 

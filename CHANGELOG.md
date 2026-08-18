@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **max level 深度审查整改批次**（2026-08-19，HEAD 94bf3b0 复审）：
+  - DOCX 标题层级提取补样式级回退（styles.xml outlineLvl + Heading N 样式名正则），修复 add_heading 等样式型标题 level=None 导致的标题类检查/语义分页静默盲区
+  - setup_offline.sh 项目根路径修复（PROJECT_DIR 派生）；run.sh grep -oP 改 grep -Eo（macOS 兼容）
+  - CON-004/STR-003 加格式守卫（非 PPTX 不再误报每页须结论；PPTX 缩进级别不再冒充标题层级）
+  - languagetool_url 接线为 rules.md 可配置（仅限 localhost 白名单）
+  - 运行期 HF_HUB_OFFLINE/CACHE 注入 pdf_converter（离线 PDF 转换不再尝试联网）
+  - CLI：-o 导出失败显性化（exit 1）、不支持扩展名报错（exit 2）、--fix 不支持格式提示
+  - Web UI：rules.md 热更新（缓存键含 mtime）、上传文件显示原始名、st.expander 标题转义
+  - AutoFix：os.replace 原子覆盖、eastAsia 缺失元素创建
+  - 门禁：check_api_sync 签名一致性、check_html_escape 覆盖 app.py、check_doc_numbers 否定语境、check_skill_sync 双向+BOM 容错
+  - 其他：factual 缓存 weakref、缩写定义窗口修复、全局字体统计纳入 eastAsia、md 表格行号/页面序号连续化、pdf 跨页归属、模型死字段清理（详见 2026-08-19 审查报告）
+
 ### Added
 
 - **审查整改批次（2026-08-18，fix）**：eastAsia 中文字体链路打通（docx/pptx 读写字型）、
