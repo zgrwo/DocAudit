@@ -127,6 +127,26 @@ def test_bom_without_frontmatter_tolerated(tmp_path):
     assert check_skill_sync(skills_dir, qoder_dir) == []
 
 
+def test_platform_local_skill_allowed_without_prompts_dir(tmp_path):
+    """CI 复现回归: deep-code-review 源在 .qoder/prompts/ (不入库, 平台本地资产)。
+
+    CI 全新检出时 .qoder/prompts/ 不存在，若靠 prompts 文件存在性豁免则门禁在 CI 必红
+    (2026-08-19 CI lint job 实测失败)。必须由静态白名单 PLATFORM_LOCAL_SKILLS
+    (依据 AGENTS.md 技能加载表) 豁免。
+    """
+    skills_dir, qoder_dir = _make_dirs(tmp_path)
+    (skills_dir / "python-SKILL.md").write_text("# 正文\n", encoding="utf-8")
+    py_target = qoder_dir / "python"
+    py_target.mkdir()
+    (py_target / "SKILL.md").write_text("# 正文\n", encoding="utf-8")
+    dcr_target = qoder_dir / "deep-code-review"
+    dcr_target.mkdir()
+    (dcr_target / "SKILL.md").write_text("# 深度审查模板\n", encoding="utf-8")
+    # 模拟 CI: 无 .qoder/prompts 目录
+    problems = check_skill_sync(skills_dir, qoder_dir)
+    assert problems == [], f"CI 场景不应报多余副本: {problems}"
+
+
 def test_extra_registered_copy_flagged(tmp_path):
     """LOW13②: .qoder/skills 下多余注册副本 (skills/ 无对应源文件) → 报告"""
     skills_dir, qoder_dir = _make_dirs(tmp_path)

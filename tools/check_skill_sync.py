@@ -10,6 +10,12 @@ skills/*.md 与 .qoder/skills/<name>/SKILL.md 是同一技能的仓库副本与�
 import sys
 from pathlib import Path
 
+# 平台本地技能白名单: 源文件在 .qoder/prompts/<name>.prompt.md (平台本地资产, 不入库)，
+# 注册副本在 .qoder/skills/<name>/SKILL.md (入库)。与 AGENTS.md「技能加载」表一致。
+# 不能靠 .qoder/prompts 文件存在性豁免 — CI 全新检出时该目录不存在, 门禁会误报
+# (2026-08-19 CI lint job 实测失败)。
+PLATFORM_LOCAL_SKILLS = frozenset({"deep-code-review"})
+
 
 def strip_frontmatter(text: str) -> str:
     """去除文档开头的 YAML frontmatter 块（--- 到 --- 之间），返回正文。"""
@@ -59,6 +65,9 @@ def check_skill_sync(skills_dir: Path, qoder_skills_dir: Path) -> list[str]:
         if not reg_dir.is_dir():
             continue
         name = reg_dir.name
+        # 白名单内平台本地技能 (源在 .qoder/prompts/, 不入库) 直接豁免
+        if name in PLATFORM_LOCAL_SKILLS:
+            continue
         source = skills_dir / f"{name}-SKILL.md"
         if not source.exists():
             source = skills_dir / f"{name}.md"
