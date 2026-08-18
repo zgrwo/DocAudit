@@ -103,6 +103,9 @@ class DocxConverter(BaseConverter):
                                     if elem is not None:
                                         elements.append(elem)
 
+        # 未解析嵌套内容提示 (仅日志，不改变解析行为)
+        self._warn_unparsed_nested_content(doc)
+
         logger.info("DOCX 解析完毕: %d 元素", len(elements))
 
         # 分页
@@ -114,6 +117,40 @@ class DocxConverter(BaseConverter):
             metadata=metadata,
             pages=pages,
         )
+
+    def _warn_unparsed_nested_content(self, doc: DocxDocument) -> None:
+        """提示当前未解析的嵌套内容：文本框、页眉页脚、脚注。
+
+        仅输出 logger.warning 说明跳过范围，不改变现有解析行为。
+        """
+        # 文本框: 段落内 w:drawing/w:txbxContent (画布文本框中的文字)
+        try:
+            for para in doc.paragraphs:
+                if para._element.findall(".//" + qn("w:txbxContent")):
+                    logger.warning(
+                        "段落包含文本框 (w:txbxContent) 内容，当前跳过未解析: %s",
+                        para.text[:40] or "(无文本)",
+                    )
+        except Exception:
+            pass  # bare-handler-ok — 文本框检测降级，不影响解析
+
+        # 页眉/页脚
+        try:
+            for section in doc.sections:
+                for hf in (section.header, section.footer):
+                    if not hf.is_linked_to_previous and any(p.text.strip() for p in hf.paragraphs):
+                        logger.warning("检测到页眉/页脚内容，当前跳过未解析（不在正文审查范围内）")
+                        break  # 每节最多一条
+        except Exception:
+            pass  # bare-handler-ok — 页眉页脚检测降级，不影响解析
+
+        # 脚注: 文档部件存在 footnotes 关系即视为含脚注
+        try:
+            has_footnotes = any("footnotes" in rel.reltype for rel in doc.part.rels.values())
+            if has_footnotes:
+                logger.warning("检测到脚注内容，当前跳过未解析")
+        except Exception:
+            pass  # bare-handler-ok — 脚注检测降级，不影响解析
 
     def _extract_metadata(self, doc: DocxDocument) -> DocumentMetadata:
         """提取文档元数据"""
@@ -145,15 +182,28 @@ class DocxConverter(BaseConverter):
                 except (AttributeError, ValueError):
                     pass
 
-                runs.append(Run(
-                    text=r.text,
-                    font_name=font.name,
-                    font_size=font.size.pt if font.size else None,
-                    bold=font.bold,
-                    italic=font.italic,
-                    underline=font.underline,
-                    color=font_color,
-                ))
+                # eastAsia 中文字体: w:rPr/w:rFonts 的 w:eastAsia 属性
+                # (python-docx font.name 只读 w:ascii/w:hAnsi，不含中文显示字体)
+                font_name_east_asia = None
+                try:
+                    rPr = r._element.rPr
+                    if rPr is not None and rPr.rFonts is not None:
+                        font_name_east_asia = rPr.rFonts.get(qn("w:eastAsia"))
+                except Exception:
+                    pass  # bare-handler-ok — eastAsia 字体提取降级，失败时保留 None
+
+                runs.append(
+                    Run(
+                        text=r.text,
+                        font_name=font.name,
+                        font_name_east_asia=font_name_east_asia,
+                        font_size=font.size.pt if font.size else None,
+                        bold=font.bold,
+                        italic=font.italic,
+                        underline=font.underline,
+                        color=font_color,
+                    )
+                )
         except Exception:
             # 回退：不提取格式，只提取文本
             runs = [Run(text=para.text)]
@@ -184,31 +234,35 @@ class DocxConverter(BaseConverter):
 
         return PageElement(
             type="text_frame",
-            paragraphs=[Paragraph(
-                text=full_text,
-                runs=runs,
-                level=level,
-                alignment=ALIGNMENT_MAP.get(para.alignment),
-                space_before=(
-                    para.paragraph_format.space_before.pt
-                    if (para.paragraph_format and
-                        para.paragraph_format.space_before is not None)
-                    else None
-                ),
-                space_after=(
-                    para.paragraph_format.space_after.pt
-                    if (para.paragraph_format and
-                        para.paragraph_format.space_after is not None)
-                    else None
-                ),
-                line_spacing=(
-                    para.paragraph_format.line_spacing
-                    if (para.paragraph_format and
-                        para.paragraph_format.line_spacing is not None)
-                    else None
-                ),
-            )],
-            shape_name=style_name,
+            paragraphs=[
+                Paragraph(
+                    text=full_text,
+                    runs=runs,
+                    level=level,
+                    alignment=ALIGNMENT_MAP.get(para.alignment),
+                    space_before=(
+                        para.paragraph_format.space_before.pt
+                        if (
+                            para.paragraph_format and para.paragraph_format.space_before is not None
+                        )
+                        else None
+                    ),
+                    space_after=(
+                        para.paragraph_format.space_after.pt
+                        if (para.paragraph_format and para.paragraph_format.space_after is not None)
+                        else None
+                    ),
+                    line_spacing=(
+                        para.paragraph_format.line_spacing
+                        if (
+                            para.paragraph_format and para.paragraph_format.line_spacing is not None
+                        )
+                        else None
+                    ),
+                )
+            ],
+            # 段落样式名放入 style_name，shape_name 保留给 PPTX shape 名 (默认 None)
+            style_name=style_name,
             # H1 或 H2 均视为标题 (与 _split_into_pages 的页面边界语义一致: level <= 1)
             is_title=is_heading and level is not None and level <= 1,
             is_body=not is_heading,
@@ -251,24 +305,24 @@ class DocxConverter(BaseConverter):
                     except Exception:
                         fill_color = None  # bare-handler-ok — 异常 XML 结构，降级
 
-                    cells.append(TableCell(
-                        text=cell_text,
-                        row=row_idx,
-                        col=col_idx,
-                        font_name=font_name,
-                        font_size=font_size,
-                        fill_color=fill_color,
-                        font_color=font_color,
-                    ))
+                    cells.append(
+                        TableCell(
+                            text=cell_text,
+                            row=row_idx,
+                            col=col_idx,
+                            font_name=font_name,
+                            font_size=font_size,
+                            fill_color=fill_color,
+                            font_color=font_color,
+                        )
+                    )
 
             nrows = len(table.rows)
             # 按行分组 (单次遍历，与 PptxConverter._convert_table 一致)
             row_map: dict[int, list[TableCell]] = defaultdict(list)
             for c in cells:
                 row_map[c.row].append(c)
-            rows: list[list[TableCell]] = [
-                row_map[r] for r in sorted(row_map) if r < nrows
-            ]
+            rows: list[list[TableCell]] = [row_map[r] for r in sorted(row_map) if r < nrows]
 
             return PageElement(
                 type="table",
@@ -303,31 +357,41 @@ class DocxConverter(BaseConverter):
         for elem in elements:
             # 标题作为页面边界（但不在 chunk 为空时创建空页）
             if _is_heading(elem) and current_chunk:
-                pages.append(Page(
-                    index=len(pages),
-                    elements=current_chunk,
-                    slide_number=len(pages) + 1,
-                ))
+                pages.append(
+                    Page(
+                        index=len(pages),
+                        elements=current_chunk,
+                        slide_number=len(pages) + 1,
+                    )
+                )
                 current_chunk = []
             current_chunk.append(elem)
             # CHUNK_SIZE 硬上限回退：避免单页元素过多
             if len(current_chunk) >= CHUNK_SIZE:
                 chunk_split_count += 1
-                logger.debug("DOCX 分页: CHUNK_SIZE (%d) 回退触发 (第 %d 次)，当前页 %d 个元素",
-                             CHUNK_SIZE, chunk_split_count, len(current_chunk))
-                pages.append(Page(
-                    index=len(pages),
-                    elements=current_chunk,
-                    slide_number=len(pages) + 1,
-                ))
+                logger.debug(
+                    "DOCX 分页: CHUNK_SIZE (%d) 回退触发 (第 %d 次)，当前页 %d 个元素",
+                    CHUNK_SIZE,
+                    chunk_split_count,
+                    len(current_chunk),
+                )
+                pages.append(
+                    Page(
+                        index=len(pages),
+                        elements=current_chunk,
+                        slide_number=len(pages) + 1,
+                    )
+                )
                 current_chunk = []
 
         if current_chunk:
-            pages.append(Page(
-                index=len(pages),
-                elements=current_chunk,
-                slide_number=len(pages) + 1,
-            ))
+            pages.append(
+                Page(
+                    index=len(pages),
+                    elements=current_chunk,
+                    slide_number=len(pages) + 1,
+                )
+            )
 
         return pages
 

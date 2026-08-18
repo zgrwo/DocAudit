@@ -20,6 +20,7 @@ _LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
 # ── WCAG 对比度 (FMT-008 表格底色 vs 字体色) ────────────────────────────
 # 纯函数，无依赖，便于单元测试与配置驱动。
 
+
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """'#RRGGBB' 或 'RRGGBB' → (r, g, b) 整数元组。非法输入抛 ValueError。"""
     h = hex_color.strip().lstrip("#")
@@ -55,16 +56,16 @@ class FormatAuditor(BaseAuditor):
 
     # 默认配置 (对齐 rules.md FMT-001/FMT-002/FMT-003/FMT-004)
     DEFAULT_ALLOWED_FONTS = ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
-    DEFAULT_TITLE_SIZE_RANGE = (28, 40)     # pt  (rules.md FMT-002: 标题 28-40pt)
-    DEFAULT_BODY_SIZE_RANGE = (12, 22)      # pt  (rules.md FMT-002: 正文 12-22pt)
-    DEFAULT_ALIGNMENT_TOLERANCE = 5.0       # pt — 位置偏差容忍度
-    DEFAULT_MAX_CHINESE_CHARS = 150         # 单段中文字数上限 (~3行×50字/行)
-    DEFAULT_MAX_ENGLISH_CHARS = 300         # 单段英文字符上限 (~3行×100字符/行)
-    DEFAULT_MAX_EXPLICIT_NEWLINES = 3       # 单段显式换行上限
-    DEFAULT_MAX_CHARS_PER_PAGE = 200        # 单页总字数上限
-    DEFAULT_MIN_CONTRAST = 4.5              # FMT-008 正文对比度阈值 (WCAG AA)
-    DEFAULT_LARGE_TEXT_MIN_CONTRAST = 3.0   # FMT-008 大字对比度阈值 (WCAG AA 大字)
-    DEFAULT_LARGE_TEXT_THRESHOLD = 18       # FMT-008 大字字号阈值 (pt)
+    DEFAULT_TITLE_SIZE_RANGE = (28, 40)  # pt  (rules.md FMT-002: 标题 28-40pt)
+    DEFAULT_BODY_SIZE_RANGE = (12, 22)  # pt  (rules.md FMT-002: 正文 12-22pt)
+    DEFAULT_ALIGNMENT_TOLERANCE = 5.0  # pt — 位置偏差容忍度
+    DEFAULT_MAX_CHINESE_CHARS = 150  # 单段中文字数上限 (~3行×50字/行)
+    DEFAULT_MAX_ENGLISH_CHARS = 300  # 单段英文字符上限 (~3行×100字符/行)
+    DEFAULT_MAX_EXPLICIT_NEWLINES = 3  # 单段显式换行上限
+    DEFAULT_MAX_CHARS_PER_PAGE = 200  # 单页总字数上限
+    DEFAULT_MIN_CONTRAST = 4.5  # FMT-008 正文对比度阈值 (WCAG AA)
+    DEFAULT_LARGE_TEXT_MIN_CONTRAST = 3.0  # FMT-008 大字对比度阈值 (WCAG AA 大字)
+    DEFAULT_LARGE_TEXT_THRESHOLD = 18  # FMT-008 大字字号阈值 (pt)
 
     def __init__(self, config: dict | None = None):
         super().__init__(config)
@@ -79,7 +80,9 @@ class FormatAuditor(BaseAuditor):
             self.max_font_types = 3
         self.max_chinese_chars = cfg.get("max_chinese_chars", self.DEFAULT_MAX_CHINESE_CHARS)
         self.max_english_chars = cfg.get("max_english_chars", self.DEFAULT_MAX_ENGLISH_CHARS)
-        self.max_explicit_newlines = cfg.get("max_explicit_newlines", self.DEFAULT_MAX_EXPLICIT_NEWLINES)
+        self.max_explicit_newlines = cfg.get(
+            "max_explicit_newlines", self.DEFAULT_MAX_EXPLICIT_NEWLINES
+        )
         self.max_chars_per_page = cfg.get("max_chars_per_page", self.DEFAULT_MAX_CHARS_PER_PAGE)
         try:
             self.min_contrast = float(cfg.get("min_contrast", self.DEFAULT_MIN_CONTRAST))
@@ -87,12 +90,14 @@ class FormatAuditor(BaseAuditor):
             self.min_contrast = self.DEFAULT_MIN_CONTRAST
         try:
             self.large_text_min_contrast = float(
-                cfg.get("large_text_min_contrast", self.DEFAULT_LARGE_TEXT_MIN_CONTRAST))
+                cfg.get("large_text_min_contrast", self.DEFAULT_LARGE_TEXT_MIN_CONTRAST)
+            )
         except (ValueError, TypeError):
             self.large_text_min_contrast = self.DEFAULT_LARGE_TEXT_MIN_CONTRAST
         try:
             self.large_text_threshold = float(
-                cfg.get("large_text_threshold", self.DEFAULT_LARGE_TEXT_THRESHOLD))
+                cfg.get("large_text_threshold", self.DEFAULT_LARGE_TEXT_THRESHOLD)
+            )
         except (ValueError, TypeError):
             self.large_text_threshold = self.DEFAULT_LARGE_TEXT_THRESHOLD
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
@@ -132,11 +137,13 @@ class FormatAuditor(BaseAuditor):
     def _check_font_consistency(self, page: Page) -> list[AuditFinding]:
         """检查每页字体是否在允许列表中。
 
-        按页+字体聚合，避免对每个 Run 产生独立 finding 导致报告泛滥。
+        西文 (font_name / w:ascii / a:latin) 与中文 (font_name_east_asia /
+        w:eastAsia / a:ea) 分别判定，避免中文正文字体检查半盲。
+        按页+字体+作用域聚合，避免对每个 Run 产生独立 finding 导致报告泛滥。
         """
         findings: list[AuditFinding] = []
-        # 按字体聚合: font_name → list of (run_text, shape_name)
-        violations: dict[str, list[tuple[str, str | None]]] = {}
+        # 按 (字体, 作用域) 聚合: → list of (run_text, shape_name)
+        violations: dict[tuple[str, str], list[tuple[str, str | None]]] = {}
 
         for elem in page.flattened_elements:
             if elem.type != "text_frame":
@@ -144,25 +151,36 @@ class FormatAuditor(BaseAuditor):
             for para in elem.paragraphs:
                 for run in para.runs:
                     if run.font_name and run.font_name not in self.allowed_fonts:
-                        violations.setdefault(run.font_name, []).append(
+                        violations.setdefault((run.font_name, "latin"), []).append(
+                            (run.text[:50], elem.shape_name)
+                        )
+                    # eastAsia 为 None 时跳过 (纯西文 run)
+                    if (
+                        run.font_name_east_asia
+                        and run.font_name_east_asia not in self.allowed_fonts
+                    ):
+                        violations.setdefault((run.font_name_east_asia, "east_asia"), []).append(
                             (run.text[:50], elem.shape_name)
                         )
 
-        for font_name, examples in violations.items():
+        for (font_name, scope), examples in violations.items():
             # 取前 3 个示例
             example_texts = [t for t, _ in examples[:3]]
             ctx = " | ".join(example_texts)
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=FindingSeverity.WARNING,
-                message=f"使用了非标准字体「{font_name}」({len(examples)} 处)",
-                rule_id="FMT-001",
-                page_index=page.index,
-                location=f"第 {page.slide_number or page.index+1} 页",
-                context=f'"{ctx[:145]}"',
-                suggestion=f"建议使用标准字体: {', '.join(self.allowed_fonts[:4])}",
-                metadata={"font": font_name, "count": len(examples)},
-            ))
+            scope_label = "中文（eastAsia）字体" if scope == "east_asia" else "西文（latin）字体"
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.WARNING,
+                    message=f"使用了非标准{scope_label}「{font_name}」({len(examples)} 处)",
+                    rule_id="FMT-001",
+                    page_index=page.index,
+                    location=f"第 {page.slide_number or page.index + 1} 页",
+                    context=f'"{ctx[:145]}"',
+                    suggestion=f"建议使用标准字体: {', '.join(self.allowed_fonts[:4])}",
+                    metadata={"font": font_name, "count": len(examples), "font_scope": scope},
+                )
+            )
 
         return findings
 
@@ -186,16 +204,17 @@ class FormatAuditor(BaseAuditor):
         max_fonts = self.max_font_types
         if len(font_counter) > max_fonts:
             top_fonts = font_counter.most_common(3)
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=FindingSeverity.WARNING,
-                message=f"全文使用了 {len(font_counter)} 种不同字体，建议统一为 2-3 种",
-                rule_id="FMT-001",
-                location="全文",
-                suggestion=f"最常用的字体: "
-                           f"{', '.join(f'{f}({c}次)' for f, c in top_fonts)}",
-                metadata={"font_distribution": dict(font_counter.most_common())},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.WARNING,
+                    message=f"全文使用了 {len(font_counter)} 种不同字体，建议统一为 2-3 种",
+                    rule_id="FMT-001",
+                    location="全文",
+                    suggestion=f"最常用的字体: {', '.join(f'{f}({c}次)' for f, c in top_fonts)}",
+                    metadata={"font_distribution": dict(font_counter.most_common())},
+                )
+            )
 
         return findings
 
@@ -215,50 +234,58 @@ class FormatAuditor(BaseAuditor):
 
                     if elem.is_title:
                         if sz < self.title_size_range[0]:
-                            findings.append(AuditFinding(
-                                type=FindingType.FORMAT,
-                                severity=FindingSeverity.WARNING,
-                                message=f"标题字号过小: {sz}pt（建议 {self.title_size_range[0]}-{self.title_size_range[1]}pt）",
-                                rule_id="FMT-002",
-                                page_index=page.index,
-                                location=f"第 {page.slide_number or page.index+1} 页",
-                                context=f'"{run.text[:40]}" ({sz}pt)',
-                                suggestion=f"建议标题字号 ≥ {self.title_size_range[0]}pt",
-                            ))
+                            findings.append(
+                                AuditFinding(
+                                    type=FindingType.FORMAT,
+                                    severity=FindingSeverity.WARNING,
+                                    message=f"标题字号过小: {sz}pt（建议 {self.title_size_range[0]}-{self.title_size_range[1]}pt）",
+                                    rule_id="FMT-002",
+                                    page_index=page.index,
+                                    location=f"第 {page.slide_number or page.index + 1} 页",
+                                    context=f'"{run.text[:40]}" ({sz}pt)',
+                                    suggestion=f"建议标题字号 ≥ {self.title_size_range[0]}pt",
+                                )
+                            )
                         elif sz > self.title_size_range[1]:
-                            findings.append(AuditFinding(
-                                type=FindingType.FORMAT,
-                                severity=FindingSeverity.WARNING,
-                                message=f"标题字号过大: {sz}pt（建议 {self.title_size_range[0]}-{self.title_size_range[1]}pt）",
-                                rule_id="FMT-002",
-                                page_index=page.index,
-                                location=f"第 {page.slide_number or page.index+1} 页",
-                                context=f'"{run.text[:40]}" ({sz}pt)',
-                                suggestion=f"建议标题字号 ≤ {self.title_size_range[1]}pt",
-                            ))
+                            findings.append(
+                                AuditFinding(
+                                    type=FindingType.FORMAT,
+                                    severity=FindingSeverity.WARNING,
+                                    message=f"标题字号过大: {sz}pt（建议 {self.title_size_range[0]}-{self.title_size_range[1]}pt）",
+                                    rule_id="FMT-002",
+                                    page_index=page.index,
+                                    location=f"第 {page.slide_number or page.index + 1} 页",
+                                    context=f'"{run.text[:40]}" ({sz}pt)',
+                                    suggestion=f"建议标题字号 ≤ {self.title_size_range[1]}pt",
+                                )
+                            )
                     else:
                         if sz < self.body_size_range[0]:
-                            findings.append(AuditFinding(
-                                type=FindingType.FORMAT,
-                                severity=FindingSeverity.WARNING,
-                                message=f"正文字号偏小: {sz}pt（建议 ≥ {self.body_size_range[0]}pt）",
-                                rule_id="FMT-002",
-                                page_index=page.index,
-                                location=f"第 {page.slide_number or page.index+1} 页",
-                                context=f'"{run.text[:40]}" ({sz}pt)',
-                                suggestion=f"建议正文字号 ≥ {self.body_size_range[0]}pt",
-                            ))
+                            findings.append(
+                                AuditFinding(
+                                    type=FindingType.FORMAT,
+                                    severity=FindingSeverity.WARNING,
+                                    message=f"正文字号偏小: {sz}pt（建议 ≥ {self.body_size_range[0]}pt）",
+                                    rule_id="FMT-002",
+                                    page_index=page.index,
+                                    location=f"第 {page.slide_number or page.index + 1} 页",
+                                    context=f'"{run.text[:40]}" ({sz}pt)',
+                                    suggestion=f"建议正文字号 ≥ {self.body_size_range[0]}pt",
+                                )
+                            )
                         elif sz > self.body_size_range[1]:
-                            findings.append(AuditFinding(
-                                type=FindingType.FORMAT,
-                                severity=FindingSeverity.WARNING,
-                                message=f"正文字号过大: {sz}pt（建议 ≤ {self.body_size_range[1]}pt）",
-                                rule_id="FMT-002",
-                                page_index=page.index,
-                                location=f"第 {page.slide_number or page.index+1} 页",
-                                context=f'"{run.text[:40]}" ({sz}pt)',
-                                suggestion=f"建议正文字号 ≤ {self.body_size_range[1]}pt",
-                            ))
+                            findings.append(
+                                AuditFinding(
+                                    type=FindingType.FORMAT,
+                                    severity=FindingSeverity.WARNING,
+                                    message=f"正文字号过大: {sz}pt（建议 ≤ {self.body_size_range[1]}pt）",
+                                    rule_id="FMT-002",
+                                    page_index=page.index,
+                                    location=f"第 {page.slide_number or page.index + 1} 页",
+                                    context=f'"{run.text[:40]}" ({sz}pt)',
+                                    suggestion=f"建议正文字号 ≤ {self.body_size_range[1]}pt",
+                                )
+                            )
 
         return findings
 
@@ -269,8 +296,9 @@ class FormatAuditor(BaseAuditor):
         findings: list[AuditFinding] = []
 
         # 按 left 位置聚类 (已过滤 left=None，避免 None 与 0 混淆)
-        text_frames = [e for e in page.flattened_elements if e.type == "text_frame"
-                       and e.left is not None]
+        text_frames = [
+            e for e in page.flattened_elements if e.type == "text_frame" and e.left is not None
+        ]
         if len(text_frames) < 2:
             return findings
 
@@ -300,16 +328,18 @@ class FormatAuditor(BaseAuditor):
                 avg_top = sum(tops) / len(tops)
                 for i, f in enumerate(cluster):
                     if f.top is not None and abs(f.top - avg_top) > self.alignment_tolerance * 2:
-                        findings.append(AuditFinding(
-                            type=FindingType.FORMAT,
-                            severity=FindingSeverity.INFO,
-                            message="文本框垂直位置不一致，建议对齐",
-                            rule_id=None,  # 无对应 rules.md 规则，仅供参考
-                            page_index=page.index,
-                            location=f"第 {page.slide_number or page.index+1} 页",
-                            context=f'"{f.shape_name or "文本框"}" top={f.top:.0f}pt (同列其他 ~{avg_top:.0f}pt)',
-                            suggestion="调整文本框 top 值使其与同列其他元素对齐",
-                        ))
+                        findings.append(
+                            AuditFinding(
+                                type=FindingType.FORMAT,
+                                severity=FindingSeverity.INFO,
+                                message="文本框垂直位置不一致，建议对齐",
+                                rule_id=None,  # 无对应 rules.md 规则，仅供参考
+                                page_index=page.index,
+                                location=f"第 {page.slide_number or page.index + 1} 页",
+                                context=f'"{f.shape_name or "文本框"}" top={f.top:.0f}pt (同列其他 ~{avg_top:.0f}pt)',
+                                suggestion="调整文本框 top 值使其与同列其他元素对齐",
+                            )
+                        )
 
         return findings
 
@@ -328,13 +358,15 @@ class FormatAuditor(BaseAuditor):
         title_layouts = [name for name in layout_usage if "标题" in name]
         for name in title_layouts:
             if layout_usage[name] > 1:
-                findings.append(AuditFinding(
-                    type=FindingType.FORMAT,
-                    severity=FindingSeverity.INFO,
-                    message=f"标题版式「{name}」被使用了 {layout_usage[name]} 次，建议只用于封面",
-                    location="全文",
-                    suggestion="内容页请使用「标题和内容」或「仅内容」版式",
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message=f"标题版式「{name}」被使用了 {layout_usage[name]} 次，建议只用于封面",
+                        location="全文",
+                        suggestion="内容页请使用「标题和内容」或「仅内容」版式",
+                    )
+                )
 
         return findings
 
@@ -349,7 +381,7 @@ class FormatAuditor(BaseAuditor):
         3. 英文段落总字符数 >= max_english_chars
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         for elem in page.flattened_elements:
             if elem.type != "text_frame":
@@ -366,7 +398,9 @@ class FormatAuditor(BaseAuditor):
                 reasons: list[str] = []
 
                 if newline_count >= self.max_explicit_newlines:
-                    reasons.append(f"显式换行 {newline_count} 行 (上限 {self.max_explicit_newlines})")
+                    reasons.append(
+                        f"显式换行 {newline_count} 行 (上限 {self.max_explicit_newlines})"
+                    )
                 if chinese_chars >= self.max_chinese_chars:
                     reasons.append(f"中文字 {chinese_chars} 个 (上限 {self.max_chinese_chars})")
                 if english_chars >= self.max_english_chars:
@@ -374,21 +408,23 @@ class FormatAuditor(BaseAuditor):
 
                 if reasons:
                     preview = text[:80].replace("\n", "\\n")
-                    findings.append(AuditFinding(
-                        type=FindingType.FORMAT,
-                        severity=FindingSeverity.WARNING,
-                        message=f"段落过长 (超过3行): {'; '.join(reasons)}",
-                        rule_id="FMT-004",
-                        page_index=page.index,
-                        location=page_label,
-                        context=preview + ("..." if len(text) > 80 else ""),
-                        suggestion="将长段落拆分为多个短段落或精简为要点列表 (bullet points)",
-                        metadata={
-                            "newline_count": newline_count,
-                            "chinese_chars": chinese_chars,
-                            "total_length": total_len,
-                        },
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.FORMAT,
+                            severity=FindingSeverity.WARNING,
+                            message=f"段落过长 (超过3行): {'; '.join(reasons)}",
+                            rule_id="FMT-004",
+                            page_index=page.index,
+                            location=page_label,
+                            context=preview + ("..." if len(text) > 80 else ""),
+                            suggestion="将长段落拆分为多个短段落或精简为要点列表 (bullet points)",
+                            metadata={
+                                "newline_count": newline_count,
+                                "chinese_chars": chinese_chars,
+                                "total_length": total_len,
+                            },
+                        )
+                    )
 
         return findings
 
@@ -399,7 +435,7 @@ class FormatAuditor(BaseAuditor):
         容差 5pt。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
         TOL = 5.0
         SW = doc.metadata.custom_properties.get("slide_width", 960) or 960
         SH = doc.metadata.custom_properties.get("slide_height", 540) or 540
@@ -423,25 +459,31 @@ class FormatAuditor(BaseAuditor):
             if issues:
                 w_str = f"{elem.width:.0f}" if elem.width is not None else "?"
                 h_str = f"{elem.height:.0f}" if elem.height is not None else "?"
-                findings.append(AuditFinding(
-                    type=FindingType.FORMAT,
-                    severity=FindingSeverity.ERROR,
-                    message=f"元素超出页面边界: {'; '.join(issues)}",
-                    rule_id="FMT-005",
-                    page_index=page.index,
-                    location=page_label,
-                    context=f"{elem.shape_name or elem.type} ({elem.left:.0f},{elem.top:.0f},{w_str}x{h_str})"[:150],
-                    suggestion="调整元素位置或大小，使其适应幻灯片边界",
-                ))
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.ERROR,
+                        message=f"元素超出页面边界: {'; '.join(issues)}",
+                        rule_id="FMT-005",
+                        page_index=page.index,
+                        location=page_label,
+                        context=f"{elem.shape_name or elem.type} ({elem.left:.0f},{elem.top:.0f},{w_str}x{h_str})"[
+                            :150
+                        ],
+                        suggestion="调整元素位置或大小，使其适应幻灯片边界",
+                    )
+                )
 
         return findings
 
-    def _check_per_page_char_limit(self, page: Page, doc: Document | None = None) -> list[AuditFinding]:
+    def _check_per_page_char_limit(
+        self, page: Page, doc: Document | None = None
+    ) -> list[AuditFinding]:
         """检查单页文本量是否超过上限 (FMT-003)。
         doc 参数仅为 CustomRulesAuditor per-page dispatch 接口一致性保留，未使用。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         total_chars = sum(
             len(p.text)
@@ -459,17 +501,19 @@ class FormatAuditor(BaseAuditor):
         )
 
         if total_chars > self.max_chars_per_page:
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=FindingSeverity.WARNING,
-                message=f"单页文本量过大: {total_chars} 字 (上限 {self.max_chars_per_page})",
-                rule_id="FMT-003",
-                page_index=page.index,
-                location=page_label,
-                context=f"共 {total_chars} 个字符",
-                suggestion="精简文本内容或拆分为多页，确保每页信息密度合理",
-                metadata={"total_chars": total_chars, "limit": self.max_chars_per_page},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.WARNING,
+                    message=f"单页文本量过大: {total_chars} 字 (上限 {self.max_chars_per_page})",
+                    rule_id="FMT-003",
+                    page_index=page.index,
+                    location=page_label,
+                    context=f"共 {total_chars} 个字符",
+                    suggestion="精简文本内容或拆分为多页，确保每页信息密度合理",
+                    metadata={"total_chars": total_chars, "limit": self.max_chars_per_page},
+                )
+            )
 
         return findings
 
@@ -484,7 +528,7 @@ class FormatAuditor(BaseAuditor):
         doc 参数仅为 CustomRulesAuditor per-page dispatch 接口一致性保留。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         for elem in page.flattened_elements:
             if elem.type != "table":
@@ -507,31 +551,33 @@ class FormatAuditor(BaseAuditor):
                     if ratio >= threshold:
                         continue
 
-                    findings.append(AuditFinding(
-                        type=FindingType.FORMAT,
-                        severity=FindingSeverity.WARNING,
-                        message=(
-                            f"表格单元格文字与底色对比度不足: {ratio:.1f}:1 "
-                            f"(阈值 {threshold}:1)"
-                        ),
-                        rule_id="FMT-008",
-                        page_index=page.index,
-                        location=f"{page_label} [表格 第{cell.row + 1}行 第{cell.col + 1}列]",
-                        # 前缀含行列坐标: dedup_key 用 context 哈希, 同页同文本的
-                        # 不同单元格必须互异, 否则 deduplicate 折叠为一条 (信息丢失)
-                        context=f"[{cell.row + 1}行 {cell.col + 1}列] {text[:85]}",
-                        suggestion=(
-                            "深色底色配浅色文字、浅色底色配深色文字，"
-                            f"确保对比度不低于 {threshold}:1"
-                        ),
-                        metadata={
-                            "cell": (cell.row, cell.col),
-                            "fill_color": cell.fill_color,
-                            "font_color": cell.font_color,
-                            "ratio": round(ratio, 2),
-                            "threshold": threshold,
-                        },
-                    ))
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.FORMAT,
+                            severity=FindingSeverity.WARNING,
+                            message=(
+                                f"表格单元格文字与底色对比度不足: {ratio:.1f}:1 "
+                                f"(阈值 {threshold}:1)"
+                            ),
+                            rule_id="FMT-008",
+                            page_index=page.index,
+                            location=f"{page_label} [表格 第{cell.row + 1}行 第{cell.col + 1}列]",
+                            # 前缀含行列坐标: dedup_key 用 context 哈希, 同页同文本的
+                            # 不同单元格必须互异, 否则 deduplicate 折叠为一条 (信息丢失)
+                            context=f"[{cell.row + 1}行 {cell.col + 1}列] {text[:85]}",
+                            suggestion=(
+                                "深色底色配浅色文字、浅色底色配深色文字，"
+                                f"确保对比度不低于 {threshold}:1"
+                            ),
+                            metadata={
+                                "cell": (cell.row, cell.col),
+                                "fill_color": cell.fill_color,
+                                "font_color": cell.font_color,
+                                "ratio": round(ratio, 2),
+                                "threshold": threshold,
+                            },
+                        )
+                    )
 
         return findings
 
@@ -541,7 +587,7 @@ class FormatAuditor(BaseAuditor):
         检测 PPTX 中未填充内容的占位符，避免残留空白模板区域。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         for elem in page.flattened_elements:
             if elem.type != "text_frame":
@@ -561,17 +607,19 @@ class FormatAuditor(BaseAuditor):
             else:
                 placeholder_type = "通用"
 
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=FindingSeverity.WARNING,
-                message=f"检测到空的{placeholder_type}占位符，建议填入内容或删除",
-                rule_id="FMT-006",
-                page_index=page.index,
-                location=page_label,
-                context=f"{elem.shape_name or '占位符'} ({placeholder_type})",
-                suggestion="在该占位符中填入相应内容，或从幻灯片版式中删除此占位符",
-                metadata={"shape_name": elem.shape_name, "placeholder_type": placeholder_type},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.WARNING,
+                    message=f"检测到空的{placeholder_type}占位符，建议填入内容或删除",
+                    rule_id="FMT-006",
+                    page_index=page.index,
+                    location=page_label,
+                    context=f"{elem.shape_name or '占位符'} ({placeholder_type})",
+                    suggestion="在该占位符中填入相应内容，或从幻灯片版式中删除此占位符",
+                    metadata={"shape_name": elem.shape_name, "placeholder_type": placeholder_type},
+                )
+            )
 
         return findings
 
@@ -581,7 +629,7 @@ class FormatAuditor(BaseAuditor):
         检测同一页内是否混用了不同类型的项目符号（如实心圆点 + 数字编号 + 字母编号）。
         """
         findings: list[AuditFinding] = []
-        page_label = f"第 {page.slide_number or page.index+1} 页"
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         categories_found: set[str] = set()
         example_texts: dict[str, str] = {}
@@ -608,19 +656,25 @@ class FormatAuditor(BaseAuditor):
 
         # 如果同一页内出现了多种类型的项目符号 → 报告
         if len(categories_found) >= 2:
-            cat_names = {"symbol": "符号(•-*)", "numbered": "数字(1. 2.)", "lettered": "字母(a) i.)"}
+            cat_names = {
+                "symbol": "符号(•-*)",
+                "numbered": "数字(1. 2.)",
+                "lettered": "字母(a) i.)",
+            }
             found_names = [cat_names.get(c, c) for c in sorted(categories_found)]
             examples = " | ".join(example_texts.get(c, "") for c in sorted(categories_found))
-            findings.append(AuditFinding(
-                type=FindingType.FORMAT,
-                severity=FindingSeverity.INFO,
-                message=f"该页混用了多种项目符号样式: {', '.join(found_names)}",
-                rule_id="FMT-007",
-                page_index=page.index,
-                location=page_label,
-                context=examples[:150],
-                suggestion="建议统一该页的项目符号样式，选择一种并全文保持一致",
-                metadata={"bullet_categories": sorted(categories_found)},
-            ))
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.INFO,
+                    message=f"该页混用了多种项目符号样式: {', '.join(found_names)}",
+                    rule_id="FMT-007",
+                    page_index=page.index,
+                    location=page_label,
+                    context=examples[:150],
+                    suggestion="建议统一该页的项目符号样式，选择一种并全文保持一致",
+                    metadata={"bullet_categories": sorted(categories_found)},
+                )
+            )
 
         return findings

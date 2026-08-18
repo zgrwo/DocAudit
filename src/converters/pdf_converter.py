@@ -41,7 +41,7 @@ class PdfConverter(BaseConverter):
         except ImportError:
             raise ImportError(
                 "PDF 转换需要安装 docling 依赖。请运行: "
-                "pip install doc-audit[pdf] 或 pip install docling"
+                "pip install docaudit[pdf] 或 pip install docling"
             )
 
         logger.info("使用 Docling 解析 PDF: %s", source_path.name)
@@ -68,14 +68,14 @@ class PdfConverter(BaseConverter):
                 # 提取页面上的文本项 (适配 Docling 不同版本 API)
                 try:
                     uses_cells = False
-                    if hasattr(docling_page, 'cells'):
+                    if hasattr(docling_page, "cells"):
                         uses_cells = True
                         for cell in docling_page.cells:
                             elem = self._convert_cell(cell)
                             if elem is not None:
                                 elements.append(elem)
                         # cells API 已包含表格内容，不重复提取
-                    elif hasattr(docling_page, 'items'):
+                    elif hasattr(docling_page, "items"):
                         for item in docling_page.items:
                             elem = self._convert_item(item)
                             if elem is not None:
@@ -84,16 +84,22 @@ class PdfConverter(BaseConverter):
                         # 未知 Docling API: 回退到文本导出，避免静默丢页
                         logger.debug("Docling page %d 结构未知，回退到文本导出", page_idx)
                         try:
-                            page_text = docling_page.export_to_markdown() if hasattr(docling_page, 'export_to_markdown') else ""
+                            page_text = (
+                                docling_page.export_to_markdown()
+                                if hasattr(docling_page, "export_to_markdown")
+                                else ""
+                            )
                         except Exception:
                             page_text = ""
                         if page_text.strip():
-                            elements.append(PageElement(
-                                type="text_frame",
-                                paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
-                            ))
+                            elements.append(
+                                PageElement(
+                                    type="text_frame",
+                                    paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
+                                )
+                            )
                     # 非 cells API 路径: 尝试提取结构化表格 (统一处理，避免 items/fallback 分支重复)
-                    if not uses_cells and hasattr(docling_page, 'tables'):
+                    if not uses_cells and hasattr(docling_page, "tables"):
                         for table in docling_page.tables:
                             elem = self._convert_docling_table(table)
                             if elem is not None:
@@ -101,35 +107,45 @@ class PdfConverter(BaseConverter):
                 except Exception as e:
                     logger.warning("Docling 页面 %d 解析失败: %s，跳过该页", page_idx, e)
 
-                pages.append(Page(
-                    index=page_idx,
-                    elements=elements,
-                    slide_number=page_idx + 1,
-                ))
+                pages.append(
+                    Page(
+                        index=page_idx,
+                        elements=elements,
+                        slide_number=page_idx + 1,
+                    )
+                )
         else:
             # 回退：使用 Markdown 导出并按页拆分
             md_text = docling_doc.export_to_markdown()
             for page_idx, page_text in enumerate(md_text.split("\n\n---\n\n")):
                 if page_text.strip():
-                    pages.append(Page(
-                        index=page_idx,
-                        elements=[PageElement(
-                            type="text_frame",
-                            paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
-                        )],
-                        slide_number=page_idx + 1,
-                    ))
+                    pages.append(
+                        Page(
+                            index=page_idx,
+                            elements=[
+                                PageElement(
+                                    type="text_frame",
+                                    paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
+                                )
+                            ],
+                            slide_number=page_idx + 1,
+                        )
+                    )
 
         if not pages:
             # 最终回退
-            pages.append(Page(
-                index=0,
-                elements=[PageElement(
-                    type="text_frame",
-                    paragraphs=[Paragraph(text=docling_doc.export_to_markdown(), runs=[])],
-                )],
-                slide_number=1,
-            ))
+            pages.append(
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text=docling_doc.export_to_markdown(), runs=[])],
+                        )
+                    ],
+                    slide_number=1,
+                )
+            )
 
         return Document(
             source_path=str(source_path),
@@ -143,7 +159,7 @@ class PdfConverter(BaseConverter):
 
         表格 cell 暂不拆分结构，统一作为 text_frame 保留文本内容。
         """
-        cell_text = getattr(cell, 'text', '')
+        cell_text = getattr(cell, "text", "")
         if not cell_text or not str(cell_text).strip():
             return None
 
@@ -154,20 +170,22 @@ class PdfConverter(BaseConverter):
 
     def _convert_item(self, item) -> PageElement | None:
         """Docling item → PageElement"""
-        item_text = getattr(item, 'text', str(item))
+        item_text = getattr(item, "text", str(item))
         if not item_text or not str(item_text).strip():
             return None
 
         # 尝试获取标题层级
-        level = getattr(item, 'heading_level', None)
+        level = getattr(item, "heading_level", None)
 
         return PageElement(
             type="text_frame",
-            paragraphs=[Paragraph(
-                text=str(item_text).strip(),
-                runs=[],
-                level=level,
-            )],
+            paragraphs=[
+                Paragraph(
+                    text=str(item_text).strip(),
+                    runs=[],
+                    level=level,
+                )
+            ],
             is_title=(level == 1),
         )
 
@@ -175,13 +193,11 @@ class PdfConverter(BaseConverter):
         """Docling table → PageElement (表格结构)"""
         try:
             rows: list[list[TableCell]] = []
-            if hasattr(table, 'export_to_dataframe'):
+            if hasattr(table, "export_to_dataframe"):
                 try:
                     import pandas  # noqa: F401 — availability check
                 except ImportError:
-                    logger.warning(
-                        "PDF 表格转换需要 pandas。请运行: pip install doc-audit[pdf]"
-                    )
+                    logger.warning("PDF 表格转换需要 pandas。请运行: pip install docaudit[pdf]")
                     return None
                 df = table.export_to_dataframe()
                 if df is None:
@@ -189,21 +205,20 @@ class PdfConverter(BaseConverter):
                     return None
                 for row_idx, (_, row) in enumerate(df.iterrows()):
                     row_cells = [
-                        TableCell(text=str(v) if v is not None else "",
-                                  row=row_idx, col=col_idx)
+                        TableCell(text=str(v) if v is not None else "", row=row_idx, col=col_idx)
                         for col_idx, v in enumerate(row)
                     ]
                     if row_cells:
                         rows.append(row_cells)
             else:
                 # 回退：尝试 cells 属性
-                table_cells = getattr(table, 'cells', [])
+                table_cells = getattr(table, "cells", [])
                 if table_cells:
                     row_map: dict[int, list[TableCell]] = {}
                     for cell in table_cells:
-                        r = getattr(cell, 'row', 0)
-                        c = getattr(cell, 'col', 0)
-                        t = getattr(cell, 'text', '')
+                        r = getattr(cell, "row", 0)
+                        c = getattr(cell, "col", 0)
+                        t = getattr(cell, "text", "")
                         row_map.setdefault(r, []).append(
                             TableCell(text=str(t).strip(), row=r, col=c)
                         )

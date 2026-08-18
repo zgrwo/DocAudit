@@ -8,6 +8,7 @@ from typing import Any
 from pptx import Presentation
 from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.oxml.ns import qn
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -98,16 +99,19 @@ class PptxConverter(BaseConverter):
                 if element is not None:
                     elements.append(element)
 
-            pages.append(Page(
-                index=slide_idx,
-                elements=elements,
-                layout_name=layout_name,
-                slide_number=slide_idx + 1,
-                notes=notes_text or None,
-            ))
+            pages.append(
+                Page(
+                    index=slide_idx,
+                    elements=elements,
+                    layout_name=layout_name,
+                    slide_number=slide_idx + 1,
+                    notes=notes_text or None,
+                )
+            )
 
-        logger.info("PPTX 解析完毕: %d slides, %d 总元素",
-                     len(pages), sum(len(p.elements) for p in pages))
+        logger.info(
+            "PPTX 解析完毕: %d slides, %d 总元素", len(pages), sum(len(p.elements) for p in pages)
+        )
 
         return Document(
             source_path=str(source_path),
@@ -161,29 +165,48 @@ class PptxConverter(BaseConverter):
                 font = run_elem.font
                 # 安全获取颜色
                 try:
-                    font_color = _rgb_to_hex(font.color.rgb) if font.color and font.color.rgb else None
+                    font_color = (
+                        _rgb_to_hex(font.color.rgb) if font.color and font.color.rgb else None
+                    )
                 except Exception:
                     font_color = None
 
-                runs.append(Run(
-                    text=run_elem.text,
-                    font_name=font.name,
-                    font_size=font.size / 12700 if font.size else None,  # EMU → pt
-                    bold=font.bold,
-                    italic=font.italic,
-                    underline=font.underline,
-                    color=font_color,
-                ))
+                # eastAsia 中文字体: a:rPr 下的 a:ea typeface
+                # (python-pptx font.name 只读 a:latin，不含中文显示字体)
+                font_name_east_asia = None
+                try:
+                    rPr = run_elem.font._rPr
+                    if rPr is not None:
+                        ea = rPr.find(qn("a:ea"))
+                        if ea is not None:
+                            font_name_east_asia = ea.get("typeface")
+                except Exception:
+                    pass  # bare-handler-ok — ea 字体提取降级，失败时保留 None
 
-            paragraphs.append(Paragraph(
-                text=para.text,
-                runs=runs,
-                level=para.level,
-                alignment=_pptx_alignment(para.alignment),
-                space_before=para.space_before.pt if para.space_before else None,
-                space_after=para.space_after.pt if para.space_after else None,
-                line_spacing=para.line_spacing if para.line_spacing else None,
-            ))
+                runs.append(
+                    Run(
+                        text=run_elem.text,
+                        font_name=font.name,
+                        font_name_east_asia=font_name_east_asia,
+                        font_size=font.size / 12700 if font.size else None,  # EMU → pt
+                        bold=font.bold,
+                        italic=font.italic,
+                        underline=font.underline,
+                        color=font_color,
+                    )
+                )
+
+            paragraphs.append(
+                Paragraph(
+                    text=para.text,
+                    runs=runs,
+                    level=para.level,
+                    alignment=_pptx_alignment(para.alignment),
+                    space_before=para.space_before.pt if para.space_before else None,
+                    space_after=para.space_after.pt if para.space_after else None,
+                    line_spacing=para.line_spacing if para.line_spacing else None,
+                )
+            )
 
         # 判断是否为占位符
         is_placeholder = shape.is_placeholder
@@ -202,8 +225,10 @@ class PptxConverter(BaseConverter):
             width=_emu_to_pt(shape.width) if shape.width is not None else None,
             height=_emu_to_pt(shape.height) if shape.height is not None else None,
             shape_name=shape.name,
-            is_title=(is_placeholder and ph_type in (1, 3)),    # TITLE=1, CENTER_TITLE=3
-            is_body=(is_placeholder and ph_type in (2, 4, 6)),   # BODY=2, SUBTITLE=4, VERTICAL_BODY=6
+            is_title=(is_placeholder and ph_type in (1, 3)),  # TITLE=1, CENTER_TITLE=3
+            is_body=(
+                is_placeholder and ph_type in (2, 4, 6)
+            ),  # BODY=2, SUBTITLE=4, VERTICAL_BODY=6
             is_placeholder=is_placeholder,
         )
 
@@ -241,15 +266,17 @@ class PptxConverter(BaseConverter):
                 except Exception:
                     fill_color = None  # bare-handler-ok — 异常填充结构，降级
 
-                cells.append(TableCell(
-                    text=cell_text,
-                    row=row_idx,
-                    col=col_idx,
-                    font_name=font_name,
-                    font_size=font_size,
-                    fill_color=fill_color,
-                    font_color=font_color,
-                ))
+                cells.append(
+                    TableCell(
+                        text=cell_text,
+                        row=row_idx,
+                        col=col_idx,
+                        font_name=font_name,
+                        font_size=font_size,
+                        fill_color=fill_color,
+                        font_color=font_color,
+                    )
+                )
 
         # 按行分组 (单次遍历)
         row_map: dict[int, list[TableCell]] = defaultdict(list)
@@ -338,7 +365,7 @@ class PptxConverter(BaseConverter):
             for rel in chart_part.rels.values():
                 if "package" not in rel.reltype:
                     continue
-                if hasattr(rel, 'target_part') and rel.target_part.blob:
+                if hasattr(rel, "target_part") and rel.target_part.blob:
                     blob = rel.target_part.blob
                     if blob and len(blob) > 0:
                         return {"source": "embedded_excel", "size": len(blob)}
@@ -348,6 +375,7 @@ class PptxConverter(BaseConverter):
 
 
 # ── 工具函数 ────────────────────────────────────────────────
+
 
 def _emu_to_pt(emu_value) -> float | None:
     """EMU (English Metric Unit) → points (1 pt = 12700 EMU)"""

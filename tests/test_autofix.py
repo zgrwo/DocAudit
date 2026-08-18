@@ -1,6 +1,5 @@
 """AutoFixer 单元测试 — 字体修复 / 间距修复 / 原子写入 / 链式修复"""
 
-
 import pytest
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -212,3 +211,96 @@ class TestChainedFix:
         assert font_fixes >= 1
         assert spacing_fixes >= 1
         assert out.exists()
+
+
+class TestFixEastAsia:
+    """eastAsia 中文字体修复: 字体替换必须同时写 latin 与 ea (FMT-001 中文修复生效)"""
+
+    def test_fix_docx_replaces_east_asia(self, fixer, tmp_path):
+        """DOCX: 非允许的 w:eastAsia 被替换为默认字体"""
+        from docx import Document
+        from docx.oxml.ns import qn
+
+        doc = Document()
+        p = doc.add_paragraph()
+        run = p.add_run("中文正文")
+        run.font.name = "Arial"  # 允许
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+        src = tmp_path / "ea_src.docx"
+        doc.save(str(src))
+
+        out = tmp_path / "ea_out.docx"
+        fixer.fix_docx(src, out)
+        assert out.exists()
+        assert fixer.fix_count >= 1
+
+        # 重开验证 eastAsia 已改为允许字体
+        doc2 = Document(str(out))
+        run2 = next(r for para in doc2.paragraphs for r in para.runs)
+        rPr2 = run2._element.rPr
+        assert rPr2 is not None and rPr2.rFonts is not None
+        ea2 = rPr2.rFonts.get(qn("w:eastAsia"))
+        assert ea2 in fixer.allowed_fonts, f"eastAsia 应变为允许字体, got {ea2}"
+        # latin 保持不变 (Arial 本就在允许列表)
+        assert run2.font.name == "Arial"
+
+    def test_fix_docx_east_asia_idempotent(self, fixer, tmp_path):
+        """DOCX: 二次运行幂等 (fix_count == 0)"""
+        from docx import Document
+        from docx.oxml.ns import qn
+
+        doc = Document()
+        p = doc.add_paragraph()
+        run = p.add_run("中文正文")
+        run.font.name = "Arial"
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+        src = tmp_path / "ea_src.docx"
+        doc.save(str(src))
+
+        out1 = tmp_path / "ea_1.docx"
+        fixer.fix_docx(src, out1)
+        assert fixer.fix_count >= 1
+        out2 = tmp_path / "ea_2.docx"
+        fixer.fix_docx(out1, out2)
+        assert fixer.fix_count == 0, f"二次运行应幂等, fix_count={fixer.fix_count}"
+
+    def test_fix_pptx_replaces_ea(self, fixer, tmp_path):
+        """PPTX: 非允许的 a:ea typeface 被替换为默认字体"""
+        from lxml import etree
+        from pptx import Presentation
+        from pptx.oxml.ns import qn
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+        run = txBox.text_frame.paragraphs[0].add_run()
+        run.text = "中文正文"
+        run.font.name = "Arial"
+        ea = etree.SubElement(run.font._rPr, qn("a:ea"))
+        ea.set("typeface", "宋体")
+        src = tmp_path / "ea_src.pptx"
+        prs.save(str(src))
+
+        out = tmp_path / "ea_out.pptx"
+        fixer.fix_pptx(src, out)
+        assert out.exists()
+        assert fixer.fix_count >= 1
+
+        # 重开验证 a:ea 已改为允许字体
+        prs2 = Presentation(str(out))
+        run2 = next(
+            r
+            for slide in prs2.slides
+            for shape in slide.shapes
+            if shape.has_text_frame
+            for para in shape.text_frame.paragraphs
+            for r in para.runs
+        )
+        rPr2 = run2.font._rPr
+        ea2 = rPr2.find(qn("a:ea"))
+        assert ea2 is not None
+        assert ea2.get("typeface") in fixer.allowed_fonts, (
+            f"a:ea 应变为允许字体, got {ea2.get('typeface')}"
+        )
+        assert run2.font.name == "Arial"  # latin 不变

@@ -51,6 +51,7 @@ class MarkdownConverter(BaseConverter):
             if len(parts) >= 3:
                 try:
                     import yaml
+
                     frontmatter = yaml.safe_load(parts[1]) or {}
                 except Exception:
                     pass  # bare-handler-ok — frontmatter 解析失败时忽略，按纯正文处理
@@ -87,21 +88,27 @@ class MarkdownConverter(BaseConverter):
 
             elements = self._parse_elements(page_text)
             if elements:
-                pages.append(Page(
-                    index=idx,
-                    elements=elements,
-                    slide_number=idx + 1,
-                ))
+                pages.append(
+                    Page(
+                        index=idx,
+                        elements=elements,
+                        slide_number=idx + 1,
+                    )
+                )
 
         if not pages:
-            pages.append(Page(
-                index=0,
-                elements=[PageElement(
-                    type="text_frame",
-                    paragraphs=[Paragraph(text=text.strip(), runs=[])],
-                )],
-                slide_number=1,
-            ))
+            pages.append(
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text=text.strip(), runs=[])],
+                        )
+                    ],
+                    slide_number=1,
+                )
+            )
 
         return pages
 
@@ -119,10 +126,12 @@ class MarkdownConverter(BaseConverter):
                 if in_code_block:
                     # 代码块结束
                     current_lines.append(line)
-                    elements.append(PageElement(
-                        type="text_frame",
-                        paragraphs=[Paragraph(text="\n".join(current_lines), runs=[])],
-                    ))
+                    elements.append(
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text="\n".join(current_lines), runs=[])],
+                        )
+                    )
                     current_lines = []
                     in_code_block = False
                 else:
@@ -147,11 +156,13 @@ class MarkdownConverter(BaseConverter):
                     current_lines = []
                 level = len(m.group(1))
                 heading_text = m.group(2)
-                elements.append(PageElement(
-                    type="text_frame",
-                    paragraphs=[Paragraph(text=heading_text.strip(), runs=[], level=level)],
-                    is_title=(level == 1),
-                ))
+                elements.append(
+                    PageElement(
+                        type="text_frame",
+                        paragraphs=[Paragraph(text=heading_text.strip(), runs=[], level=level)],
+                        is_title=(level == 1),
+                    )
+                )
                 current_type = None
                 continue
 
@@ -166,9 +177,7 @@ class MarkdownConverter(BaseConverter):
             # 表格行 (支持可选前导 | 的 GFM 语法: "Name | Age" 和 "| Name | Age |" 均可)
             # 排除: 水平分隔线 (---) 与列表标记开头的行 (如 "- 项 A | 内容" 是列表非表格)
             stripped = line.strip()
-            is_list_marker = (
-                re.match(r"^[\-*+]\s", stripped) or re.match(r"^\d+\.\s", stripped)
-            )
+            is_list_marker = re.match(r"^[\-*+]\s", stripped) or re.match(r"^\d+\.\s", stripped)
             if (
                 "|" in stripped
                 and not re.match(r"^[\-*_]{3,}\s*$", stripped)
@@ -208,10 +217,12 @@ class MarkdownConverter(BaseConverter):
         if current_lines:
             if in_code_block:
                 # 未闭合的代码块 — 仍作为代码块保留
-                elements.append(PageElement(
-                    type="text_frame",
-                    paragraphs=[Paragraph(text="\n".join(current_lines), runs=[])],
-                ))
+                elements.append(
+                    PageElement(
+                        type="text_frame",
+                        paragraphs=[Paragraph(text="\n".join(current_lines), runs=[])],
+                    )
+                )
             else:
                 elements.append(self._make_element(current_lines, current_type))
 
@@ -253,8 +264,7 @@ class MarkdownConverter(BaseConverter):
             if cells and cells[-1] == "":
                 cells = cells[:-1]
             row_cells = [
-                TableCell(text=c, row=row_idx, col=col_idx)
-                for col_idx, c in enumerate(cells)
+                TableCell(text=c, row=row_idx, col=col_idx) for col_idx, c in enumerate(cells)
             ]
             if row_cells:
                 rows.append(row_cells)

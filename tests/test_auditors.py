@@ -14,17 +14,19 @@ from src.models.finding import FindingSeverity
 def _heading_doc(levels: list[int]) -> Document:
     """构造含指定标题层级的单页文档 (text_frame 段落)。"""
     paragraphs = [Paragraph(text=f"H{lv} 标题", runs=[], level=lv) for lv in levels]
-    page = Page(index=0, slide_number=1, elements=[
-        PageElement(type="text_frame", paragraphs=paragraphs)
-    ])
+    page = Page(
+        index=0, slide_number=1, elements=[PageElement(type="text_frame", paragraphs=paragraphs)]
+    )
     return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
 
 
 def _text_doc(text: str) -> Document:
     """构造单页纯文本文档。"""
-    page = Page(index=0, slide_number=1, elements=[
-        PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
-    ])
+    page = Page(
+        index=0,
+        slide_number=1,
+        elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])],
+    )
     return Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[page])
 
 
@@ -37,9 +39,12 @@ class TestStructureAuditor:
         sa = StructureAuditor(config={"required_sections": []})
         findings = sa.audit(doc)
         # sample.pptx 第一页为 Title Slide 版式 → 不应有 STR-001 告警
-        str001_errors = [f for f in findings
-                         if f.rule_id == "STR-001" and f.severity == FindingSeverity.ERROR]
-        assert len(str001_errors) == 0, f"STR-001 should not fire on title slide, got: {str001_errors}"
+        str001_errors = [
+            f for f in findings if f.rule_id == "STR-001" and f.severity == FindingSeverity.ERROR
+        ]
+        assert len(str001_errors) == 0, (
+            f"STR-001 should not fire on title slide, got: {str001_errors}"
+        )
 
     def test_title_slide_detection_direct(self):
         """STR-001: 直接调用 _check_title_slide → 空列表"""
@@ -54,8 +59,7 @@ class TestStructureAuditor:
         sa = StructureAuditor(config={"required_sections": []})
         findings = sa.audit(doc)
         # 标题页豁免: 第一页不应有 CON-004 告警
-        title_page_errors = [f for f in findings if f.page_index == 0
-                            and f.rule_id == "CON-004"]
+        title_page_errors = [f for f in findings if f.page_index == 0 and f.rule_id == "CON-004"]
         assert len(title_page_errors) == 0, (
             f"Title slide should be exempt, got CON-004: {title_page_errors}"
         )
@@ -112,12 +116,20 @@ class TestStructureAuditor:
 
     def test_figure_numbering_cross_page_skip_flagged(self):
         """STR-002: 跨页跳号仍被检测 (图1 → 图3)"""
-        p1 = Page(index=0, slide_number=1, elements=[
-            PageElement(type="text_frame", paragraphs=[Paragraph(text="如图1 所示", runs=[])])
-        ])
-        p2 = Page(index=1, slide_number=2, elements=[
-            PageElement(type="text_frame", paragraphs=[Paragraph(text="如图3 所示", runs=[])])
-        ])
+        p1 = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(type="text_frame", paragraphs=[Paragraph(text="如图1 所示", runs=[])])
+            ],
+        )
+        p2 = Page(
+            index=1,
+            slide_number=2,
+            elements=[
+                PageElement(type="text_frame", paragraphs=[Paragraph(text="如图3 所示", runs=[])])
+            ],
+        )
         doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[p1, p2])
         sa = StructureAuditor(config={"required_sections": []})
         findings = sa._check_figure_numbering(doc)
@@ -156,6 +168,7 @@ class TestStructureAuditor:
     def test_title_length_or_condition(self):
         """STR-004: 纯中文超长标题应触发告警 — 验证 AND→OR 修复"""
         from pptx import Presentation
+
         prs = Presentation()
         slide_layout = prs.slide_layouts[0]
         s = prs.slides.add_slide(slide_layout)
@@ -202,10 +215,72 @@ class TestFormatAuditor:
             assert f.message
             assert f.rule_id == "FMT-001"
 
+    def test_font_consistency_east_asia_flagged(self):
+        """FMT-001: 非允许的 eastAsia 中文字体应触发告警 (font_scope=east_asia)"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="中文正文",
+                            runs=[
+                                Run(text="中文正文", font_name="Arial", font_name_east_asia="宋体"),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        findings = FormatAuditor()._check_font_consistency(page)
+        fmt001 = [f for f in findings if f.rule_id == "FMT-001"]
+        ea = [f for f in fmt001 if (f.metadata or {}).get("font_scope") == "east_asia"]
+        assert len(ea) >= 1, f"非允许 eastAsia 字体应触发 FMT-001, got: {fmt001}"
+        assert "宋体" in ea[0].message
+        assert "中文" in ea[0].message  # message 区分中文（eastAsia）字体
+        # latin 字体 (Arial) 在允许列表 → 不误报
+        latin = [f for f in fmt001 if (f.metadata or {}).get("font_scope") == "latin"]
+        assert len(latin) == 0
+
+    def test_font_consistency_latin_scope_label(self):
+        """FMT-001: 非允许 latin 字体的 message 标注为西文（latin）"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="x",
+                            runs=[
+                                Run(
+                                    text="x", font_name="Comic Sans", font_name_east_asia="微软雅黑"
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        findings = FormatAuditor()._check_font_consistency(page)
+        fmt001 = [f for f in findings if f.rule_id == "FMT-001"]
+        latin = [f for f in fmt001 if (f.metadata or {}).get("font_scope") == "latin"]
+        assert len(latin) == 1
+        assert "西文" in latin[0].message
+        assert latin[0].metadata.get("font") == "Comic Sans"
+
     def test_font_size_max_check(self):
         """FMT-002: 验证字号最大值检查生效"""
         from pptx import Presentation
         from pptx.util import Pt
+
         prs = Presentation()
         slide_layout = prs.slide_layouts[0]
         s = prs.slides.add_slide(slide_layout)
@@ -222,8 +297,7 @@ class TestFormatAuditor:
             doc = PptxConverter().convert(tmp_path)
             findings = FormatAuditor().audit(doc)
             # 应检测到超大标题字号
-            fmt002_max = [f for f in findings
-                          if f.rule_id == "FMT-002" and "过大" in f.message]
+            fmt002_max = [f for f in findings if f.rule_id == "FMT-002" and "过大" in f.message]
             assert len(fmt002_max) >= 1, (
                 f"72pt title should trigger FMT-002 max size warning. "
                 f"All FMT-002: {[f.message for f in findings if f.rule_id == 'FMT-002']}"
@@ -254,8 +328,22 @@ class TestFactualAuditor:
         findings = FactualAuditor().audit(doc)
         # 验证 THE/AND/NEW 等常见词不在 findings 中
         con003_findings = [f for f in findings if f.rule_id == "CON-003"]
-        common_words = {"THE", "AND", "FOR", "ALL", "BUT", "NOT", "CAN",
-                        "ARE", "WAS", "HAS", "NEW", "SET", "END", "TOP"}
+        common_words = {
+            "THE",
+            "AND",
+            "FOR",
+            "ALL",
+            "BUT",
+            "NOT",
+            "CAN",
+            "ARE",
+            "WAS",
+            "HAS",
+            "NEW",
+            "SET",
+            "END",
+            "TOP",
+        }
         for f in con003_findings:
             # 从 context 中提取缩写字面
             ctx = f.context or ""
@@ -275,6 +363,4 @@ class TestFactualAuditor:
         fa._check_abbreviation_first_defined(doc1)
         findings_doc2 = fa._check_abbreviation_first_defined(doc2)
         # doc2 的 TSV 首次出现即带全称定义 → 不应报"首次未定义"
-        assert len(findings_doc2) == 0, (
-            f"doc2 不应复用车 doc1 的扫描结果: {findings_doc2}"
-        )
+        assert len(findings_doc2) == 0, f"doc2 不应复用车 doc1 的扫描结果: {findings_doc2}"

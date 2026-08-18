@@ -45,6 +45,7 @@ class AutoFixer:
         target = Path(target)
 
         from pptx import Presentation
+        from pptx.oxml.ns import qn
         from pptx.util import Pt
 
         prs = Presentation(str(source))
@@ -58,11 +59,24 @@ class AutoFixer:
                     continue
                 for para in shape.text_frame.paragraphs:
                     for run in para.runs:
-
                         # 修复1: 非标准字体 → 默认字体
                         if run.font.name and run.font.name not in self.allowed_fonts:
                             run.font.name = default_font
                             self._fix_count += 1
+
+                        # 修复1b: eastAsia (a:ea) 中文字体同步替换
+                        # (python-pptx font.name 只写 a:latin，中文显示字体需写 a:ea)
+                        try:
+                            rPr = run.font._rPr
+                            if rPr is not None:
+                                ea = rPr.find(qn("a:ea"))
+                                if ea is not None:
+                                    ea_typeface = ea.get("typeface")
+                                    if ea_typeface and ea_typeface not in self.allowed_fonts:
+                                        ea.set("typeface", default_font)
+                                        self._fix_count += 1
+                        except Exception:
+                            pass  # bare-handler-ok — PPTX eastAsia 修复降级，不影响 latin/字号修复
 
                         # 修复2: 字号过小 → 12pt
                         if run.font.size and run.font.size < 12 * 12700:  # EMU
@@ -72,6 +86,7 @@ class AutoFixer:
         # 原子写入: 先写临时文件，成功后再替换
         target = Path(target)
         import tempfile
+
         tmp_fd, tmp_path = tempfile.mkstemp(
             suffix=target.suffix, prefix="autofix_", dir=target.parent
         )
@@ -93,6 +108,7 @@ class AutoFixer:
         target = Path(target)
 
         from docx import Document
+        from docx.oxml.ns import qn
         from docx.shared import Pt
 
         doc = Document(str(source))
@@ -105,12 +121,23 @@ class AutoFixer:
                 if run.font.name and run.font.name not in self.allowed_fonts:
                     run.font.name = default_font
                     self._fix_count += 1
+                # eastAsia 中文字体同步替换 (python-docx font.name 只写 w:ascii/w:hAnsi)
+                try:
+                    rPr = run._element.rPr
+                    if rPr is not None and rPr.rFonts is not None:
+                        ea = rPr.rFonts.get(qn("w:eastAsia"))
+                        if ea and ea not in self.allowed_fonts:
+                            rPr.rFonts.set(qn("w:eastAsia"), default_font)
+                            self._fix_count += 1
+                except Exception:
+                    pass  # bare-handler-ok — DOCX eastAsia 修复降级，不影响 latin/字号修复
                 if run.font.size and run.font.size < Pt(12):
                     run.font.size = Pt(12)
                     self._fix_count += 1
 
         # 原子写入: 先写临时文件，成功后再替换
         import tempfile
+
         tmp_fd, tmp_path = tempfile.mkstemp(
             suffix=target.suffix, prefix="autofix_", dir=target.parent
         )
@@ -134,15 +161,14 @@ class AutoFixer:
         import tempfile
 
         from src.text_utils import CJK_LATIN_BOUNDARY, LATIN_CJK_BOUNDARY
+
         source = Path(source)
         ext = source.suffix.lower()
         target = Path(target)
 
         # 仅支持 OOXML 格式 (.pptx/.docx)；旧版二进制 .ppt/.doc 不被 python-pptx/docx 支持
         if ext not in (".pptx", ".docx"):
-            raise ValueError(
-                f"fix_spacing 仅支持 PPTX/DOCX 格式，不支持: {ext}"
-            )
+            raise ValueError(f"fix_spacing 仅支持 PPTX/DOCX 格式，不支持: {ext}")
 
         self._fix_count = 0
         tmp_fd, tmp_path = tempfile.mkstemp(
@@ -153,6 +179,7 @@ class AutoFixer:
         try:
             if ext == ".pptx":
                 from pptx import Presentation
+
                 shutil.copy2(source, tmp_path)
                 prs = Presentation(str(tmp_path))
                 for slide in prs.slides:
@@ -171,6 +198,7 @@ class AutoFixer:
 
             elif ext == ".docx":
                 from docx import Document
+
                 shutil.copy2(source, tmp_path)
                 doc = Document(str(tmp_path))
                 for para in doc.paragraphs:
@@ -215,7 +243,7 @@ class AutoFixer:
         try:
             shutil.copy2(source, tmp_path)
             prs = Presentation(str(tmp_path))
-            SW = prs.slide_width   # EMU
+            SW = prs.slide_width  # EMU
             SH = prs.slide_height  # EMU
 
             for slide in prs.slides:
@@ -316,8 +344,9 @@ class AutoFixer:
         logger.info("Auto-fix title punctuation: %d 处标点修复 → %s", self._fix_count, target.name)
         return target
 
-    def fix_bullet_style(self, source: str | Path, target: str | Path,
-                         preferred: str = "•") -> Path:
+    def fix_bullet_style(
+        self, source: str | Path, target: str | Path, preferred: str = "•"
+    ) -> Path:
         """修复项目符号样式 — 将混合项目符号统一为指定样式 (inspired by intern fix)。
 
         将文本开头的 '-' 或 '*' 替换为 preferred。

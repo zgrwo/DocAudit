@@ -12,35 +12,36 @@
 
 `src/converters/` — 多格式 → 统一 Document 模型
 
-### BaseConverter `src/converters/base.py`
+### `BaseConverter` `src/converters/base.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `can_handle` | `(source_path: str \| Path)` | `bool` | 抽象方法 — 扩展名匹配 |
 | `convert` | `(source_path: str \| Path)` | `Document` | 抽象方法 — 格式 → Document |
 
-### PptxConverter `src/converters/pptx_converter.py`
+### `PptxConverter` `src/converters/pptx_converter.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `can_handle` | `(source_path: str \| Path)` | `bool` | `.pptx` / `.ppt` 扩展名匹配 |
 | `convert` | `(source_path: str \| Path)` | `Document` | 完整解析 PPTX → Document。提取 Run 级字体/颜色/位置/版式/备注/图片/图表 |
 
-### DocxConverter `src/converters/docx_converter.py`
+### `DocxConverter` `src/converters/docx_converter.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `can_handle` | `(source_path: str \| Path)` | `bool` | `.docx` / `.doc` 扩展名匹配 |
-| `convert` | `(source_path: str \| Path)` | `Document` | DOCX → Document。段落样式→shape_name，大纲级别→level |
+| `convert` | `(source_path: str \| Path)` | `Document` | DOCX → Document。段落样式→style_name，大纲级别→level |
+| `_warn_unparsed_nested_content` | `(doc: DocxDocument)` | `None` | 未解析嵌套内容 (文本框/页眉页脚/脚注) 跳过时输出 logger.warning，不改变解析行为 |
 
-### PdfConverter `src/converters/pdf_converter.py`
+### `PdfConverter` `src/converters/pdf_converter.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `can_handle` | `(source_path: str \| Path)` | `bool` | `.pdf` 扩展名匹配 |
 | `convert` | `(source_path: str \| Path)` | `Document` | PDF → Document (Docling)。回退 Markdown 导出 |
 
-### MarkdownConverter `src/converters/md_converter.py`
+### `MarkdownConverter` `src/converters/md_converter.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
@@ -53,7 +54,7 @@
 
 `src/auditors/` — Document → [AuditFinding, ...]
 
-### StructureAuditor `src/auditors/structure.py`
+### `StructureAuditor` `src/auditors/structure.py`
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
@@ -70,13 +71,13 @@
 | `_check_duplicate_title` | `(doc: Document)` | STR-005 | 跨幻灯片重复标题 |
 | `_check_figure_caption_format` | `(doc: Document)` | STR-007 | 图表标题格式一致性 |
 
-### FormatAuditor `src/auditors/format.py`
+### `FormatAuditor` `src/auditors/format.py`
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
 | `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
-| `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (按页+字体聚合) |
+| `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (西文 latin 与中文 eastAsia 分别判定，按页+字体+作用域聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |
 | `_check_font_size` | `(page: Page)` | FMT-002 | 标题/正文字号范围检查 |
 | `_check_alignment` | `(page: Page)` | — | 同列文本框垂直对齐 |
@@ -89,7 +90,7 @@
 | `_check_table_contrast` | `(page: Page, doc: Document)` | FMT-008 | 表格底色 vs 字体色 WCAG 对比度 (PPTX/DOCX) |
 | `_hex_to_rgb` / `_relative_luminance` / `_contrast_ratio` | 模块级纯函数 | — | WCAG 对比度计算 (FMT-008) |
 
-### LanguageAuditor `src/auditors/language.py`
+### `LanguageAuditor` `src/auditors/language.py`
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
@@ -100,7 +101,7 @@
 | `_check_rejected_vocab` | `(text, page_index, page_label)` | — | reject.txt 禁用词匹配 |
 | `_segment_by_language` | `(text)` | — | → `list[(text, "zh"\|"en")]` 语言分段 |
 
-### FactualAuditor `src/auditors/factual.py`
+### `FactualAuditor` `src/auditors/factual.py`
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
@@ -113,7 +114,7 @@
 | `_check_abbreviation_used_before_defined` | `(doc: Document)` | CON-003-C | 缩写在定义前使用 |
 | `_scan_abbreviations` | `(doc: Document)` | — | → `dict` 全量缩写扫描 (缓存) |
 
-### CustomRulesAuditor `src/auditors/custom_rules.py`
+### `CustomRulesAuditor` `src/auditors/custom_rules.py`
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
@@ -170,7 +171,13 @@
 | `parse_rules_md` | `(file_path: str \| Path)` | `list[AuditRule]` | 解析 rules.md → 规则对象列表 |
 | `extract_auditor_config` | `(rules: list)` | `dict` | 从规则中提取 Auditor 配置参数 |
 
-### TerminologyChecker `src/engines/terminology.py`
+数据类（同文件）:
+
+| 类 | 字段 | 说明 |
+|------|------|------|
+| `AuditRule` | `rule_id` / `category` / `severity` / `description` / `check_type` / `params` / `raw_text` | 单条审查规则 (`parse_rules_md` 返回) |
+
+### `TerminologyChecker` `src/engines/terminology.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
@@ -185,7 +192,7 @@
 | `TermRule` | `pattern` / `preferred` / `context` / `severity` | 单条术语规则 (regex 编译) |
 | `TermGlossary` | `category` / `terms` | 术语表 (对应一个 YAML 文件) |
 
-### LanguageToolClient `src/engines/languagetool.py`
+### `LanguageToolClient` `src/engines/languagetool.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
@@ -197,20 +204,20 @@
 | `reset` | `()` | — | 清除缓存并重新探测后端 |
 | `shutdown` | `()` | — | 关闭 Java 子进程，清理资源 |
 
-### AutoFixer `src/engines/autofix.py`
+### `AutoFixer` `src/engines/autofix.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `__init__` | `(allowed_fonts=None)` | — | 默认字体: [微软雅黑, Arial, Noto Sans SC, Calibri] (对齐 rules.md FMT-001) |
-| `fix_pptx` | `(source, target)` | `Path` | 字体标准化 + 字号修正 (PPTX) |
-| `fix_docx` | `(source, target)` | `Path` | 字体标准化 + 字号修正 (DOCX) |
+| `fix_pptx` | `(source, target)` | `Path` | 字体标准化 (latin + a:ea) + 字号修正 (PPTX) |
+| `fix_docx` | `(source, target)` | `Path` | 字体标准化 (latin + w:eastAsia) + 字号修正 (DOCX) |
 | `fix_spacing` | `(source, target)` | `Path` | CJK-Latin 间距修复 (PPTX/DOCX) |
 | `fix_element_overflow` | `(source, target)` | `Path` | 溢出元素移回边界内 (PPTX only) |
 | `fix_title_punctuation` | `(source, target)` | `Path` | 去除标题末尾标点 (PPTX only) |
 | `fix_bullet_style` | `(source, target, preferred="•")` | `Path` | 统一项目符号样式 (PPTX only) |
 | `fix_count` | (属性) | `int` | 最后一次修复的变更数 |
 
-### Vocabulary `src/engines/vocabulary.py`
+### `Vocabulary` `src/engines/vocabulary.py`
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
@@ -226,6 +233,18 @@
 
 `src/models/` — 系统通用语言
 
+### Run `src/models/document.py`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `text` | `str` | 文本内容 |
+| `font_name` | `str \| None` | 西文字体 (DOCX w:ascii / PPTX a:latin)；未提取到为 None |
+| `font_name_east_asia` | `str \| None` | 中文字体 (DOCX w:eastAsia / PPTX a:ea typeface)；中文显示字体由此决定，无则 None |
+| `font_size` | `float \| None` | 字号 (pt) |
+| `bold` / `italic` / `underline` | `bool \| None` | 加粗/斜体/下划线 |
+| `color` | `str \| None` | 字体色 hex RGB (e.g. "FF0000") |
+| `strikethrough` | `bool \| None` | 删除线 |
+
 ### Document `src/models/document.py`
 
 | 字段 | 类型 | 说明 |
@@ -237,7 +256,14 @@
 | `all_text` (属性) | `str` | 全文拼接 (缓存) |
 | `all_paragraphs` (属性) | `list[Paragraph]` | 全文档段落 |
 
-### Page `src/models/document.py`
+内部数据类（同文件）:
+
+| 类 | 字段 | 说明 |
+|------|------|------|
+| `Run` | `text` / `font_name` / `font_size` / `bold` / `italic` / `underline` / `color` / `strikethrough` | 最小文本单元 — 一段连续格式属性的文本 |
+| `Paragraph` | `text` / `runs` / `level` / `alignment` / `space_before` / `space_after` / `line_spacing` | 段落 — 一组 Run 组成一个逻辑段落 |
+
+### `Page` `src/models/document.py`
 
 | 字段/属性 | 类型 | 说明 |
 |----------|------|------|
@@ -252,7 +278,7 @@
 | `text_frames` (属性) | `list[PageElement]` | 仅文本框类型 |
 | `tables` (属性) | `list[PageElement]` | 仅表格类型 |
 
-### PageElement `src/models/document.py`
+### `PageElement` `src/models/document.py`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -261,7 +287,8 @@
 | `tables` | `list[list[TableCell]]` | 表格数据 (按行) |
 | `children` | `list[PageElement]` | Group 子元素 |
 | `left` / `top` / `width` / `height` | `float \| None` | 位置尺寸 (pt) |
-| `shape_name` | `str \| None` | PPTX shape 名称 / DOCX 样式名 |
+| `shape_name` | `str \| None` | PPTX shape 名称 (DOCX 为 None) |
+| `style_name` | `str \| None` | DOCX 段落样式名 (如 "Heading 1")；PPTX 为 None |
 | `is_title` | `bool` | 是否为标题占位符 |
 | `is_body` | `bool` | 是否为正文占位符 |
 | `is_placeholder` | `bool` | 是否为占位符 |
@@ -269,7 +296,7 @@
 | `chart_type` / `chart_data` | `str \| None` / `dict \| None` | 图表数据 |
 | `iter_flat()` | 生成器 | 递归展开自身 + 所有子孙 |
 
-### TableCell `src/models/document.py`
+### `TableCell` `src/models/document.py`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -310,7 +337,7 @@
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行 |
+| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None, page_count: int \| None = None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行；`page_count` 覆盖总页数（批量模式传聚合页数，None 保持现状） |
 
 ### JsonReporter `src/reporters/json_reporter.py`
 
