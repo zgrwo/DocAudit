@@ -304,3 +304,68 @@ class TestFixEastAsia:
             f"a:ea 应变为允许字体, got {ea2.get('typeface')}"
         )
         assert run2.font.name == "Arial"  # latin 不变
+
+
+class TestFixEastAsiaCreation:
+    """L1: 字体替换时若 a:ea / w:eastAsia 缺失 → 创建并写入默认字体。"""
+
+    def test_fix_pptx_creates_ea_when_missing(self, fixer, tmp_path):
+        """PPTX: latin 非标准且无 a:ea → 修复后创建 a:ea 并写入默认字体。"""
+        from pptx import Presentation
+        from pptx.oxml.ns import qn
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+        run = txBox.text_frame.paragraphs[0].add_run()
+        run.text = "中文正文"
+        run.font.name = "宋体"  # 非标准 latin, 无 a:ea
+        src = tmp_path / "ea_missing_src.pptx"
+        prs.save(str(src))
+
+        out = tmp_path / "ea_missing_out.pptx"
+        fixer.fix_pptx(src, out)
+        assert out.exists()
+
+        prs2 = Presentation(str(out))
+        run2 = next(
+            r
+            for slide in prs2.slides
+            for shape in slide.shapes
+            if shape.has_text_frame
+            for para in shape.text_frame.paragraphs
+            for r in para.runs
+        )
+        rPr2 = run2.font._rPr
+        assert rPr2 is not None
+        ea2 = rPr2.find(qn("a:ea"))
+        assert ea2 is not None, "a:ea 应被创建"
+        assert ea2.get("typeface") in fixer.allowed_fonts, (
+            f"a:ea 应为允许字体, got {ea2.get('typeface')}"
+        )
+        assert run2.font.name in fixer.allowed_fonts
+
+    def test_fix_docx_creates_east_asia_when_missing(self, fixer, tmp_path):
+        """DOCX: latin 非标准且 rFonts 无 w:eastAsia → 修复后写入 w:eastAsia。"""
+        from docx import Document
+        from docx.oxml.ns import qn
+
+        doc = Document()
+        p = doc.add_paragraph()
+        run = p.add_run("中文正文")
+        run.font.name = "宋体"  # 非标准 latin; rFonts 仅含 w:ascii/w:hAnsi, 无 w:eastAsia
+        src = tmp_path / "ea_missing_src.docx"
+        doc.save(str(src))
+
+        out = tmp_path / "ea_missing_out.docx"
+        fixer.fix_docx(src, out)
+        assert out.exists()
+
+        doc2 = Document(str(out))
+        run2 = next(r for para in doc2.paragraphs for r in para.runs)
+        rPr2 = run2._element.rPr
+        assert rPr2 is not None and rPr2.rFonts is not None
+        ea2 = rPr2.rFonts.get(qn("w:eastAsia"))
+        assert ea2 in fixer.allowed_fonts, f"w:eastAsia 应为允许字体, got {ea2}"
+        assert run2.font.name in fixer.allowed_fonts

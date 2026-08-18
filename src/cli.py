@@ -291,6 +291,11 @@ def main():
         parser.print_help()
         sys.exit(0)
 
+    # -o 仅支持 .html/.json (M9: 其他扩展名 → 用法错误 exit 2)
+    if args.output and Path(args.output).suffix not in (".html", ".json"):
+        print(f"[ERROR] 不支持的输出格式: {Path(args.output).suffix}（仅支持 .html 或 .json）")
+        sys.exit(2)
+
     # Collect files
     path = Path(args.path)
     files: list[Path] = []
@@ -413,6 +418,8 @@ def main():
                     print(f"      输出: {out}")
                 else:
                     print(f"\n[FIX] 未发现可自动修复的问题 ({fix_type})")
+            elif args.fix:
+                print(f"[FIX] 格式 {doc.format.upper()} 暂不支持自动修复（仅支持 PPTX/DOCX）")
 
             # 导出报告 — 批量模式每文件独立命名，单文件保持不变
             if args.output:
@@ -427,6 +434,9 @@ def main():
                 elif out_path.suffix == ".json":
                     generate_json_report(doc, findings, output_path=out_path)
                     print(f"\n[EXPORT] JSON report saved: {out_path}")
+                # M6: 报告器内部吞掉 OSError，导出后必须校验产物存在，失败 → exit 1
+                if not out_path.exists():
+                    raise OSError(f"报告导出失败，输出文件未生成: {out_path}")
 
         except Exception as e:
             failed_files += 1

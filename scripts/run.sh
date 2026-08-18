@@ -20,7 +20,7 @@ echo "  [1/4] 检测 Python 环境..."
 PYTHON=""
 for p in python3 python; do
     if command -v "$p" &>/dev/null; then
-        ver=$("$p" --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+        ver=$("$p" --version 2>&1 | grep -Eo '[0-9]+\.[0-9]+' | head -1)
         major=$(echo "$ver" | cut -d. -f1)
         minor=$(echo "$ver" | cut -d. -f2)
         if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ] 2>/dev/null; then

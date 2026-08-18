@@ -60,9 +60,11 @@ class AutoFixer:
                 for para in shape.text_frame.paragraphs:
                     for run in para.runs:
                         # 修复1: 非标准字体 → 默认字体
+                        latin_replaced = False
                         if run.font.name and run.font.name not in self.allowed_fonts:
                             run.font.name = default_font
                             self._fix_count += 1
+                            latin_replaced = True
 
                         # 修复1b: eastAsia (a:ea) 中文字体同步替换
                         # (python-pptx font.name 只写 a:latin，中文显示字体需写 a:ea)
@@ -75,6 +77,17 @@ class AutoFixer:
                                     if ea_typeface and ea_typeface not in self.allowed_fonts:
                                         ea.set("typeface", default_font)
                                         self._fix_count += 1
+                                elif latin_replaced:
+                                    # L1: a:ea 缺失且 latin 被替换 → 创建并写入默认字体
+                                    # (python-pptx 1.0.2 未建模 a:ea, 用 lxml 创建, 插在 a:latin 之后)
+                                    ea = rPr.makeelement(qn("a:ea"), {})
+                                    ea.set("typeface", default_font)
+                                    latin = rPr.find(qn("a:latin"))
+                                    if latin is not None:
+                                        latin.addnext(ea)
+                                    else:
+                                        rPr.append(ea)
+                                    self._fix_count += 1
                         except Exception:
                             pass  # bare-handler-ok — PPTX eastAsia 修复降级，不影响 latin/字号修复
 
@@ -93,7 +106,7 @@ class AutoFixer:
         os.close(tmp_fd)  # 关闭 fd，避免 Windows 文件锁定
         try:
             prs.save(tmp_path)
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             # 清理临时文件
             Path(tmp_path).unlink(missing_ok=True)
@@ -118,9 +131,11 @@ class AutoFixer:
 
         for para in doc.paragraphs:
             for run in para.runs:
+                latin_replaced = False
                 if run.font.name and run.font.name not in self.allowed_fonts:
                     run.font.name = default_font
                     self._fix_count += 1
+                    latin_replaced = True
                 # eastAsia 中文字体同步替换 (python-docx font.name 只写 w:ascii/w:hAnsi)
                 try:
                     rPr = run._element.rPr
@@ -129,6 +144,16 @@ class AutoFixer:
                         if ea and ea not in self.allowed_fonts:
                             rPr.rFonts.set(qn("w:eastAsia"), default_font)
                             self._fix_count += 1
+                        elif not ea and latin_replaced:
+                            # L1: w:eastAsia 缺失且 latin 被替换 → 写入默认字体
+                            rPr.rFonts.set(qn("w:eastAsia"), default_font)
+                            self._fix_count += 1
+                    elif latin_replaced:
+                        # L1: rFonts 缺失且 latin 被替换 → 创建并写入默认字体
+                        run._element.get_or_add_rPr().get_or_add_rFonts().set(
+                            qn("w:eastAsia"), default_font
+                        )
+                        self._fix_count += 1
                 except Exception:
                     pass  # bare-handler-ok — DOCX eastAsia 修复降级，不影响 latin/字号修复
                 if run.font.size and run.font.size < Pt(12):
@@ -144,7 +169,7 @@ class AutoFixer:
         os.close(tmp_fd)  # 关闭 fd，避免 Windows 文件锁定
         try:
             doc.save(tmp_path)
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
@@ -211,7 +236,7 @@ class AutoFixer:
                             self._fix_count += 1
                 doc.save(str(tmp_path))
 
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
@@ -270,7 +295,7 @@ class AutoFixer:
                         self._fix_count += 1
 
             prs.save(str(tmp_path))
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
@@ -336,7 +361,7 @@ class AutoFixer:
                                 self._fix_count += 1
 
             prs.save(str(tmp_path))
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
@@ -389,7 +414,7 @@ class AutoFixer:
                                 self._fix_count += 1
 
             prs.save(str(tmp_path))
-            shutil.move(tmp_path, str(target))
+            os.replace(tmp_path, str(target))
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise

@@ -4,6 +4,7 @@
 审查维度：内容结构 · 格式规范 · 语言文字 · 事实精准 · 自定义规则
 """
 
+import html as _html  # 别名: app.py 中 html 变量被报告字符串占用，避免遮蔽模块
 import json
 import re
 import sys
@@ -112,6 +113,9 @@ def convert_file(uploaded_file) -> Document | None:
         doc = convert_file_path(tmp_path)
         if doc is None:
             st.error(f"不支持的文件格式: {suffix}")
+        else:
+            # L2: 临时文件名不应进入 UI/报告 — 覆写为原始上传文件名
+            doc.source_path = uploaded_file.name
         return doc
     except Exception as e:
         st.error(f"转换失败: {e}")
@@ -171,16 +175,24 @@ def _exempt_ids(ids) -> None:
     ) | set(ids)
 
 
+def _rules_mtime() -> float:
+    """rules.md 最后修改时间 — 审计器缓存热更新依据 (M7)。"""
+    return (Path(__file__).parent / "rules.md").stat().st_mtime
+
+
 @st.cache_resource(show_spinner=False)
-def _get_auditors():
+def _get_auditors(rules_mtime: float | None = None):
     """构建全部审计器 (app.py 和批量审查共用)。
 
-    使用 @st.cache_resource 缓存 (key 基于函数参数 rules.md/glossary/vocab 路径)，
-    避免每次 rerun 重新解析 rules.md/glossary/vocab。
+    使用 @st.cache_resource 缓存 (key 含 rules_mtime 参数)。
+    rules.md 修改后 mtime 变化 → 自动重建审计器 (配置热更新 M7)。
+    rules_mtime 为 None 时在函数内计算 (便于显式传值/测试注入)。
     """
     from src.engines.pipeline import build_auditors
 
     base = Path(__file__).parent
+    if rules_mtime is None:
+        rules_mtime = _rules_mtime()
     return build_auditors(
         str(base / "rules.md"),
         str(base / "glossary"),
@@ -208,7 +220,7 @@ def _run_batch_audit(files: list) -> None:
     """批量审查：转换 + 审查所有文件。支持 StreamlitUploadedFile 和 Path。"""
     from src.engines.pipeline import run_auditors
 
-    auditors = _get_auditors()
+    auditors = _get_auditors(_rules_mtime())
 
     progress_bar = st.empty().progress(0, "批量审查中...")
     docs = []
@@ -275,7 +287,7 @@ def _run_batch_audit(files: list) -> None:
 
 def run_audit(doc: Document) -> list[AuditFinding]:
     """执行全部审查器，返回发现列表"""
-    auditors = _get_auditors()
+    auditors = _get_auditors(_rules_mtime())
     progress_bar = st.empty().progress(0, "开始审查...")
 
     def on_progress(name, i, total):
@@ -450,11 +462,10 @@ with st.sidebar:
                 key="excluded_pages",
             )
 
-            applied = st.form_submit_button("✅ 应用过滤器", use_container_width=True)
-            if applied:
-                # 显式 key 的 form widget 提交时自动同步 session_state，无需手动赋值
-                # (手动赋值会触发 "cannot be modified after the widget is instantiated" 异常)
-                st.rerun()
+            st.form_submit_button("✅ 应用过滤器", use_container_width=True)
+            # 表单提交自动触发 rerun，无需显式 st.rerun() (L4)；
+            # 显式 key 的 form widget 提交时自动同步 session_state，无需手动赋值
+            # (手动赋值会触发 "cannot be modified after the widget is instantiated" 异常)
 
         # ── 过滤计算 (widget 渲染之后，勾选/提交立即生效；结果存 session_state 避免重复计算) ──
         st.session_state["_filtered_cache"] = (
@@ -749,9 +760,10 @@ if st.session_state.doc and st.session_state.findings:
                 "custom": "自定义",
             }.get(finding.type.value, finding.type.value)
 
+            # 用户文本渲染前必须转义 (红线 #2) — Streamlit 默认转义 HTML，此处防御性转义
+            _msg = _html.escape(finding.message or "")
             with st.expander(
-                f"{sev_icon} [{type_label}] {finding.message[:80]}"
-                f"{'...' if len(finding.message) > 80 else ''}",
+                f"{sev_icon} [{type_label}] {_msg[:80]}{'...' if len(_msg) > 80 else ''}",
                 expanded=(finding.severity == FindingSeverity.ERROR),
             ):
                 col_a, col_b = st.columns([3, 1])

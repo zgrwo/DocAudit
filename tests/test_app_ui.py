@@ -334,3 +334,48 @@ def test_folder_path_missing_dir_rejected_in_ui():
     at.run()
     errors = [e.value for e in at.error]
     assert any("文件夹不存在" in e for e in errors), f"expected st.error, got: {errors}"
+
+
+# ── M7: 审计器缓存热更新 ─────────────────────────────────────
+
+
+def test_get_auditors_rebuilds_on_rules_mtime_change():
+    """M7: 同 mtime 复用同一对象；rules.md 变更 (mtime 不同) → 重建。"""
+    a1 = app._get_auditors(1.0)
+    a2 = app._get_auditors(1.0)
+    assert a1 is a2  # 同 mtime → 命中缓存
+    b1 = app._get_auditors(2.0)
+    assert b1 is not a1  # 不同 mtime → 重建
+
+
+def test_rules_mtime_is_positive():
+    """M7: _rules_mtime 返回 rules.md 的修改时间 (热更新依据)。"""
+    assert app._rules_mtime() > 0
+
+
+# ── L2: 上传文件临时名 → 原始文件名 ─────────────────────────
+
+
+def test_convert_file_overwrites_source_path_with_upload_name(tmp_path):
+    """L2: 转换后 source_path 覆写为原始上传文件名 (UI/报告不显示临时路径)。"""
+    import io
+
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+    txBox.text_frame.paragraphs[0].add_run().text = "测试"
+    buf = io.BytesIO()
+    prs.save(buf)
+
+    class _Upload:
+        name = "原始报告.pptx"
+
+        def getvalue(self):
+            return buf.getvalue()
+
+    doc = app.convert_file(_Upload())
+    assert doc is not None
+    assert doc.source_path == "原始报告.pptx"

@@ -8,6 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PACKAGES_DIR="$SCRIPT_DIR/packages"
 PROFILE="${2:-core}"
 
@@ -25,13 +26,13 @@ download_deps() {
     echo "[DocAudit] 下载依赖 profile=$PROFILE 到 packages/ ..."
     echo ""
     mkdir -p "$PACKAGES_DIR"
-    LOCK="$SCRIPT_DIR/requirements-$PROFILE.txt"
+    LOCK="$PROJECT_DIR/requirements-$PROFILE.txt"
     if [ -f "$LOCK" ]; then
         echo "[1/3] 按锁文件下载运行时依赖: $(basename "$LOCK")"
         pip download -r "$LOCK" -d "$PACKAGES_DIR"
     else
         echo "[警告] 未找到 requirements-$PROFILE.txt，回退到 pyproject 声明解析（结果不可复现）"
-        pip download "$SCRIPT_DIR$EXTRAS" -d "$PACKAGES_DIR"
+        pip download "$PROJECT_DIR$EXTRAS" -d "$PACKAGES_DIR"
     fi
 
     echo "[2/3] 下载构建依赖 setuptools/wheel（离线安装本地项目必需，pip download 不会自动保存）"
@@ -40,11 +41,11 @@ download_deps() {
     echo "[3/3] 离线自检：dry-run 安装解析..."
     if [ -f "$LOCK" ]; then
         pip install --dry-run --ignore-installed --no-index --find-links="$PACKAGES_DIR" \
-            -r "$LOCK" "$SCRIPT_DIR" \
+            -r "$LOCK" "$PROJECT_DIR" \
             || { echo "[错误] 离线自检失败：packages/ 不完整，请勿拷贝到离线机器"; exit 1; }
     else
         pip install --dry-run --ignore-installed --no-index --find-links="$PACKAGES_DIR" \
-            "$SCRIPT_DIR$EXTRAS" \
+            "$PROJECT_DIR$EXTRAS" \
             || { echo "[错误] 离线自检失败：packages/ 不完整，请勿拷贝到离线机器"; exit 1; }
     fi
 
@@ -77,7 +78,7 @@ install_offline() {
     # pip 升级必须离线 (完全离线红线); packages/ 无 pip wheel 时跳过升级
     pip install --upgrade pip -q --no-index --find-links="$PACKAGES_DIR" \
         || echo "[警告] pip 升级失败 (packages/ 中无 pip wheel 属正常)，使用现有 pip 继续"
-    pip install --no-index --find-links="$PACKAGES_DIR" "$SCRIPT_DIR$EXTRAS"
+    pip install --no-index --find-links="$PACKAGES_DIR" "$PROJECT_DIR$EXTRAS"
 
     echo "[2/2] 验证安装..."
     python -c "import streamlit; from src.converters import PptxConverter; from src.auditors import StructureAuditor; print('        核心模块导入成功')" || echo "[警告] 模块导入验证失败"

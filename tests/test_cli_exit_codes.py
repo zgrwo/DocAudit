@@ -26,7 +26,15 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess:
 
 
 def _write_clean_pptx(path: Path) -> None:
-    """生成无 Error 级发现的 PPTX (含 CON-002 必含章节 + CON-004 每页结论)。"""
+    """生成无 Error 级发现的 PPTX (含 CON-002 必含章节 + CON-004 每页结论)。
+
+    依赖清单 (rules.md 当前阈值, 改动后需同步本函数):
+    - CON-002 必含章节: 概述 / 工艺流程 / 关键参数 / 结论
+    - CON-004 每页结论: 每页正文须含"结论"等关键词
+    - STR-001 标题版式: slide_layouts[0] (标题版式)
+    - FMT-001 允许字体: 占位符无显式字体 (默认字体)
+    若测试失败, 先确认 rules.md 阈值变化; 断言失败信息会输出实际 findings 便于定位。
+    """
     from pptx import Presentation
 
     prs = Presentation()
@@ -57,8 +65,9 @@ class TestCliExitCodes:
         clean = tmp_path / "clean.pptx"
         _write_clean_pptx(clean)
         result = _run_cli(str(clean), "--rules", str(PROJECT_ROOT / "rules.md"))
+        # 失败时输出完整 stdout (含 [SUMMARY] 计数与 Errors 列表) 便于对照 rules.md 阈值定位
         assert result.returncode == 0, (
-            f"无 Error 应 exit 0，实际 {result.returncode}\n{result.stdout[-500:]}"
+            f"无 Error 应 exit 0，实际 {result.returncode}\n{result.stdout}"
         )
 
     def test_sample_pptx_with_errors_exits_1(self):
@@ -81,3 +90,36 @@ class TestCliExitCodes:
         assert result.returncode == 1, (
             f"路径不存在应 exit 1，实际 {result.returncode}\n{result.stdout[-500:]}"
         )
+
+
+class TestCliOutputContract:
+    """-o 导出契约 (M6/M9): 导出失败 → exit 1；不支持的扩展名 → exit 2。"""
+
+    def test_output_dir_missing_exits_1(self, tmp_path):
+        """-o 指向不存在的目录 → 报告未生成 → exit 1 且输出含错误。"""
+        clean = tmp_path / "clean.pptx"
+        _write_clean_pptx(clean)
+        out = tmp_path / "no_such_dir" / "report.html"
+        result = _run_cli(str(clean), "--rules", str(PROJECT_ROOT / "rules.md"), "-o", str(out))
+        assert result.returncode == 1, (
+            f"导出失败应 exit 1，实际 {result.returncode}\n{result.stdout[-500:]}"
+        )
+        assert "导出失败" in result.stdout or "Processing failed" in result.stdout
+
+    def test_output_unsupported_extension_exits_2(self, tmp_path):
+        """-o 非 .html/.json 扩展名 → 打印错误 + exit 2 (用法错误)。"""
+        clean = tmp_path / "clean.pptx"
+        _write_clean_pptx(clean)
+        out = tmp_path / "report.txt"
+        result = _run_cli(str(clean), "--rules", str(PROJECT_ROOT / "rules.md"), "-o", str(out))
+        assert result.returncode == 2, (
+            f"不支持扩展名应 exit 2，实际 {result.returncode}\n{result.stdout[-500:]}"
+        )
+        assert "不支持的输出格式" in result.stdout
+
+    def test_fix_unsupported_format_prints_hint(self, tmp_path):
+        """--fix 对 MD → 打印不支持自动修复提示 (L7, 不改变行为)。"""
+        md = tmp_path / "doc.md"
+        md.write_text("# 概述\n\n测试内容。\n\n## 结论\n\n测试完成。\n", encoding="utf-8")
+        result = _run_cli(str(md), "--rules", str(PROJECT_ROOT / "rules.md"), "--fix")
+        assert "暂不支持自动修复" in result.stdout
