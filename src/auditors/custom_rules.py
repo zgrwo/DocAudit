@@ -29,7 +29,7 @@ class CustomRulesAuditor(BaseAuditor):
     _DISPATCH = {
         "first_slide_has_title_layout": ("sa", "_check_title_slide", False, True),
         "figure_numbering_sequential": ("sa", "_check_figure_numbering", False, False),
-        "heading_level_sequential": ("sa", "_check_heading_levels", False, False),
+        "heading_level_sequential": ("sa", "_check_heading_levels", False, True),
         "numeric_cross_reference": ("fca", "_check_numeric_consistency", False, False),
         "abbreviation_first_defined": ("fca", "_check_abbreviation_first_defined", False, False),
         "abbreviation_defined_never_used": (
@@ -50,7 +50,7 @@ class CustomRulesAuditor(BaseAuditor):
             False,
             False,
         ),
-        "every_slide_has_conclusion": ("sa", "_check_every_slide_has_conclusion", False, False),
+        "every_slide_has_conclusion": ("sa", "_check_every_slide_has_conclusion", False, True),
         "duplicate_title": ("sa", "_check_duplicate_title", False, False),
         "title_trailing_punctuation": ("sa", "_check_title_trailing_punctuation", True, False),
         "figure_caption_format": ("sa", "_check_figure_caption_format", False, False),
@@ -271,7 +271,10 @@ class CustomRulesAuditor(BaseAuditor):
                     findings.extend(method(page, doc))
             else:
                 findings.extend(method(doc))
-            # 用 rules.md 声明的严重度覆盖审计器内部默认值 (配置驱动原则)
+            # 用 rules.md 声明的严重度覆盖审计器内部默认值 (配置驱动设计, 2026-08 审查 L9):
+            # rules.md 是严重度的唯一来源 — dispatch 委托的审计器方法只是"检测器",
+            # 其内置严重度仅是代码内兜底；此处统一覆盖保证同一条规则在不同
+            # 文档/环境下严重度一致且可由用户通过 rules.md 配置调整。
             for f in findings:
                 f.severity = severity
         else:

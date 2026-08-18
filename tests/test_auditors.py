@@ -75,6 +75,23 @@ class TestStructureAuditor:
                 assert f.message, "Finding message should not be empty"
                 assert f.page_index is not None, "Finding must have page_index"
 
+    def test_exempt_layouts_empty_list_uses_default(self):
+        """CON-004 豁免版式: 显式空列表不得覆盖内置默认 (修复: pipeline 传 [] 使默认失效)"""
+        sa = StructureAuditor(config={"exempt_layouts": []})
+        assert sa.exempt_layouts, "空列表不应覆盖内置默认豁免版式"
+        assert "标题幻灯片" in sa.exempt_layouts
+
+    def test_exempt_layouts_declared_used(self):
+        """CON-004 豁免版式: 显式声明的列表生效"""
+        sa = StructureAuditor(config={"exempt_layouts": ["封面页"]})
+        assert sa.exempt_layouts == ["封面页"]
+
+    def test_every_slide_conclusion_non_pptx_no_findings(self):
+        """CON-004: 非 PPTX (MD) 不执行每页结论检查 (修复: 曾对 DOCX/PDF/MD 每页误报 error)"""
+        doc = _text_doc("这是第一段普通正文，第二段补充说明，第三段技术描述。")
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_every_slide_has_conclusion(doc) == [], "非 PPTX 文档不应产生 CON-004"
+
     def test_heading_levels_page_first_heading_exempt(self):
         """STR-003: 页首标题不参与跳级比较 (修复: 按标题分页的文档页首 H2/H3 不再误报)"""
         doc = _heading_doc([2, 3])  # 页首即 H2 (MD ### 切页场景)
@@ -103,6 +120,27 @@ class TestStructureAuditor:
         findings = sa._check_heading_levels(doc)
         assert len(findings) == 1
         assert "H2" in findings[0].message and "H4" in findings[0].message
+
+    def test_heading_levels_pptx_bullet_indent_not_flagged(self):
+        """STR-003: PPTX 的 para.level 是缩进级别, 不得当标题层级 (修复: bullet 缩进 0→2 误报)"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(text="• 第一级", runs=[], level=0),
+                        Paragraph(text="    • 第三级", runs=[], level=2),
+                    ],
+                )
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_heading_levels(doc) == [], "PPTX 缩进级别不应触发 STR-003 跳级"
 
     def test_figure_numbering_within_page_order_preserved(self):
         """STR-002: 同页内按出现次序检查 (修复: 曾按编号重排, 倒退被掩盖成跳号)"""
@@ -276,6 +314,86 @@ class TestFormatAuditor:
         assert "西文" in latin[0].message
         assert latin[0].metadata.get("font") == "Comic Sans"
 
+    def test_global_font_consistency_counts_east_asia(self):
+        """FMT-001 全局: 复合键 (font, scope) 统计 — latin 统一 + 3 种 eastAsia → 触发"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="a",
+                            runs=[Run(text="a", font_name="Arial", font_name_east_asia="宋体")],
+                        ),
+                        Paragraph(
+                            text="b",
+                            runs=[Run(text="b", font_name="Arial", font_name_east_asia="黑体")],
+                        ),
+                        Paragraph(
+                            text="c",
+                            runs=[Run(text="c", font_name="Arial", font_name_east_asia="楷体")],
+                        ),
+                    ],
+                )
+            ],
+        )
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        findings = FormatAuditor()._check_global_font_consistency(doc)
+        assert len(findings) == 1, f"4 种复合字体应触发 FMT-001 全局检查, got: {findings}"
+        f = findings[0]
+        assert f.rule_id == "FMT-001"
+        dist = f.metadata["font_distribution"]
+        assert dist["Arial/latin"] == 3
+        assert dist["宋体/east_asia"] == 1 and dist["黑体/east_asia"] == 1
+        assert dist["楷体/east_asia"] == 1
+
+    def test_english_char_count_ignores_punctuation(self):
+        """FMT-004: 英文计数只算字母 — 数字/标点/空格不计入 (修复: 曾 总长-中文字数)"""
+        fa = FormatAuditor()
+        doc = _text_doc("1" * 300 + " test")
+        findings = fa._check_paragraph_length(doc.pages[0])
+        assert len(findings) == 0, f"纯数字+少量字母不应触发 FMT-004, got: {findings}"
+
+    def test_english_char_count_pure_letters_triggers(self):
+        """FMT-004: 纯字母超上限仍触发 (回归)"""
+        fa = FormatAuditor()
+        doc = _text_doc("a" * 305)
+        findings = fa._check_paragraph_length(doc.pages[0])
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-004"
+        assert "英文字符" in findings[0].message
+
+    def test_global_font_consistency_latin_plus_two_east_asia_ok(self):
+        """FMT-001 全局: latin 统一 + 2 种 eastAsia (共 3 复合键) → 不触发"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="a",
+                            runs=[Run(text="a", font_name="Arial", font_name_east_asia="宋体")],
+                        ),
+                        Paragraph(
+                            text="b",
+                            runs=[Run(text="b", font_name="Arial", font_name_east_asia="黑体")],
+                        ),
+                    ],
+                )
+            ],
+        )
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        findings = FormatAuditor()._check_global_font_consistency(doc)
+        assert len(findings) == 0, f"3 种复合字体不应触发, got: {findings}"
+
     def test_font_size_max_check(self):
         """FMT-002: 验证字号最大值检查生效"""
         from pptx import Presentation
@@ -353,6 +471,49 @@ class TestFactualAuditor:
                     assert word not in (f.metadata.get("abbreviation") or ""), (
                         f"Common word '{word}' should not be flagged as undefined abbreviation"
                     )
+
+    def test_abbreviation_reuse_after_definition_not_double_defined(self):
+        """CON-003-B: 定义后再次使用 (复用) 不得误计为重复定义 (修复: is_full_before 120 字符窗口假阳性)"""
+        fa = FactualAuditor()
+        doc = _text_doc("TSV (硅通孔 TSV) 工艺。TSV 用于 3D 集成。")
+        findings = fa._check_abbreviation_multiply_defined(doc)
+        assert len(findings) == 0, f"TSV 仅定义一次, 复用不应报 CON-003-B: {findings}"
+
+    def test_abbreviation_fullname_parens_abbr_recognized(self):
+        """CON-003: "全称 (TSV)" 定义格式 — 括号内缩写应识别为已定义 (不报未给出全称)"""
+        fa = FactualAuditor()
+        doc = _text_doc("Through Silicon Via (TSV) 工艺。TSV 用于先进封装。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        assert len(findings) == 0, f"'全称 (TSV)' 应视为已定义, got: {findings}"
+
+    def test_abbreviation_cache_weakref_identity(self):
+        """回归: 缩写扫描缓存以 weakref.ref 绑定文档身份 (曾用 id(doc) — 地址可复用)"""
+        import gc
+
+        fa = FactualAuditor()
+        doc1 = _text_doc("TSV 工艺用于先进封装。")
+        fa._check_abbreviation_first_defined(doc1)
+        key = fa._abbr_scan_cache[0]
+        assert callable(key), f"缓存键应为 weakref.ref, got {type(key)}"
+        assert key() is doc1, "存活时 weakref 应指向同一文档对象"
+        del doc1
+        gc.collect()
+        assert key() is None, "文档对象回收后 weakref 应失效"
+
+    def test_abbreviation_cache_weakref_new_doc_after_gc(self):
+        """回归: 对象回收 + 新对象 → 缓存不串档 (weakref 失效后重扫)"""
+        import gc
+
+        fa = FactualAuditor()
+        doc1 = _text_doc("TSV 工艺用于先进封装。")
+        assert len(fa._check_abbreviation_first_defined(doc1)) == 1  # TSV 未定义
+        del doc1
+        gc.collect()
+        doc2 = _text_doc("TSV (Through Silicon Via) 是硅通孔。")
+        findings_doc2 = fa._check_abbreviation_first_defined(doc2)
+        assert len(findings_doc2) == 0, (
+            f"doc2 不应复用已回收 doc1 的扫描结果 (TSV 已定义), got: {findings_doc2}"
+        )
 
     def test_abbreviation_cache_not_leaked_across_documents(self):
         """回归: 缩写扫描缓存不得跨文档串档 (独立模式 dispatch 直调不走 audit() 的 reset)"""

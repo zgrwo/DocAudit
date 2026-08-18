@@ -1,6 +1,7 @@
 """事实审查器 — 文档内部一致性检查"""
 
 import re
+import weakref
 from collections import defaultdict
 from typing import Any
 
@@ -95,9 +96,7 @@ _COMMON_UPPERCASE_WORDS = frozenset(
         "COULD",
         "SHOULD",
         "THERE",
-        "THEIR",
         "ABOUT",
-        "WHICH",
     }
 )
 
@@ -109,6 +108,33 @@ _NUMERIC_VALUE_RE = re.compile(
 )
 
 # 数值提取后剥离非数字字符 — 比固定单位列表更通用，无需与 _NUMERIC_VALUE_RE 同步
+
+# 技术缩写提取正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每次扫描重复编译)
+_ABBR_RE = re.compile(r"\b([A-Z]{2,8})\b")
+
+# 中英文括号开合字符 (与 custom_rules.py TERM-003 排除括号内配对逻辑一致)
+_OPEN_PARENS_RE = re.compile(r"[（(]")
+_CLOSE_PARENS_RE = re.compile(r"[）)]")
+
+
+def _compute_paren_ranges(text: str) -> list[tuple[int, int]]:
+    """计算括号组区间 [(open_pos, close_pos), ...]。
+
+    配对逻辑与 custom_rules.py 的 TERM-003 排除括号内一致:
+    每个开括号与它之后最近的闭括号配对 (不成对的开括号忽略)。
+    用于 "全称 (ABBR)" 定义格式的缩写定位 (缩写位于括号组内 → 定义位置)。
+    """
+    opens = [m.start() for m in _OPEN_PARENS_RE.finditer(text)]
+    closes = [m.start() for m in _CLOSE_PARENS_RE.finditer(text)]
+    ranges: list[tuple[int, int]] = []
+    ci = 0
+    for op in opens:
+        while ci < len(closes) and closes[ci] <= op:
+            ci += 1
+        if ci < len(closes):
+            ranges.append((op, closes[ci]))
+            ci += 1
+    return ranges
 
 
 class FactualAuditor(BaseAuditor):
@@ -265,17 +291,22 @@ class FactualAuditor(BaseAuditor):
                 "first_is_definition": bool,
             }}
         结果缓存在 self._abbr_scan_cache 中，同一次 audit 调用内复用
-        (绑定 id(doc)，独立模式跨文档不串档)。
+        (以 weakref.ref(doc) 绑定文档身份 — 修复 2026-08 审查 L3:
+        曾用 id(doc)，对象回收后地址可被新对象复用导致跨文档串档)。
         """
-        if self._abbr_scan_cache is not None and self._abbr_scan_cache[0] == id(doc):
-            return self._abbr_scan_cache[1]
+        if self._abbr_scan_cache is not None:
+            cached_ref, cached_result = self._abbr_scan_cache
+            if cached_ref() is doc:
+                return cached_result
 
-        abbr_pattern = re.compile(r"\b([A-Z]{2,8})\b")
         scan_result: dict = {}
 
         for page in doc.pages:
             text = page.all_text
-            for m in abbr_pattern.finditer(text):
+            # 括号组区间 (每页一次) — 定义站点判定依赖
+            paren_ranges = _compute_paren_ranges(text)
+
+            for m in _ABBR_RE.finditer(text):
                 abbr = m.group(1)
 
                 # 跳过常见英语单词
@@ -285,49 +316,55 @@ class FactualAuditor(BaseAuditor):
                 pos = m.start()
                 abbr_end = m.end()
 
-                # 检测是否为定义位置
-                before_short = text[max(0, pos - 4) : pos].strip()
-                is_def_before = before_short.startswith("(")
-
+                # 定义站点判定 (修复 2026-08 审查 L14: 曾用 120 字符窗口
+                # is_full_before 把"定义后的再次使用"误计为定义 → CON-003-B 假阳性;
+                # 改为紧邻判定 — 定义站点 = 括号组 open 位置):
+                # 1. is_def_after: 缩写后紧跟括号组 "ABBR (全称)" (仅允许空白)
+                # 2. in_paren: 缩写位于括号组内 "全称 (ABBR)"
+                def_site: int | None = None
                 after_window = text[abbr_end : abbr_end + 80]
-                is_def_after = bool(re.match(r"[\s]*\([^)]+\)", after_window))
-
-                before_window = text[max(0, pos - 120) : pos]
-                is_full_before = bool(
-                    re.search(r"\([^)]*" + re.escape(abbr) + r"[^)]*\)", before_window)
-                )
-
-                is_defined = is_def_before or is_def_after or is_full_before
+                m_after = re.match(r"[\s]*\([^)]+\)", after_window)
+                if m_after:
+                    paren_start = abbr_end + m_after.group(0).find("(")
+                    def_site = paren_start
+                else:
+                    for op, cl in paren_ranges:
+                        if op < pos < cl:
+                            def_site = op
+                            break
 
                 occurrence = {
                     "page_index": page.index,
                     "page_number": page.slide_number or page.index + 1,
                     "position": pos,
                     "context": text[max(0, pos - 20) : abbr_end + 20],
-                    "is_definition": is_defined,
+                    "is_definition": def_site is not None,
+                    "def_site": def_site,
                 }
 
                 if abbr not in scan_result:
                     scan_result[abbr] = {
                         "occurrences": [],
                         "total_count": 0,
-                        "definition_count": 0,
                         "first_page": page.index,
                         "first_page_number": page.slide_number or page.index + 1,
                     }
                 scan_result[abbr]["occurrences"].append(occurrence)
                 scan_result[abbr]["total_count"] += 1
-                if is_defined:
-                    scan_result[abbr]["definition_count"] += 1
 
-        # 按出现顺序排序并标记 first_is_definition
+        # 按出现顺序排序并标记 first_is_definition / definition_count
+        # definition_count = 不同定义站点数 (同一括号组 "TSV (硅通孔 TSV)" 中
+        # 括号内出现不再重复计入, 修复 CON-003-B 假阳性)
         for abbr, data in scan_result.items():
             data["occurrences"].sort(key=lambda o: (o["page_index"], o["position"]))
             data["first_is_definition"] = (
                 data["occurrences"][0]["is_definition"] if data["occurrences"] else False
             )
+            data["definition_count"] = len(
+                {o["def_site"] for o in data["occurrences"] if o["def_site"] is not None}
+            )
 
-        self._abbr_scan_cache = (id(doc), scan_result)
+        self._abbr_scan_cache = (weakref.ref(doc), scan_result)
         return scan_result
 
     # ── 缩写首次定义 ─────────────────────────────────────────

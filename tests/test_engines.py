@@ -309,6 +309,27 @@ class TestLanguageToolFallback:
         hit = comma_hits[0]
         assert text[hit["offset"] : hit["offset"] + hit["length"]] == "，，"
 
+    def test_python_spell_word_boundary(self):
+        """PY-SPELL: 拼写错误词作为更长词子串出现时不应命中 (词边界修复)"""
+        from unittest.mock import MagicMock
+
+        from src.engines.languagetool import LanguageToolClient
+
+        client = LanguageToolClient(auto_start=False)
+        spell = MagicMock()
+        spell.unknown.return_value = {"recieve"}
+        spell.candidates.return_value = ["receive"]
+        client._spell_checker = spell
+        client._available = True
+        client._backend = "python"
+
+        text = "xrecieve is a substring, but recieve alone is a real misspelling."
+        results = client._check_python(text, "en-US")
+        recieve_hits = [r for r in results if "recieve" in r["message"]]
+        # 无词边界时 "xrecieve" 与 "recieve" 各命中一次 → 2 条; 修复后仅独立词 → 1 条
+        assert len(recieve_hits) == 1, f"应仅命中独立词 'recieve', got {len(recieve_hits)} 条"
+        assert text[recieve_hits[0]["offset"]] == "r", "命中位置应为独立词 'recieve' 起点"
+
     def test_chinese_patterns_context_has_offset_length(self):
         """中文分支 context 必须含 offset/length 键（与 PY-SPELL 分支对齐，
         否则 language.py 的 accept.txt 白名单过滤整体跳过）"""

@@ -52,7 +52,8 @@ class Vocabulary:
 
     def __init__(self, vocab_dir: str | Path | None = None):
         self.accepted: set[str] = set()
-        self.rejected: dict[str, str] = {}  # word → reason
+        # 实际消费路径是 _rejected_patterns (预编译模式); self.rejected 字典
+        # 只写不读 (2026-08 审查 L7), 已移除 — should_reject 行为不变。
         self._rejected_patterns: list[tuple[str, re.Pattern, str]] = []  # (word, pattern, reason)
         if vocab_dir:
             self.load(vocab_dir)
@@ -85,7 +86,6 @@ class Vocabulary:
                     else:
                         word = line.strip()
                         reason = "词汇表中的禁用术语"
-                    self.rejected[word.lower()] = reason
 
                     # 预编译匹配模式: 自动检测正则 vs 字面字符串
                     try:

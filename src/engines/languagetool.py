@@ -336,8 +336,9 @@ class LanguageToolClient:
                         continue
                     candidates_list = self._spell_checker.candidates(word_lower)
                     suggestion = ", ".join(list(candidates_list)[:3]) if candidates_list else None
-                    # 使用大小写不敏感正则查找所有出现位置
-                    pattern = re.compile(re.escape(word_lower), re.IGNORECASE)
+                    # 使用大小写不敏感正则查找所有出现位置 (带词边界 —
+                    # 修复 2026-08 审查 L11: 无边界时 "xrecieve" 内的 "recieve" 也被命中)
+                    pattern = re.compile(rf"\b{re.escape(word_lower)}\b", re.IGNORECASE)
                     for m in pattern.finditer(text):
                         # context 必须携带 offset/length (相对 context.text)，供
                         # language.py 的 accept.txt 白名单过滤定位匹配词。
@@ -393,14 +394,6 @@ class LanguageToolClient:
                 )
         return results
 
-    def check_chinese_only(self, text: str) -> list[dict[str, Any]]:
-        """便捷方法：仅中文检查。当前流水线使用 language="auto" 自动检测，此方法供外部调用。"""
-        return self.check(text, language="zh-CN")
-
-    def check_english_only(self, text: str) -> list[dict[str, Any]]:
-        """便捷方法：仅英文检查。当前流水线使用 language="auto" 自动检测，此方法供外部调用。"""
-        return self.check(text, language="en-US")
-
     # ── Reset ────────────────────────────────────────────────
 
     def reset(self):
@@ -430,13 +423,6 @@ class LanguageToolClient:
                 self._java_process = None
         except Exception:
             pass  # bare-handler-ok — 解释器关闭期间模块可能已被清理，任意异常均可安全忽略
-
-    def shutdown(self):
-        """终止 Java 子进程 (用户主动调用)。"""
-        had_process = self._java_process is not None
-        self._cleanup_java()
-        if had_process:
-            logger.info("LanguageTool Java server stopped")
 
     def __del__(self):
         """清理 Java 子进程。解释器关闭期间不执行（atexit 已处理）。"""

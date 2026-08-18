@@ -365,4 +365,12 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
             if "exempt_layouts" in rule.params:
                 config["exempt_layouts"] = rule.params["exempt_layouts"]
 
+    # languagetool_url 接线 (2026-08 审查 L6): 任一规则 params 含该键即注入 config,
+    # 由 pipeline.build_auditors 传给 LanguageAuditor (本地服务地址, 白名单在
+    # LanguageToolClient._validate_base_url 拦截外部地址)。
+    for rule in rules:
+        if "languagetool_url" in rule.params:
+            config["languagetool_url"] = str(rule.params["languagetool_url"])
+            break
+
     return config

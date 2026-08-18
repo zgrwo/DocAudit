@@ -8,6 +8,9 @@ from src.models.document import Document, Page
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import is_cjk_char as _is_cjk_char
 
+# 标题末尾标点检测正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每页重复编译)
+_TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
+
 
 class StructureAuditor(BaseAuditor):
     """检查文档的内容结构"""
@@ -35,19 +38,17 @@ class StructureAuditor(BaseAuditor):
                 "Takeaway",
                 "Recommend",
             ]
-        # 标题页豁免版式 (默认对齐 rules.md CON-004，可配置覆盖)
-        self.exempt_layouts = cfg.get(
-            "exempt_layouts",
-            [
-                "标题幻灯片",
-                "Title Slide",
-                "Title",
-                "Titelfolie",
-                "封面",
-                "タイトル",
-                "Cover",
-            ],
-        )
+        # 标题页豁免版式 (默认对齐 rules.md CON-004，可配置覆盖)。
+        # 用 or 而非 .get(key, default) — 显式空列表/None 不得清空内置默认。
+        self.exempt_layouts = cfg.get("exempt_layouts") or [
+            "标题幻灯片",
+            "Title Slide",
+            "Title",
+            "Titelfolie",
+            "封面",
+            "タイトル",
+            "Cover",
+        ]
         # STR-004 标题长度阈值 (从 rules.md 配置，支持动态调整)
         try:
             self.max_english_words = int(cfg.get("max_english_words", 10))
@@ -156,8 +157,14 @@ class StructureAuditor(BaseAuditor):
         return findings
 
     def _check_heading_levels(self, doc: Document) -> list[AuditFinding]:
-        """检查标题层级是否逐级递进 (不跳级)"""
+        """检查标题层级是否逐级递进 (不跳级)。
+
+        仅非 PPTX 适用 (修复 2026-08: PPTX 的 para.level 是缩进级别,
+        被当作标题层级导致 bullet 缩进 0→2 误报 "H0→H2 跳级")。
+        """
         findings: list[AuditFinding] = []
+        if doc.format == "pptx":
+            return findings
 
         for page in doc.pages:
             prev_level: int | None = None  # None = 页内首个标题, 不参与跳级比较
@@ -417,8 +424,13 @@ class StructureAuditor(BaseAuditor):
         2. 除标题外有 >= 3 个有内容的段落（确保足够实质性内容）
         3. 演讲者备注中有文字
         标题页和目录页自动豁免。
+
+        仅 PPTX 适用 (修复 2026-08: DOCX/PDF/MD 每页误报 error —
+        "每页结论" 是幻灯片语义，非分页文档无意义)。
         """
         findings: list[AuditFinding] = []
+        if doc.format != "pptx":
+            return findings
         keywords = self.keywords
 
         for page in doc.pages:
@@ -527,8 +539,6 @@ class StructureAuditor(BaseAuditor):
         """
         findings: list[AuditFinding] = []
         page_label = f"第 {page.slide_number or page.index + 1} 页"
-        # 匹配标题末尾的标点符号
-        trailing_re = re.compile(r"[。，、.!,;；：…—]+$")
 
         for elem in page.flattened_elements:
             if not elem.is_title and not (
@@ -539,7 +549,7 @@ class StructureAuditor(BaseAuditor):
                 title_text = para.text.strip()
                 if not title_text:
                     continue
-                match = trailing_re.search(title_text)
+                match = _TRAILING_PUNCT_RE.search(title_text)
                 if match:
                     punct = match.group(0)
                     findings.append(

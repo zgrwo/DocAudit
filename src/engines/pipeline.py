@@ -86,7 +86,9 @@ def build_auditors(
                     "Recommend",
                 ],
             ),
-            "exempt_layouts": config.get("exempt_layouts", []),
+            # 修复 (2026-08 审查 L10): 未声明时传 None (而非 []), 否则空列表
+            # 覆盖 StructureAuditor 内置默认豁免版式
+            "exempt_layouts": config.get("exempt_layouts"),
             "max_english_words": config.get("max_english_words", 10),
             "max_chinese_chars_title": config.get("max_chinese_chars_title", 40),
             "min_title_font_size": config.get("min_title_font_size", 28),
@@ -127,12 +129,16 @@ def build_auditors(
             ],
         }
     )
-    language_auditor = LanguageAuditor(
-        config={
-            "glossary_dir": glossary_dir,
-            "vocab_dir": vocab_dir,
-        }
-    )
+    # languagetool_url 可选注入: rules.md 声明时传入, 未声明时由
+    # LanguageAuditor 使用内置默认 (http://localhost:8010/v2)。显式传 None
+    # 会覆盖默认值, 故仅在该键存在时注入。
+    _language_cfg: dict[str, Any] = {
+        "glossary_dir": glossary_dir,
+        "vocab_dir": vocab_dir,
+    }
+    if "languagetool_url" in config:
+        _language_cfg["languagetool_url"] = config["languagetool_url"]
+    language_auditor = LanguageAuditor(config=_language_cfg)
     factual_auditor = FactualAuditor(
         config={
             "_skip_checks": [

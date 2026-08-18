@@ -185,8 +185,14 @@ class FormatAuditor(BaseAuditor):
         return findings
 
     def _check_global_font_consistency(self, doc: Document) -> list[AuditFinding]:
-        """全局字体一致性统计"""
+        """全局字体一致性统计。
+
+        修复 (2026-08 审查 M4): 曾只统计 font_name (西文 latin)，忽略
+        font_name_east_asia (中文 eastAsia) → 1 种 latin + N 种中文不触发。
+        现以复合键 (font, scope) 统计，latin 与 eastAsia 分别计数。
+        """
         findings: list[AuditFinding] = []
+        # 复合键 (font, scope) → 计数 (latin 与 eastAsia 同名字体互不混淆)
         font_counter: Counter = Counter()
 
         for page in doc.pages:
@@ -196,7 +202,9 @@ class FormatAuditor(BaseAuditor):
                 for para in elem.paragraphs:
                     for run in para.runs:
                         if run.font_name:
-                            font_counter[run.font_name] += 1
+                            font_counter[(run.font_name, "latin")] += 1
+                        if run.font_name_east_asia:
+                            font_counter[(run.font_name_east_asia, "east_asia")] += 1
 
         if not font_counter:
             return findings
@@ -204,15 +212,28 @@ class FormatAuditor(BaseAuditor):
         max_fonts = self.max_font_types
         if len(font_counter) > max_fonts:
             top_fonts = font_counter.most_common(3)
+
+            def _label(item: tuple[tuple[str, str], int]) -> str:
+                (font, scope), count = item
+                scope_label = "中文" if scope == "east_asia" else "西文"
+                return f"{font}({scope_label})({count}次)"
+
+            # 复合键 → "font/scope" 字符串键 (JSON 序列化安全)
+            distribution = {
+                f"{font}/{scope}": count for (font, scope), count in font_counter.items()
+            }
             findings.append(
                 AuditFinding(
                     type=FindingType.FORMAT,
                     severity=FindingSeverity.WARNING,
-                    message=f"全文使用了 {len(font_counter)} 种不同字体，建议统一为 2-3 种",
+                    message=(
+                        f"全文使用了 {len(font_counter)} 种不同字体（含中英文作用域），"
+                        "建议统一为 2-3 种"
+                    ),
                     rule_id="FMT-001",
                     location="全文",
-                    suggestion=f"最常用的字体: {', '.join(f'{f}({c}次)' for f, c in top_fonts)}",
-                    metadata={"font_distribution": dict(font_counter.most_common())},
+                    suggestion="最常用的字体: " + ", ".join(_label(t) for t in top_fonts),
+                    metadata={"font_distribution": distribution},
                 )
             )
 
@@ -394,7 +415,10 @@ class FormatAuditor(BaseAuditor):
                 newline_count = text.count("\n")
                 chinese_chars = sum(1 for c in text if _is_cjk_char(c))
                 total_len = len(text)
-                english_chars = total_len - chinese_chars
+                # 修复 (2026-08 审查 L12): 英文计数曾为 总长-中文字数 (数字/标点/空格
+                # 全部计入, "1"*300 误报 300 英文字符); 现改为纯字母计数,
+                # 与 FMT-004 "英文约 300 字符" 语义一致。
+                english_chars = len(re.findall(r"[a-zA-Z]", text))
                 reasons: list[str] = []
 
                 if newline_count >= self.max_explicit_newlines:

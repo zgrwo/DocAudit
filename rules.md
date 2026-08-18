@@ -160,3 +160,18 @@ language: "zh-CN"
 - 关键词: [结论, 小结, 总结, 要点, 关键, 建议, 展望, Summary, Conclusion, Key, Takeaway, Recommend]
 - 豁免版式: [标题幻灯片, Title Slide, Title, Titelfolie, 封面, タイトル, Cover]
 
+# 内置检查（非配置驱动）
+
+以下检查由审计器/引擎内置实现，不经 rules.md 声明与 _DISPATCH 调度，不参与上方
+26 条规则计数（无对应 `##` 条目）：
+
+| rule_id | 说明 | 实现位置 |
+|---------|------|----------|
+| FMT-MIXED-001 | 英文与中文之间建议加空格 | `src/auditors/language.py` → `_check_mixed_formatting` |
+| FMT-MIXED-002 | 中文与英文之间建议加空格 | `src/auditors/language.py` → `_check_mixed_formatting` |
+| FMT-MIXED-003 | 英文后不应使用中文标点 | `src/auditors/language.py` → `_check_mixed_formatting` |
+| VOCAB-REJECT | 禁用词汇检查 (reject.txt) | `src/auditors/language.py` → `_check_rejected_vocab`；引擎 `src/engines/vocabulary.py` |
+| PY-SPELL | 纯 Python 拼写检查 (tier-3 降级) | `src/engines/languagetool.py` → `_check_python` |
+| PY-ZH-GRAMMAR | 中文基础语法正则检查 | `src/engines/languagetool.py` → `_check_chinese_patterns` |
+| SYS-ERROR | 规则/审计器执行失败的系统错误 (UI 可见) | `src/auditors/custom_rules.py` → `audit`/`_execute_check_rule`；`src/engines/pipeline.py` → `run_auditors` |
+

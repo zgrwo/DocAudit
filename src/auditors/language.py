@@ -35,8 +35,10 @@ class LanguageAuditor(BaseAuditor):
 
     def __init__(self, config: dict | None = None):
         super().__init__(config)
+        # languagetool_url: rules.md 可注入 (见 rule_parser.extract_auditor_config);
+        # 用 or 而非 .get(key, default) — 显式 None 键不得覆盖内置默认。
         self.lt_client = LanguageToolClient(
-            base_url=config.get("languagetool_url", "http://localhost:8010/v2")
+            base_url=(config.get("languagetool_url") or "http://localhost:8010/v2")
             if config
             else "http://localhost:8010/v2"
         )
@@ -316,14 +318,6 @@ class LanguageAuditor(BaseAuditor):
                 )
             )
         return findings
-
-    def reset(self):
-        """重置语言检查器缓存状态，强制重新探测 LanguageTool 后端。
-
-        适用于 LanguageTool 服务在审计运行中途启动的场景。
-        """
-        self._lt_unavailable_warned = False
-        self.lt_client.reset()
 
     @staticmethod
     def _map_severity(issue_type: str) -> FindingSeverity:

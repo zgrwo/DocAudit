@@ -1,9 +1,17 @@
 """测试规则解析器"""
 
+from pathlib import Path
+
 from src.auditors.custom_rules import CustomRulesAuditor
 from src.engines.pipeline import SKIP_TO_CHECK_TYPE
 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
+
+# 绝对路径锚点 — 不依赖 CWD (2026-08 审查 L16: 曾用相对 "rules.md"/"glossary")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RULES_MD = str(PROJECT_ROOT / "rules.md")
+GLOSSARY_DIR = str(PROJECT_ROOT / "glossary")
+VOCAB_DIR = str(PROJECT_ROOT / "vocab")
 
 
 def _md_doc(text: str) -> Document:
@@ -22,11 +30,11 @@ def _md_doc(text: str) -> Document:
 
 class TestRuleParser:
     def test_parse_rules_md(self):
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         assert len(rules) >= 10
 
     def test_extract_auditor_config(self):
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         config = extract_auditor_config(rules)
         assert "allowed_fonts" in config
         assert "body_size_range" in config
@@ -35,13 +43,13 @@ class TestRuleParser:
         assert config["body_size_range"][0] >= 10  # min 字号
 
     def test_rule_ids_unique(self):
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         ids = [r.rule_id for r in rules]
         assert len(ids) == len(set(ids)), f"Duplicate rule IDs: {ids}"
 
     def test_str004_config_extraction(self):
         """STR-004 配置从 rules.md 正确提取"""
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         config = extract_auditor_config(rules)
         assert config.get("max_english_words") == 10, (
             f"Expected max_english_words=10, got {config.get('max_english_words')}"
@@ -58,7 +66,7 @@ class TestRuleParser:
 
     def test_str001_min_title_font_size_extraction(self):
         """STR-001 最小标题字号 从 rules.md 提取 (配置驱动: 曾三处硬编码 28)"""
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         config = extract_auditor_config(rules)
         assert config.get("min_title_font_size") == 28, (
             f"Expected min_title_font_size=28, got {config.get('min_title_font_size')}"
@@ -79,9 +87,87 @@ class TestRuleParser:
         config = extract_auditor_config([rule])
         assert config["min_title_font_size"] == 28
 
+    def test_languagetool_url_extracted_from_rules(self):
+        """languagetool_url 接线: 任一规则 params 含该键 → extract_auditor_config 注入"""
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="CON-001",
+            category="content",
+            severity="error",
+            description="数值一致性",
+            check_type="numeric_cross_reference",
+            params={"languagetool_url": "http://localhost:8011/v2"},
+        )
+        config = extract_auditor_config([rule])
+        assert config.get("languagetool_url") == "http://localhost:8011/v2"
+
+    def test_languagetool_url_absent_when_not_declared(self):
+        """无 languagetool_url 声明 → config 不含该键 (build_auditors 不注入)"""
+        config = extract_auditor_config([])
+        assert "languagetool_url" not in config
+
+    def test_exempt_layouts_default_when_rules_not_declared(self, tmp_path):
+        """build_auditors: rules.md 未声明 豁免版式 → 结构审查器使用内置默认 (修复: 曾传 [] 覆盖)"""
+        from src.engines.pipeline import build_auditors
+
+        rules_file = tmp_path / "rules.md"
+        rules_file.write_text(
+            "# 内容规则\n\n"
+            "## CON-001: 数值一致性\n"
+            "- 严重度: error\n"
+            "- 检查: numeric_cross_reference\n",
+            encoding="utf-8",
+        )
+        glossary = tmp_path / "glossary"
+        glossary.mkdir(exist_ok=True)
+        auditors = build_auditors(str(rules_file), str(glossary))
+        structure_auditor = next(a for n, a in auditors if n == "结构审查")
+        assert structure_auditor.exempt_layouts, "未声明时应使用内置默认豁免版式"
+        assert "标题幻灯片" in structure_auditor.exempt_layouts
+
+    def test_languagetool_url_wired_through_build_auditors(self, tmp_path):
+        """build_auditors: rules 声明 languagetool_url → LanguageAuditor 配置生效"""
+        from src.engines.pipeline import build_auditors
+
+        rules_file = tmp_path / "rules.md"
+        rules_file.write_text(
+            "# 内容规则\n\n"
+            "## CON-001: 数值一致性\n"
+            "- 严重度: error\n"
+            "- 检查: numeric_cross_reference\n"
+            "- languagetool_url: http://localhost:8011/v2\n",
+            encoding="utf-8",
+        )
+        glossary = tmp_path / "glossary"
+        glossary.mkdir(exist_ok=True)
+        auditors = build_auditors(str(rules_file), str(glossary))
+        language_auditor = next(a for n, a in auditors if n == "语言审查")
+        assert language_auditor.lt_client.base_url == "http://localhost:8011/v2"
+
+    def test_languagetool_url_external_blocked_by_whitelist(self, tmp_path):
+        """白名单拦截: rules 声明外部 languagetool_url → build_auditors 抛 ValueError"""
+        import pytest
+
+        from src.engines.pipeline import build_auditors
+
+        rules_file = tmp_path / "rules.md"
+        rules_file.write_text(
+            "# 内容规则\n\n"
+            "## CON-001: 数值一致性\n"
+            "- 严重度: error\n"
+            "- 检查: numeric_cross_reference\n"
+            "- languagetool_url: http://evil.example.com/v2\n",
+            encoding="utf-8",
+        )
+        glossary = tmp_path / "glossary"
+        glossary.mkdir(exist_ok=True)
+        with pytest.raises(ValueError):
+            build_auditors(str(rules_file), str(glossary))
+
     def test_fmt008_config_extraction(self):
         """FMT-008 对比度阈值从 rules.md 正确提取 (配置驱动)"""
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         config = extract_auditor_config(rules)
         assert config.get("min_contrast") == 4.5, (
             f"Expected min_contrast=4.5, got {config.get('min_contrast')}"
@@ -124,7 +210,7 @@ class TestRuleParser:
 
     def test_term003_skipped_on_pure_english_pages(self):
         """TERM-003: 纯英文页不检查中英混排 (曾对每个英文词报 INFO 洪水)"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("This is a standard English sentence with TSV technology.")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -132,7 +218,7 @@ class TestRuleParser:
 
     def test_term003_flags_abbrev_without_translation(self):
         """TERM-003: 中英混排页中无中文翻译的英文术语仍被标记"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("TSV 工艺用于先进封装。")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -140,7 +226,7 @@ class TestRuleParser:
 
     def test_term003_abbrev_with_chinese_parens_ok(self):
         """TERM-003: 已附 (中文) 翻译的术语不再标记"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("TSV (硅通孔) 工艺用于先进封装。")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -148,7 +234,7 @@ class TestRuleParser:
 
     def test_term003_lowercase_function_words_skipped(self):
         """TERM-003: 中英混排页中的全小写功能词不标记 (仅术语特征)"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("我们使用 standard 工艺，这是 a 测试。")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -156,7 +242,7 @@ class TestRuleParser:
 
     def test_term003_words_inside_parens_definition_skipped(self):
         """TERM-003: 括号内的全称定义词不标记 (CON-003 推荐格式 'TSV (Through Silicon Via)' 不误报)"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("TSV (Through Silicon Via) 工艺用于先进封装。")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -164,7 +250,7 @@ class TestRuleParser:
 
     def test_term003_alphanumeric_compound_not_flagged(self):
         """TERM-003: 字母数字复合词前缀不误报 ('CDMA2000' 不报 'CDMA', 'TSVstack' 不报 'TSV')"""
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("CDMA2000 与 TSVstack 技术对比。")
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
@@ -182,12 +268,66 @@ class TestRuleParser:
             check_type="table_contras",  # 拼写错误
             params={},
         )
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         findings = auditor._execute_rule(rule, _md_doc("测试"))
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
         assert len(sys_errors) == 1, f"未知 check_type 应产生 SYS-ERROR, got: {findings}"
         assert "table_contras" in sys_errors[0].message
+
+    def test_heading_levels_dispatch_skipped_for_pptx(self):
+        """STR-003 dispatch: PPTX 文档不执行标题层级检查 (para.level 是缩进级别)"""
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="STR-003",
+            category="structure",
+            severity="warning",
+            description="标题层级不跳级",
+            check_type="heading_level_sequential",
+            params={},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(text="a", runs=[], level=0),
+                        Paragraph(text="b", runs=[], level=2),
+                    ],
+                )
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = auditor._execute_rule(rule, doc)
+        str003 = [f for f in findings if f.rule_id == "STR-003"]
+        assert len(str003) == 0, f"PPTX 缩进级别不应报 STR-003, got: {str003}"
+
+    def test_con004_dispatch_skipped_for_non_pptx(self):
+        """CON-004 dispatch: 非 PPTX 文档不执行每页结论检查 (pptx_only 修复)"""
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="CON-004",
+            category="content",
+            severity="error",
+            description="每页须有结论",
+            check_type="every_slide_has_conclusion",
+            params={},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        findings = auditor._execute_rule(
+            rule, _md_doc("这是第一段普通正文，第二段补充说明，第三段技术描述。")
+        )
+        con004 = [f for f in findings if f.rule_id == "CON-004"]
+        assert len(con004) == 0, f"非 PPTX 文档不应 dispatch CON-004, got: {con004}"
 
     def test_only_chinese_page_false_string_not_truthy(self):
         """回归: 仅中文页面='false' (字符串) 不得误开启过滤器"""
@@ -201,7 +341,7 @@ class TestRuleParser:
             check_type="",
             params={"pattern": r"[A-Z]{2,8}", "仅中文页面": "false"},
         )
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         doc = _md_doc("THIS IS ENGLISH ONLY")
         findings = [f for f in auditor._execute_rule(rule, doc) if f.rule_id == "TERM-999"]
@@ -215,7 +355,7 @@ class TestRuleParser:
             raise RuntimeError("模拟 dispatch 方法崩溃")
 
         monkeypatch.setattr(FormatAuditor, "_check_bullet_consistency", boom)
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         findings = auditor.audit(_md_doc("bullet 测试"))
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
@@ -239,7 +379,7 @@ class TestRuleParser:
 
         monkeypatch.setattr(FormatAuditor, "_check_bullet_consistency", boom_fmt)
         monkeypatch.setattr(FactualAuditor, "_check_numeric_consistency", boom_fca)
-        auditor = CustomRulesAuditor(config={"rules_path": "rules.md"})
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
         auditor.load_rules()
         findings = AuditFinding.deduplicate(auditor.audit(_md_doc("测试")))
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
@@ -282,7 +422,7 @@ class TestDispatchValidation:
         防止 STR-004 式静默失效: 检查被 _skip_checks 跳过，
         但 rules.md 未声明对应 check_type 导致 dispatch 也不执行。
         """
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         declared = {r.check_type for r in rules if r.check_type}
         missing = [ct for ct in CustomRulesAuditor._DISPATCH if ct not in declared]
         assert not missing, (
@@ -296,10 +436,10 @@ class TestDispatchValidation:
         """
         from src.engines.pipeline import build_auditors
 
-        rules = parse_rules_md("rules.md")
+        rules = parse_rules_md(RULES_MD)
         declared = {r.check_type for r in rules if r.check_type}
 
-        auditors = build_auditors("rules.md", "glossary", "vocab")
+        auditors = build_auditors(RULES_MD, GLOSSARY_DIR, VOCAB_DIR)
         for _name, auditor in auditors:
             skip_keys = getattr(auditor, "_skip_checks", set())
             for key in skip_keys:
@@ -342,7 +482,7 @@ class TestDispatchValidation:
                 )
             ],
         )
-        auditors = build_auditors("rules.md", "glossary", "vocab")
+        auditors = build_auditors(RULES_MD, GLOSSARY_DIR, VOCAB_DIR)
         findings = run_auditors(doc, auditors)
         str004 = [f for f in findings if f.rule_id == "STR-004"]
         assert str004, "流水线未产生 STR-004 发现 — 标题长度检查静默失效"
