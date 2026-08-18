@@ -1,12 +1,14 @@
 """DOCX 转换器 — 使用 python-docx 解析，保留段落/字符样式信息"""
 
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.shared import Length
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -27,6 +29,9 @@ ALIGNMENT_MAP = {
     WD_ALIGN_PARAGRAPH.RIGHT: "right",
     WD_ALIGN_PARAGRAPH.JUSTIFY: "justify",
 }
+
+# 样式型标题回退 (HIGH-1): "Heading N" 样式名 → 0-based 层级 N-1
+HEADING_STYLE_RE = re.compile(r"^Heading\s+(\d+)$", re.IGNORECASE)
 
 
 class DocxConverter(BaseConverter):
@@ -171,9 +176,9 @@ class DocxConverter(BaseConverter):
 
     def _convert_paragraph(self, para) -> PageElement | None:
         """转换单个段落"""
-        try:
-            runs: list[Run] = []
-            for r in para.runs:
+        runs: list[Run] = []
+        for r in para.runs:
+            try:
                 font = r.font
                 font_color = None
                 try:
@@ -204,9 +209,10 @@ class DocxConverter(BaseConverter):
                         color=font_color,
                     )
                 )
-        except Exception:
-            # 回退：不提取格式，只提取文本
-            runs = [Run(text=para.text)]
+            except Exception as e:
+                # F9: 单个 run 提取失败仅跳过该 run (不丢整段格式)，并继续处理其余 run
+                logger.debug("DOCX run 格式提取失败，跳过该 run: %s", e, exc_info=True)
+                continue
 
         # 大纲级别
         level = None
@@ -223,6 +229,13 @@ class DocxConverter(BaseConverter):
         if not full_text.strip() and not runs:
             return None
 
+        # 行距: 固定行距返回 Twips (Length, int 子类)，转为 pt 以满足 float|None 契约 (F5)
+        line_spacing = None
+        if para.paragraph_format and para.paragraph_format.line_spacing is not None:
+            line_spacing = para.paragraph_format.line_spacing
+            if isinstance(line_spacing, Length):
+                line_spacing = line_spacing.pt
+
         # 判断是否为标题（Heading 样式）
         is_heading = False
         style_name = None
@@ -231,6 +244,25 @@ class DocxConverter(BaseConverter):
             is_heading = style_name and "heading" in style_name.lower()
         except Exception:
             pass  # bare-handler-ok — 样式名读取降级，失败时按非标题处理
+
+        # 样式级回退 (HIGH-1): 段落级无 outlineLvl 时，从样式定义补 level。
+        # ① style 的 w:pPr/w:outlineLvl (python-docx add_heading 生成的样式型标题即此形态)
+        # ② 样式名 "Heading N" → N-1 (样式未定义 outlineLvl 时)
+        if is_heading and level is None:
+            try:
+                style_el = para.style._element
+                if style_el is not None:
+                    style_pPr = style_el.find(qn("w:pPr"))
+                    if style_pPr is not None:
+                        outline = style_pPr.find(qn("w:outlineLvl"))
+                        if outline is not None:
+                            level = int(outline.get(qn("w:val"), "0"))
+            except Exception:
+                pass  # bare-handler-ok — 样式级 outlineLvl 提取降级，失败时保留 None
+            if level is None and style_name:
+                m = HEADING_STYLE_RE.match(style_name)
+                if m:
+                    level = int(m.group(1)) - 1
 
         return PageElement(
             type="text_frame",
@@ -252,13 +284,7 @@ class DocxConverter(BaseConverter):
                         if (para.paragraph_format and para.paragraph_format.space_after is not None)
                         else None
                     ),
-                    line_spacing=(
-                        para.paragraph_format.line_spacing
-                        if (
-                            para.paragraph_format and para.paragraph_format.line_spacing is not None
-                        )
-                        else None
-                    ),
+                    line_spacing=line_spacing,
                 )
             ],
             # 段落样式名放入 style_name，shape_name 保留给 PPTX shape 名 (默认 None)

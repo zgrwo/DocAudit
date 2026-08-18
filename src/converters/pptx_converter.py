@@ -9,6 +9,7 @@ from pptx import Presentation
 from pptx.enum.dml import MSO_FILL_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
+from pptx.util import Length
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -161,6 +162,10 @@ class PptxConverter(BaseConverter):
 
         for para in tf.paragraphs:
             runs: list[Run] = []
+            # 行距: 固定行距返回 Centipoints (Length, int 子类)，转为 pt 以满足 float|None 契约 (F5)
+            line_spacing = para.line_spacing if para.line_spacing else None
+            if isinstance(line_spacing, Length):
+                line_spacing = line_spacing.pt
             for run_elem in para.runs:
                 font = run_elem.font
                 # 安全获取颜色
@@ -173,15 +178,7 @@ class PptxConverter(BaseConverter):
 
                 # eastAsia 中文字体: a:rPr 下的 a:ea typeface
                 # (python-pptx font.name 只读 a:latin，不含中文显示字体)
-                font_name_east_asia = None
-                try:
-                    rPr = run_elem.font._rPr
-                    if rPr is not None:
-                        ea = rPr.find(qn("a:ea"))
-                        if ea is not None:
-                            font_name_east_asia = ea.get("typeface")
-                except Exception:
-                    pass  # bare-handler-ok — ea 字体提取降级，失败时保留 None
+                font_name_east_asia = _ea_typeface(run_elem)
 
                 runs.append(
                     Run(
@@ -204,7 +201,7 @@ class PptxConverter(BaseConverter):
                     alignment=_pptx_alignment(para.alignment),
                     space_before=para.space_before.pt if para.space_before else None,
                     space_after=para.space_after.pt if para.space_after else None,
-                    line_spacing=para.line_spacing if para.line_spacing else None,
+                    line_spacing=line_spacing,
                 )
             )
 
@@ -350,10 +347,27 @@ class PptxConverter(BaseConverter):
         )
 
     # ── 图表数据提取 ─────────────────────────────────────────
-    # (P1-5: 不再读取内嵌 Excel 整包 blob — chart_data 无消费者，字段恒为 None)
+    # (P1-5: 不再读取内嵌 Excel 整包 blob — 模型仅保留 chart_type)
 
 
 # ── 工具函数 ────────────────────────────────────────────────
+
+
+def _ea_typeface(run_elem) -> str | None:
+    """只读提取 run 的 a:ea typeface (F4)。
+
+    不使用 run.font._rPr (get_or_add 会凭空创建空 a:rPr)，改走只读
+    run._r.find(qn("a:rPr"))；a:rPr 或 a:ea 不存在时返回 None，保持现有行为。
+    """
+    try:
+        rPr = run_elem._r.find(qn("a:rPr"))
+        if rPr is not None:
+            ea = rPr.find(qn("a:ea"))
+            if ea is not None:
+                return ea.get("typeface")
+    except Exception:
+        pass  # bare-handler-ok — ea 字体提取降级，失败时保留 None
+    return None
 
 
 def _emu_to_pt(emu_value) -> float | None:

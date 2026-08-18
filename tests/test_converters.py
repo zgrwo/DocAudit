@@ -66,7 +66,7 @@ class TestDocxConverter:
         assert len(doc.pages) >= 1
 
     def test_heading_detected_as_title(self, docx_converter, sample_docx):
-        """标题样式段落被识别（style_name 含 Heading）"""
+        """标题样式段落被识别（style_name 含 Heading）且 is_title=True"""
         doc = docx_converter.convert(str(sample_docx))
         # python-docx add_heading 不设置 outlineLvl，但样式名含 Heading
         all_elements = [e for p in doc.pages for e in p.flattened_elements]
@@ -74,6 +74,54 @@ class TestDocxConverter:
             e for e in all_elements if e.style_name and "heading" in e.style_name.lower()
         ]
         assert len(heading_elements) >= 1
+        # HIGH-1: 样式型标题（无段落级 outlineLvl）也必须判为标题
+        for e in heading_elements:
+            assert e.is_title is True, f"标题元素应 is_title=True: {e.style_name!r}"
+
+    def test_heading_level_from_style_fallback(self, docx_converter, tmp_path):
+        """HIGH-1: add_heading 生成的标题（无段落级 outlineLvl，样式级定义）也能提取 level
+
+        样式级回退顺序: ① style 的 w:pPr/w:outlineLvl → ② 样式名 "Heading N"→N-1
+        """
+        doc = DocxDocument()
+        doc.add_heading("一级标题", level=1)
+        doc.add_heading("二级标题", level=2)
+        path = tmp_path / "heading_style.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        elems = [e for p in result.pages for e in p.flattened_elements if e.paragraphs]
+        h1 = next(e for e in elems if e.paragraphs[0].text == "一级标题")
+        assert h1.paragraphs[0].level == 0  # "Heading 1" → 0-based level 0
+        assert h1.is_title is True
+        h2 = next(e for e in elems if e.paragraphs[0].text == "二级标题")
+        assert h2.paragraphs[0].level == 1  # "Heading 2" → 0-based level 1
+        assert h2.is_title is True  # level 1 <= 1 → 仍为标题
+        # 语义分页: 两个 H1/H2 级标题均为页面边界 (旧实现 level=None → 整篇单页)
+        assert len(result.pages) >= 2, f"样式型标题应触发分页, got {len(result.pages)} 页"
+        assert any(e.paragraphs[0].text == "一级标题" for e in result.pages[0].flattened_elements)
+
+    def test_heading_level_from_style_name_regex(self, docx_converter, tmp_path):
+        """HIGH-1: 样式无 outlineLvl 时按样式名 "Heading N" 回退 (N-1)"""
+        from docx.oxml.ns import qn
+
+        doc = DocxDocument()
+        p = doc.add_paragraph("手写标题")
+        p.style = doc.styles["Heading 3"]
+        # 移除样式级 outlineLvl，模拟无大纲级别的 Heading 样式
+        style_el = p.style._element
+        pPr = style_el.find(qn("w:pPr"))
+        if pPr is not None:
+            ol = pPr.find(qn("w:outlineLvl"))
+            if ol is not None:
+                pPr.remove(ol)
+        path = tmp_path / "heading_regex.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        elems = [e for p in result.pages for e in p.flattened_elements if e.paragraphs]
+        h3 = next(e for e in elems if e.paragraphs[0].text == "手写标题")
+        assert h3.paragraphs[0].level == 2  # "Heading 3" → 2
 
     def test_style_name_moved_from_shape_name(self, docx_converter, sample_docx):
         """DOCX 段落样式名移到 style_name 字段, shape_name 恢复 None"""
@@ -207,6 +255,68 @@ class TestDocxConverter:
         )
         assert run_model.font_name_east_asia is None
 
+    def test_single_run_exception_keeps_other_runs(self, docx_converter, tmp_path, monkeypatch):
+        """F9: 单个 run 格式提取失败只跳过该 run，保留其余 run 的格式
+
+        (原实现外层 except 包整个 runs 循环，一个 run 异常会丢掉整段格式)
+        """
+        import docx.text.run as docx_run_module
+
+        doc = DocxDocument()
+        p = doc.add_paragraph()
+        p.add_run("正常一")
+        p.add_run("异常二")
+        p.add_run("正常三")
+        for r in p.runs:
+            r.font.name = "Arial"
+        path = tmp_path / "flaky.docx"
+        doc.save(str(path))
+
+        real_font = docx_run_module.Run.font
+
+        def flaky_font(self):
+            if self.text == "异常二":
+                raise ValueError("模拟单个 run 格式损坏")
+            return real_font.fget(self)
+
+        monkeypatch.setattr(docx_run_module.Run, "font", property(flaky_font))
+
+        result = docx_converter.convert(str(path))
+        run_models = [
+            r
+            for page in result.pages
+            for e in page.flattened_elements
+            for para in e.paragraphs
+            for r in para.runs
+        ]
+        # 异常 run 被跳过，其余 run 完整保留且格式不丢
+        assert [r.text for r in run_models] == ["正常一", "正常三"]
+        for r in run_models:
+            assert r.font_name == "Arial", f"run {r.text!r} 格式应保留"
+
+    def test_line_spacing_length_converted_to_pt(self, docx_converter, tmp_path):
+        """F5: DOCX 固定行距 (Twips Length) 转为 pt 数值，满足 Paragraph.line_spacing float|None 契约"""
+        from docx.shared import Pt
+
+        doc = DocxDocument()
+        p = doc.add_paragraph("固定行距段落")
+        p.paragraph_format.line_spacing = Pt(24)
+        path = tmp_path / "spacing.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        para = next(
+            pp
+            for page in result.pages
+            for e in page.flattened_elements
+            for pp in e.paragraphs
+            if pp.text.strip()
+        )
+        assert para.line_spacing == 24.0
+        assert isinstance(para.line_spacing, float), (
+            f"line_spacing 应为 float, got {type(para.line_spacing).__name__}"
+        )
+
 
 class TestMarkdownConverter:
     """MarkdownConverter 边界测试"""
@@ -271,6 +381,19 @@ class TestMarkdownConverter:
         path.write_text("", encoding="utf-8")
         doc = md_converter.convert(str(path))
         assert doc.format == "md"
+
+    def test_page_index_continuous_with_empty_chunks(self, md_converter, tmp_path):
+        """F10: 空 chunk 被跳过时页面 index/slide_number 保持连续 (旧实现出现 0,3,5 空洞)"""
+        md = "# 第一页\n\n# 第二页\n\n\n\n# 第三页\n"
+        path = tmp_path / "pages.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert [p.index for p in doc.pages] == [0, 1, 2], (
+            f"页面 index 应连续, got {[p.index for p in doc.pages]}"
+        )
+        assert [p.slide_number for p in doc.pages] == [1, 2, 3], (
+            f"slide_number 应连续, got {[p.slide_number for p in doc.pages]}"
+        )
 
     def test_utf8_bom_frontmatter_still_detected(self, md_converter, tmp_path):
         """UTF-8 BOM 文件的 frontmatter 仍能正确解析 (BOM 剥离)"""
@@ -444,6 +567,83 @@ class TestPptxConverterTableColors:
         assert c00.font_color == "FFFFFF"
         c01 = next(c for c in cells if (c.row, c.col) == (0, 1))
         assert c01.fill_color is None  # 无填充 → None (不误报)
+
+
+class TestPptxConverterLineSpacing:
+    """PPTX 段落行距类型契约 (F5)"""
+
+    def test_line_spacing_length_converted_to_pt(self, tmp_path):
+        """F5: PPTX 固定行距 (Centipoints Length) 转为 pt 数值，满足 float|None 契约"""
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+        para = txBox.text_frame.paragraphs[0]
+        para.text = "固定行距段落"
+        para.line_spacing = Pt(28)
+        path = tmp_path / "spacing.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        para_model = next(
+            pp
+            for page in doc.pages
+            for e in page.flattened_elements
+            for pp in e.paragraphs
+            if pp.text.strip()
+        )
+        assert para_model.line_spacing == 28.0
+        assert isinstance(para_model.line_spacing, float), (
+            f"line_spacing 应为 float, got {type(para_model.line_spacing).__name__}"
+        )
+
+
+class TestPptxConverterRprReadOnly:
+    """F4: run 属性访问不得变异 XML (font._rPr 会 get_or_add 创建空 a:rPr)"""
+
+    def test_ea_lookup_read_only_no_rpr_created(self):
+        """无 a:rPr 的 run: _ea_typeface 只读查找返回 None 且不创建 a:rPr"""
+        from pptx import Presentation
+        from pptx.oxml.ns import qn
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import _ea_typeface
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+        run = txBox.text_frame.paragraphs[0].add_run()
+        run.text = "无格式文本"
+        assert run._r.find(qn("a:rPr")) is None  # 前置: 无 rPr
+
+        assert _ea_typeface(run) is None  # 不存在 → None
+        assert run._r.find(qn("a:rPr")) is None, (
+            "只读查找不得凭空创建 a:rPr (font._rPr 会 get_or_add)"
+        )
+
+    def test_ea_lookup_reads_existing_rpr(self):
+        """已有 a:rPr/a:ea 的 run: _ea_typeface 能读到 typeface"""
+        from lxml import etree
+        from pptx import Presentation
+        from pptx.oxml.ns import qn
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import _ea_typeface
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(1))
+        run = txBox.text_frame.paragraphs[0].add_run()
+        run.text = "中文正文"
+        rPr = run.font._rPr  # 测试侧显式创建 rPr (python-pptx 无 get_or_add_ea)
+        ea = etree.SubElement(rPr, qn("a:ea"))
+        ea.set("typeface", "宋体")
+
+        assert _ea_typeface(run) == "宋体"
 
 
 class TestPptxConverterEastAsia:
@@ -650,7 +850,7 @@ class TestPptxConverterMemory:
         assert not hasattr(page, "image_blob")
 
     def test_chart_keeps_type_but_no_data_blob(self, tmp_path):
-        """图表保留 chart_type；chart_data 不再装载内嵌 Excel (恒为 None)"""
+        """图表保留 chart_type；chart_data 字段已移除 (无消费者, F7)"""
         path = tmp_path / "chart.pptx"
         self._make_chart_pptx(path)
         doc = PptxConverter().convert(str(path))
@@ -658,7 +858,7 @@ class TestPptxConverterMemory:
         assert charts, "应有图表元素"
         chart = charts[0]
         assert chart.chart_type is not None
-        assert chart.chart_data is None, "chart_data 不应再装载内嵌 Excel blob"
+        assert not hasattr(chart, "chart_data"), "chart_data 字段应已移除"
 
 
 class TestPdfConverterDocling119:
@@ -742,6 +942,46 @@ class TestPdfConverterDocling119:
         assert len(tables) == 1
         assert [c.text for row in tables[0].tables for c in row] == ["A", "B", "1", "2"]
 
+    def test_item_spanning_multiple_pages_assigned_to_all(self, tmp_path, monkeypatch):
+        """F3: 多 prov 页归属 — 跨页 item 并入所有涉及页面 (旧实现只取 prov[0])"""
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeProv:
+            def __init__(self, page_no):
+                self.page_no = page_no
+
+        class FakeTextItem:
+            def __init__(self, text, page_nos, label=None):
+                self.text = text
+                self.prov = [FakeProv(p) for p in page_nos]
+                self.label = label
+
+        class FakePageItem:
+            pass
+
+        class FakeDoclingDoc:
+            pages = {1: FakePageItem(), 2: FakePageItem()}
+            texts = [FakeTextItem("跨页文本", page_nos=[1, 2])]
+            tables = []
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        fake = tmp_path / "span.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        assert "跨页文本" in doc.pages[0].all_text, "跨页 item 应归属第 1 页"
+        assert "跨页文本" in doc.pages[1].all_text, "跨页 item 应归属第 2 页"
+
     def test_convert_orphan_items_go_to_first_page(self, tmp_path, monkeypatch):
         """无 prov 归属的文本并入第一页，不丢内容"""
         from src.converters.pdf_converter import PdfConverter
@@ -775,6 +1015,60 @@ class TestPdfConverterDocling119:
 
         doc = PdfConverter().convert(str(fake))
         assert "孤儿文本" in doc.pages[0].all_text
+
+    def test_hf_cache_env_injected_before_instantiation(self, tmp_path, monkeypatch):
+        """M5: convert() 在实例化 DoclingConverter 前注入 HF_HUB_CACHE 指向 packages/hf_cache；
+        目录存在时额外设 HF_HUB_OFFLINE=1"""
+        import os
+
+        import src.converters.pdf_converter as pdf_mod
+        from src.converters.pdf_converter import PdfConverter
+
+        hf_cache = tmp_path / "hf_cache"
+        monkeypatch.setattr(pdf_mod, "_hf_cache_dir", lambda: hf_cache)
+        monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+        monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+
+        state = {}
+
+        class FakeDoclingDoc:
+            pages = None
+
+            def export_to_markdown(self):
+                return ""
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                state["env_at_init"] = dict(os.environ)
+
+            def convert(self, path):
+                return FakeResult()
+
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        fake = tmp_path / "env.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        # 状态一: 目录不存在 → 仅 HF_HUB_CACHE，不设 offline
+        PdfConverter().convert(str(fake))
+        assert state["env_at_init"].get("HF_HUB_CACHE") == str(hf_cache), (
+            "HF_HUB_CACHE 应在 DoclingConverter 实例化前注入"
+        )
+        assert state["env_at_init"].get("HF_HUB_OFFLINE") is None
+        assert os.environ.get("HF_HUB_CACHE") == str(hf_cache)
+
+        # 状态二: 目录存在 → HF_HUB_CACHE + HF_HUB_OFFLINE=1
+        hf_cache.mkdir(parents=True, exist_ok=True)
+        monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+        monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+        state.clear()
+        PdfConverter().convert(str(fake))
+        assert state["env_at_init"].get("HF_HUB_CACHE") == str(hf_cache)
+        assert state["env_at_init"].get("HF_HUB_OFFLINE") == "1", (
+            "缓存目录存在时应设 HF_HUB_OFFLINE=1"
+        )
 
     def test_real_conversion_with_docling(self, tmp_path):
         """真实集成测试: docling 可用时真实转换 sample.pdf。
@@ -824,12 +1118,15 @@ class TestMarkdownFrontmatterStrict:
         assert "正文第二段" in doc.all_text
 
     def test_dash_separated_sections_not_swallowed(self, md_converter, tmp_path):
-        """不触发: '---' 装饰线开头 + 章节分隔 → 各章节完整保留"""
-        md = "---\n# 章节一\n\n---\n# 章节二\n"
+        """不触发: '---' 装饰线开头 + 章节分隔 → 各章节完整保留
+
+        (F12 后 '# 章节一' 属注释-only 内容会判为 frontmatter，改用非注释内容验证装饰线不吞正文)
+        """
+        md = "---\n章节一正文\n\n---\n# 章节二\n"
         path = tmp_path / "sections.md"
         path.write_text(md, encoding="utf-8")
         doc = md_converter.convert(str(path))
-        assert "章节一" in doc.all_text
+        assert "章节一正文" in doc.all_text
         assert "章节二" in doc.all_text
 
     def test_non_standalone_dash_line_not_frontmatter(self, md_converter, tmp_path):
@@ -839,6 +1136,16 @@ class TestMarkdownFrontmatterStrict:
         path.write_text(md, encoding="utf-8")
         doc = md_converter.convert(str(path))
         assert "--- 装饰线" in doc.all_text
+        assert "正文内容" in doc.all_text
+
+    def test_comment_only_frontmatter_detected(self, md_converter, tmp_path):
+        """F12: --- 开头且闭合、内容仅注释/空白 → 判定为 frontmatter (不当作正文)"""
+        md = "---\n# 生成日期: 2026-08-19\n# 来源: 内部\n---\n\n正文内容\n"
+        path = tmp_path / "cmt.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert doc.metadata.title == "cmt"  # frontmatter 无 title → 回退文件名
+        assert "生成日期" not in doc.all_text, "注释-only frontmatter 应被消费，不进入正文"
         assert "正文内容" in doc.all_text
 
 
@@ -868,6 +1175,31 @@ class TestMarkdownTableAndHeadingFixes:
         cells = [c.text for row in tables[0].tables for c in row]
         assert "-" in cells, f"'-' 数据行被误当分隔行跳过: {cells}"
         assert "A" in cells and "1" in cells
+
+    def test_inline_regexes_precompiled_module_level(self):
+        """F8: 列表/分隔行/分隔格正则预编译为模块级常量 (与 HEADING_RE 同风格)"""
+        import re as _re
+
+        from src.converters import md_converter as mdc
+
+        for name in ("_LIST_MARKER_RE", "_HR_RE", "_SEPARATOR_CELL_RE"):
+            const = getattr(mdc, name, None)
+            assert const is not None, f"{name} 应存在"
+            assert isinstance(const, _re.Pattern), f"{name} 应为编译后 Pattern"
+
+    def test_table_rows_continuous_after_separator(self, md_converter, tmp_path):
+        """F2: 分隔行跳过不影响后续行的 row 索引连续 (FMT-008 位置对齐数据源)"""
+        md = "| 名称 | 数值 |\n| --- | --- |\n| A | 1 |\n| B | 2 |\n"
+        path = tmp_path / "cont.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        tables = [e for p in doc.pages for e in p.flattened_elements if e.type == "table"]
+        assert len(tables) >= 1
+        rows = tables[0].tables
+        # 表头 + 2 数据行 = 3 行；分隔行跳过但 row 索引连续无空洞 (旧实现为 [2,2,3,3])
+        assert [c.row for row in rows for c in row] == [0, 0, 1, 1, 2, 2], (
+            f"分隔行后 row 索引应连续, got {[c.row for row in rows for c in row]}"
+        )
 
     def test_heading_with_leading_spaces_detected(self, md_converter, tmp_path):
         """触发: 0-3 空格前缀的标题被识别为标题 (与页面分割正则 s{0,3} 一致)"""

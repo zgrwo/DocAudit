@@ -199,10 +199,7 @@
 | `__init__` | `(base_url: str = DEFAULT_URL, timeout: int = 30, auto_start: bool = True)` | — | 初始化三层降级 |
 | `is_available` | (属性) | `bool` | 是否有可用后端 |
 | `check` | `(text: str, language: str = "auto", mother_tongue: str \| None = None)` | `list[dict]` | 语法拼写检查 (Docker→Java→Python) |
-| `check_chinese_only` | `(text: str)` | `list[dict]` | 仅中文检查 |
-| `check_english_only` | `(text: str)` | `list[dict]` | 仅英文检查 |
-| `reset` | `()` | — | 清除缓存并重新探测后端 |
-| `shutdown` | `()` | — | 关闭 Java 子进程，清理资源 |
+| `reset` | `()` | — | 清除缓存并重新探测后端 (有测试覆盖; 供外部手动重启探测) |
 
 ### `AutoFixer` `src/engines/autofix.py`
 
@@ -260,7 +257,7 @@
 
 | 类 | 字段 | 说明 |
 |------|------|------|
-| `Run` | `text` / `font_name` / `font_size` / `bold` / `italic` / `underline` / `color` / `strikethrough` | 最小文本单元 — 一段连续格式属性的文本 |
+| `Run` | `text` / `font_name` / `font_name_east_asia` / `font_size` / `bold` / `italic` / `underline` / `color` / `strikethrough` | 最小文本单元 — 一段连续格式属性的文本 |
 | `Paragraph` | `text` / `runs` / `level` / `alignment` / `space_before` / `space_after` / `line_spacing` | 段落 — 一组 Run 组成一个逻辑段落 |
 
 ### `Page` `src/models/document.py`
@@ -293,7 +290,7 @@
 | `is_body` | `bool` | 是否为正文占位符 |
 | `is_placeholder` | `bool` | 是否为占位符 |
 | `image_ext` | `str \| None` | 图片扩展名 ("png" \| "jpg" \| "emf"；图片二进制不载入模型，见 P1-5) |
-| `chart_type` | `str \| None` | 图表类型 ("bar" \| "line" \| ...；内嵌 Excel 数据不再装载，chart_data 恒为 None) |
+| `chart_type` | `str \| None` | 图表类型 python-pptx 枚举名 (如 "COLUMN_CLUSTERED (51)")；内嵌 Excel 数据不装载 |
 | `iter_flat()` | 生成器 | 递归展开自身 + 所有子孙 |
 
 ### `TableCell` `src/models/document.py`

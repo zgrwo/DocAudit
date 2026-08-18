@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 # 允许 0-3 前缀空白 (与 _split_into_pages 的页面分割正则 s{0,3} 一致，P1-8)
 HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.+)$", re.MULTILINE)
 
+# F8: 列表标记 / 水平分隔线 / 表格分隔格 正则 — 模块级预编译，避免每行 re.match 重建
+_LIST_MARKER_RE = re.compile(r"^(?:[\-*+]\s|\d+\.\s)")
+_HR_RE = re.compile(r"^[\-*_]{3,}\s*$")
+_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+
 # 编码回退顺序 (UTF-8 优先，然后是常见中文编码，最后 Latin-1 兜底)
 _FALLBACK_ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "gbk", "gb2312", "shift-jis", "latin-1")
 
@@ -72,7 +77,8 @@ class MarkdownConverter(BaseConverter):
         page_texts = re.split(r"\n(?=\s{0,3}#{1,3}\s)", text.strip())
 
         pages: list[Page] = []
-        for idx, page_text in enumerate(page_texts):
+        page_no = 0  # F10: 独立连续页码计数 — 空 chunk continue 不产生 index/slide_number 空洞
+        for page_text in page_texts:
             if not page_text.strip():
                 continue
 
@@ -80,11 +86,12 @@ class MarkdownConverter(BaseConverter):
             if elements:
                 pages.append(
                     Page(
-                        index=idx,
+                        index=page_no,
                         elements=elements,
-                        slide_number=idx + 1,
+                        slide_number=page_no + 1,
                     )
                 )
+                page_no += 1
 
         if not pages:
             pages.append(
@@ -167,12 +174,8 @@ class MarkdownConverter(BaseConverter):
             # 表格行 (支持可选前导 | 的 GFM 语法: "Name | Age" 和 "| Name | Age |" 均可)
             # 排除: 水平分隔线 (---) 与列表标记开头的行 (如 "- 项 A | 内容" 是列表非表格)
             stripped = line.strip()
-            is_list_marker = re.match(r"^[\-*+]\s", stripped) or re.match(r"^\d+\.\s", stripped)
-            if (
-                "|" in stripped
-                and not re.match(r"^[\-*_]{3,}\s*$", stripped)
-                and not is_list_marker
-            ):
+            is_list_marker = bool(_LIST_MARKER_RE.match(stripped))
+            if "|" in stripped and not _HR_RE.match(stripped) and not is_list_marker:
                 if current_type != "table":
                     if current_lines:
                         elements.append(self._make_element(current_lines, current_type))
@@ -183,9 +186,9 @@ class MarkdownConverter(BaseConverter):
 
             # 列表行 (排除水平分隔线: ---, ***, ___)
             stripped = line.strip()
-            if stripped and (re.match(r"^[\-*+]\s", stripped) or re.match(r"^\d+\.\s", stripped)):
+            if stripped and _LIST_MARKER_RE.match(stripped):
                 # 跳过水平分隔线 (仅由 - * _ 组成，长度 ≥ 3)
-                if re.match(r"^[\-*_]{3,}\s*$", stripped):
+                if _HR_RE.match(stripped):
                     continue
                 if current_type != "text":
                     if current_lines:
@@ -242,7 +245,8 @@ class MarkdownConverter(BaseConverter):
     def _parse_markdown_table(self, lines: list[str]) -> list[list[TableCell]]:
         """解析 Markdown 表格"""
         rows: list[list[TableCell]] = []
-        for row_idx, line in enumerate(lines):
+        data_row_idx = 0  # F2: 独立数据行计数 — 分隔行跳过不产生 row 索引空洞 (FMT-008 位置对齐)
+        for line in lines:
             line = line.strip()
             # 跳过分隔行 (|---|---|)：每格须为 3+ 连字符 (可带冒号对齐)，
             # 避免把内容为纯 "-" 的数据行当分隔行 (P1-8)
@@ -255,19 +259,21 @@ class MarkdownConverter(BaseConverter):
             if cells and cells[-1] == "":
                 cells = cells[:-1]
             row_cells = [
-                TableCell(text=c, row=row_idx, col=col_idx) for col_idx, c in enumerate(cells)
+                TableCell(text=c, row=data_row_idx, col=col_idx) for col_idx, c in enumerate(cells)
             ]
             if row_cells:
                 rows.append(row_cells)
+                data_row_idx += 1
         return rows
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """严格 frontmatter 判定 (P1-8)。
+    """严格 frontmatter 判定 (P1-8 + F12)。
 
     仅当首行为独立 "---" 行且存在独立闭合 "---" 行时视为 frontmatter，
     且中间内容须能被 yaml 解析为 mapping——否则整体按正文处理，
     避免正文以 "---" 开头 (横向分隔线) 时被误判吞掉正文。
+    F12 例外: 中间内容仅注释(#)与空白时同样判定为 frontmatter (空 dict)。
     返回 (frontmatter, body)；解析失败时返回 ({}, 原文)。
     """
     lines = text.split("\n")
@@ -281,13 +287,26 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
                 frontmatter = yaml.safe_load(fm_text) or {}
             except Exception:
-                return {}, text  # bare-handler-ok — frontmatter 解析失败，按纯正文处理
-            if not isinstance(frontmatter, dict) or not frontmatter:
-                # 中间内容非 YAML mapping 或为空 (如正文段落/纯注释) → 误判，整体按正文
-                return {}, text
-            body = "\n".join(lines[i + 1 :])
-            return frontmatter, body
+                frontmatter = None  # bare-handler-ok — yaml 解析失败，走注释-only 判定
+            if isinstance(frontmatter, dict) and frontmatter:
+                body = "\n".join(lines[i + 1 :])
+                return frontmatter, body
+            # F12: yaml 解析失败或为空，但内容仅注释/空白 → 仍视为 frontmatter (空 dict)
+            if _is_comment_only(fm_text):
+                body = "\n".join(lines[i + 1 :])
+                return {}, body
+            # 中间内容非 YAML mapping 或为空 (如正文段落) → 误判，整体按正文
+            return {}, text
     return {}, text
+
+
+def _is_comment_only(text: str) -> bool:
+    """frontmatter 中间内容是否仅由 YAML 注释 (#) 与空白组成 (F12)"""
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return False
+    return True
 
 
 def _is_separator_row(line: str) -> bool:
@@ -300,7 +319,7 @@ def _is_separator_row(line: str) -> bool:
         cells = cells[1:]
     if cells and cells[-1] == "":
         cells = cells[:-1]
-    return bool(cells) and all(re.match(r"^:?-{3,}:?$", c) for c in cells)
+    return bool(cells) and all(_SEPARATOR_CELL_RE.match(c) for c in cells)
 
 
 def _read_with_fallback(path: Path) -> str:

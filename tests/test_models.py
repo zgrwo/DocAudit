@@ -65,6 +65,22 @@ class TestDocumentModel:
         )
         assert "Page 1" in doc.all_text
 
+    def test_pageelement_no_notes_field(self):
+        """F6: PageElement.notes 死字段已移除；Page.notes 保留 (有消费者)"""
+        elem = PageElement(type="text_frame")
+        assert not hasattr(elem, "notes")
+        page = Page(index=0, notes="演讲者备注")
+        assert page.notes == "演讲者备注"
+
+    def test_pageelement_no_chart_data_field(self):
+        """F7: chart_data 无消费者，字段已移除 (图表仅保留 chart_type)"""
+        elem = PageElement(type="chart")
+        assert not hasattr(elem, "chart_data")
+
+    def test_pageelement_no_element_types_constant(self):
+        """LOW16: PageElement.ELEMENT_TYPES 类常量已移除 (无消费者)"""
+        assert not hasattr(PageElement, "ELEMENT_TYPES")
+
 
 class TestAuditFinding:
     def test_dedup_removes_duplicates(self):

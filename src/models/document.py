@@ -57,8 +57,6 @@ class TableCell:
 class PageElement:
     """页面上的一类元素 — 文本框、表格、图片、图表等"""
 
-    ELEMENT_TYPES = ("text_frame", "table", "image", "chart", "group")
-
     type: str  # "text_frame" | "table" | "image" | "chart" | "group"
     paragraphs: list[Paragraph] = field(default_factory=list)
     tables: list[list[TableCell]] = field(default_factory=list)  # 按行分组
@@ -80,12 +78,8 @@ class PageElement:
     # 图片特有 (不载入二进制数据 — P1-5 内存红线: 图片内容不进入统一模型)
     image_ext: str | None = None  # "png" | "jpg" | "emf"
 
-    # 图表特有
-    chart_type: str | None = None  # "bar" | "line" | "pie" | "scatter" | ...
-    chart_data: dict | None = None  # 结构化图表数据
-
-    # 备注
-    notes: str | None = None  # PPTX 演讲者备注
+    # 图表特有 (仅类型名，内嵌 Excel 数据不装载 — P1-5)
+    chart_type: str | None = None  # python-pptx 枚举名, 如 "COLUMN_CLUSTERED (51)"
 
     def iter_flat(self):
         """递归展开：yield 自身 + group 内所有子孙元素"""
@@ -139,9 +133,6 @@ class Page:
             for para in elem.paragraphs:
                 if para.text and para.text.strip():
                     texts.append(para.text)
-            # 预留: 未来支持 Per-shape 备注（当前所有 Converter 均未赋值 elem.notes，此为死代码路径）
-            if elem.notes:
-                texts.append(elem.notes)
             for row in elem.tables:
                 for cell in row:
                     if cell.text and cell.text.strip():

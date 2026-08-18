@@ -1,6 +1,7 @@
 """PDF 转换器 — 使用 Docling 解析，保留标题层级和表格结构"""
 
 import logging
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,6 +16,23 @@ from src.models.document import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _hf_cache_dir() -> Path:
+    """项目内 HuggingFace 模型缓存目录 (packages/hf_cache) — M5 离线注入目标"""
+    return Path(__file__).resolve().parents[2] / "packages" / "hf_cache"
+
+
+def _inject_hf_cache_env() -> None:
+    """M5: 运行期注入 HuggingFace 环境变量 (在 DoclingConverter 实例化前调用)。
+
+    - HF_HUB_CACHE 恒指向项目内 packages/hf_cache (setdefault，不覆盖用户显式设置)
+    - 该目录存在 (离线预下载完成) 时另设 HF_HUB_OFFLINE=1，强制离线加载模型
+    """
+    hf_cache = _hf_cache_dir()
+    os.environ.setdefault("HF_HUB_CACHE", str(hf_cache))
+    if hf_cache.is_dir():
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 class PdfConverter(BaseConverter):
@@ -46,6 +64,9 @@ class PdfConverter(BaseConverter):
             )
 
         logger.info("使用 Docling 解析 PDF: %s", source_path.name)
+
+        # M5: 在实例化 DoclingConverter 前注入 HF 环境变量 (项目内离线模型缓存)
+        _inject_hf_cache_env()
 
         # Docling 转换
         converter = DoclingConverter()
@@ -182,10 +203,21 @@ class PdfConverter(BaseConverter):
         """
         page_texts: dict[int | None, list] = defaultdict(list)
         for item in getattr(docling_doc, "texts", []) or []:
-            page_texts[self._item_page_no(item)].append(item)
+            page_nos = self._item_page_nos(item)
+            if page_nos:
+                # F3: 跨页 item 并入所有涉及页面 (旧实现只取 prov[0]，丢页)
+                for pn in page_nos:
+                    page_texts[pn].append(item)
+            else:
+                page_texts[None].append(item)
         page_tables: dict[int | None, list] = defaultdict(list)
         for table in getattr(docling_doc, "tables", []) or []:
-            page_tables[self._item_page_no(table)].append(table)
+            page_nos = self._item_page_nos(table)
+            if page_nos:
+                for pn in page_nos:
+                    page_tables[pn].append(table)
+            else:
+                page_tables[None].append(table)
 
         page_keys = sorted(docling_doc.pages.keys())
         fallback_page_no = page_keys[0] if page_keys else None
@@ -220,12 +252,14 @@ class PdfConverter(BaseConverter):
         return pages
 
     @staticmethod
-    def _item_page_no(item) -> int | None:
-        """取 item 归属页码 (docling >= 2.119: item.prov[0].page_no)"""
-        prov = getattr(item, "prov", None)
-        if prov:
-            return getattr(prov[0], "page_no", None)
-        return None
+    def _item_page_nos(item) -> list[int]:
+        """取 item 归属页码列表 (docling >= 2.119: item.prov[].page_no)。
+
+        F3: 遍历全部 prov 而非只取 prov[0]——跨页 item (如跨页段落/表格)
+        并入所有涉及页面；无 prov 或 page_no 为 None 时返回空列表 (调用方并入首页)。
+        """
+        prov = getattr(item, "prov", None) or []
+        return [p.page_no for p in prov if getattr(p, "page_no", None) is not None]
 
     def _convert_cell(self, cell) -> PageElement | None:
         """Docling cell → PageElement
