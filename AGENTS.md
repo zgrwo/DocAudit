@@ -76,7 +76,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `.qoder/prompts/`、`.qoder/better-harness/` 是平台本地资产（不入库）；prompt 修改后需同步 `.qoder/skills/` 注册副本
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（328 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（342 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
 
@@ -100,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 328 个用例（21 个文件，含黄金测试）
+├── tests/                            # 342 个用例（21 个文件，含黄金测试）
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
 ├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync / check_skill_sync）
@@ -160,7 +160,7 @@ DocAudit/
 
 ## 测试
 
-328 个用例，21 个文件：
+342 个用例，21 个文件：
 
 | 文件 | 内容 |
 |------|------|

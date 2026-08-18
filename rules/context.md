@@ -106,7 +106,7 @@ CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `_D
 | PDF 仅有文本层 | PDF 的字体/位置/版式无法检查 | 提示用户优先使用 PPTX/DOCX |
 | 英文语法需 LanguageTool | 仅拼写检查在纯 Python 模式可用 | Docker 一键部署 LanguageTool |
 | 项目符号字符未从 PPTX XML 提取 | 项目符号一致性检查使用文本启发式 | 未来可扩展 PPTX Converter 提取 `a:buChar` |
-| 不支持图片内文字 (OCR) | 截图中的文字无法审查 | 架构预留 `image_blob` 字段 |
+| 不支持图片内文字 (OCR) | 截图中的文字无法审查 | 已评估：2026-08 移除 image_blob 字段（无消费者，避免图片整包驻留内存）；OCR 属未来功能，届时按需设计 |
 | 不替代人工审查 | 只做确定性检查，不做语义/逻辑判断 | 定位为"第一道防线"，辅助而非替代 |
 
 ---

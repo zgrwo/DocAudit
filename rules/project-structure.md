@@ -191,12 +191,14 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (328 用例)
+└── tests/                           # 🧪 测试 (342 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
     │   ├── sample.docx              #     测试用 DOCX (存根)
-    │   └── sample_round2_test.pptx  #     第二轮测试 PPTX
+    │   ├── sample_round2_test.pptx  #     第二轮测试 PPTX
+    │   ├── sample.pdf               #     最小合法 PDF (docling 集成测试)
+    │   └── gen_sample_pdf.py        #     sample.pdf 生成器 (xref 偏移程序化计算)
     ├── test_models.py               #     Document + Finding 模型测试
     ├── test_auditors.py             #     Structure + Format + Factual 审计器测试
     ├── test_engines.py              #     Terminology + Vocabulary + 语言分段 + LT 客户端测试
