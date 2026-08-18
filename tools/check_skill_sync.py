@@ -1,0 +1,72 @@
+"""CI 验证脚本：skills/ 与 .qoder/skills/ 双份技能维护一致性检查。
+
+skills/*.md 与 .qoder/skills/<name>/SKILL.md 是同一技能的仓库副本与注册副本，
+正文必须一致。frontmatter（--- 到 --- 之间的 YAML 块）允许差异（.qoder 副本会加 trigger 等键）。
+
+名称映射: skills/python-SKILL.md → python；skills/refactoring-guardian.md → refactoring-guardian。
+退出码 0 = 通过，1 = 存在不一致。
+"""
+
+import sys
+from pathlib import Path
+
+
+def strip_frontmatter(text: str) -> str:
+    """去除文档开头的 YAML frontmatter 块（--- 到 --- 之间），返回正文。"""
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        end = next((i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
+        if end is not None:
+            return "\n".join(lines[end + 1 :])
+    return text
+
+
+def normalize(text: str) -> str:
+    """归一化正文: CRLF→LF、行尾空白去除、首尾空行去除（避免行尾差异误报）。"""
+    normalized = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n"))
+    return normalized.strip() + "\n"
+
+
+def skill_name(skill_file: Path) -> str:
+    """skills/ 下文件 → 技能名 (python-SKILL.md → python; refactoring-guardian.md → refactoring-guardian)"""
+    stem = skill_file.stem
+    return stem[: -len("-SKILL")] if stem.endswith("-SKILL") else stem
+
+
+def check_skill_sync(skills_dir: Path, qoder_skills_dir: Path) -> list[str]:
+    """返回 skills/ 与 .qoder/skills/ 的不一致清单（空列表 = 通过）。"""
+    problems: list[str] = []
+    for skill_file in sorted(skills_dir.glob("*.md")):
+        name = skill_name(skill_file)
+        target = qoder_skills_dir / name / "SKILL.md"
+        if not target.exists():
+            problems.append(f"{skill_file.name} → 缺少对应注册副本 .qoder/skills/{name}/SKILL.md")
+            continue
+        body_a = normalize(strip_frontmatter(skill_file.read_text(encoding="utf-8")))
+        body_b = normalize(strip_frontmatter(target.read_text(encoding="utf-8")))
+        if body_a != body_b:
+            problems.append(
+                f"{skill_file.name} 与 .qoder/skills/{name}/SKILL.md 正文不一致 (去 frontmatter 后)"
+            )
+    return problems
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parent.parent
+    skills_dir = root / "skills"
+    qoder_skills_dir = root / ".qoder" / "skills"
+
+    problems = check_skill_sync(skills_dir, qoder_skills_dir)
+    if problems:
+        print("技能双份维护检查失败 — 以下 skills/ 与 .qoder/skills/ 不一致:")
+        for p in problems:
+            print(f"  - {p}")
+        print("\n请同步 skills/ 与 .qoder/skills/<name>/SKILL.md 的正文 (frontmatter 允许差异)")
+        return 1
+
+    print("skill sync check passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

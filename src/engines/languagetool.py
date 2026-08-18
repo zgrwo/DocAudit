@@ -14,6 +14,7 @@ import time
 import weakref
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.text_utils import ENGLISH_WORD_MIN4_RE, is_technical_token
 
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 # LanguageTool standalone server 版本与 JAR 文件名
 LT_VERSION = "6.5"
 LT_SERVER_JAR = "languagetool-server.jar"
+
+# 安全红线: 仅允许本地 LanguageTool 服务 (rules.md 可注入 languagetool_url)
+ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 # 模块级预编译中文语法模式 (避免每次调用重复编译)
 _ZH_PATTERNS = [
@@ -59,6 +63,7 @@ _ZH_PATTERNS = [
     (re.compile(r"异质.{0,10}?结合"), "半导体语境中应为 '异质集成' 而非 '异质结合'"),
 ]
 
+
 class LanguageToolClient:
     """LanguageTool 客户端，自动选择最优后端。"""
 
@@ -75,9 +80,10 @@ class LanguageToolClient:
         for inst in list(cls._instances):
             inst._cleanup_java()
 
-    def __init__(self, base_url: str = DEFAULT_URL, timeout: int = 30,
-                 auto_start: bool = True):
+    def __init__(self, base_url: str = DEFAULT_URL, timeout: int = 30, auto_start: bool = True):
+        self._validate_base_url(base_url)
         self.base_url = base_url.rstrip("/")
+        self._initial_base_url = self.base_url  # reset() 时还原 (Java 启动会改端口)
         self.timeout = timeout
         self.auto_start = auto_start
         self._available = None
@@ -89,6 +95,18 @@ class LanguageToolClient:
         if not LanguageToolClient._atexit_registered:
             atexit.register(LanguageToolClient._cleanup_all)
             LanguageToolClient._atexit_registered = True
+
+    @staticmethod
+    def _validate_base_url(base_url: str) -> None:
+        """安全红线：仅允许本地 LanguageTool 服务。
+
+        rules.md 可注入 languagetool_url 配置，若指向外部主机，文档文本会被外发。
+        """
+        host = urlsplit(base_url).hostname
+        if host not in ALLOWED_HOSTS:
+            raise ValueError(
+                f"仅允许本地 LanguageTool 服务 (localhost/127.0.0.1/::1)，收到: {base_url}"
+            )
 
     # ── Availability ─────────────────────────────────────────
 
@@ -125,6 +143,7 @@ class LanguageToolClient:
     def _try_connect(self, url: str) -> bool:
         try:
             import requests
+
             resp = requests.get(f"{url}/languages", timeout=3)
             return resp.status_code == 200
         except Exception:
@@ -179,8 +198,11 @@ class LanguageToolClient:
                     stderr_output = self._java_process.stderr.read().decode(errors="replace")
             except Exception:
                 pass  # bare-handler-ok — stderr 读取失败时按空输出处理，日志仍会给出超时警告
-            logger.warning("LanguageTool Java server timed out (port %d). stderr: %s",
-                           port, stderr_output[:500] if stderr_output else "(empty)")
+            logger.warning(
+                "LanguageTool Java server timed out (port %d). stderr: %s",
+                port,
+                stderr_output[:500] if stderr_output else "(empty)",
+            )
             self._java_process = None
             return False
         except Exception as e:
@@ -190,6 +212,7 @@ class LanguageToolClient:
     def _find_jar(self) -> Path | None:
         """查找本地 LanguageTool standalone jar（不执行下载）"""
         import sys
+
         cache_dir = Path(sys.prefix) / "share" / "languagetool"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,7 +228,8 @@ class LanguageToolClient:
         logger.info(
             "LanguageTool standalone JAR not found. "
             "Download from https://languagetool.org/download/ "
-            "and place at %s", jar_path
+            "and place at %s",
+            jar_path,
         )
         return None
 
@@ -215,6 +239,7 @@ class LanguageToolClient:
         """初始化纯 Python 拼写检查"""
         try:
             from spellchecker import SpellChecker
+
             self._spell_checker = SpellChecker()
             return True
         except ImportError:
@@ -223,7 +248,9 @@ class LanguageToolClient:
     # ── Check ────────────────────────────────────────────────
 
     def check(
-        self, text: str, language: str = "auto",
+        self,
+        text: str,
+        language: str = "auto",
         mother_tongue: str | None = None,
     ) -> list[dict[str, Any]]:
         if not self.is_available:
@@ -234,28 +261,37 @@ class LanguageToolClient:
         else:
             return self._check_http(text, language, mother_tongue)
 
-    def _check_http(self, text: str, language: str,
-                    mother_tongue: str | None = None) -> list[dict[str, Any]]:
+    def _check_http(
+        self, text: str, language: str, mother_tongue: str | None = None
+    ) -> list[dict[str, Any]]:
         """通过 HTTP API 检查 (Docker or Java)"""
         MAX_LENGTH = 15000
         results: list[dict[str, Any]] = []
+        total_chars = len(text)
+        checked_chars = 0
 
-        for chunk_start in range(0, len(text), MAX_LENGTH):
-            chunk = text[chunk_start:chunk_start + MAX_LENGTH]
+        for chunk_start in range(0, total_chars, MAX_LENGTH):
+            chunk = text[chunk_start : chunk_start + MAX_LENGTH]
             params = {"text": chunk, "language": language}
             if mother_tongue:
                 params["motherTongue"] = mother_tongue
             try:
                 import requests
-                resp = requests.post(f"{self.base_url}/check", data=params,
-                                     timeout=self.timeout)
+
+                resp = requests.post(f"{self.base_url}/check", data=params, timeout=self.timeout)
                 if resp.status_code == 200:
                     matches = resp.json().get("matches", [])
                     for m in matches:
                         m["offset"] += chunk_start
                     results.extend(matches)
+                    checked_chars += len(chunk)
             except Exception as e:
-                logger.warning("LanguageTool request failed: %s", e)
+                logger.warning(
+                    "LanguageTool request failed: %s (已检查 %d/%d 字符)",
+                    e,
+                    checked_chars,
+                    total_chars,
+                )
                 break
             if chunk_start + MAX_LENGTH < len(text):
                 time.sleep(0.1)
@@ -307,22 +343,24 @@ class LanguageToolClient:
                         # language.py 的 accept.txt 白名单过滤定位匹配词。
                         # 否则 ctx_length=0 会导致白名单过滤被整体跳过。
                         ctx_start = max(0, m.start() - 20)
-                        results.append({
-                            "message": f"可能的拼写错误: '{word_lower}'",
-                            "offset": m.start(),
-                            "length": len(m.group()),
-                            "rule": {
-                                "id": "PY-SPELL",
-                                "category": {"id": "MISSPELLING"},
-                                "issueType": "misspelling",
-                            },
-                            "replacements": [{"value": suggestion}] if suggestion else [],
-                            "context": {
-                                "text": text[ctx_start:m.end() + 20],
-                                "offset": m.start() - ctx_start,
+                        results.append(
+                            {
+                                "message": f"可能的拼写错误: '{word_lower}'",
+                                "offset": m.start(),
                                 "length": len(m.group()),
-                            },
-                        })
+                                "rule": {
+                                    "id": "PY-SPELL",
+                                    "category": {"id": "MISSPELLING"},
+                                    "issueType": "misspelling",
+                                },
+                                "replacements": [{"value": suggestion}] if suggestion else [],
+                                "context": {
+                                    "text": text[ctx_start : m.end() + 20],
+                                    "offset": m.start() - ctx_start,
+                                    "length": len(m.group()),
+                                },
+                            }
+                        )
 
         # ── 中文基础语法正则 ──────────────────────────────────
         if language in ("zh-CN", "auto"):
@@ -335,18 +373,24 @@ class LanguageToolClient:
         results: list[dict[str, Any]] = []
         for pattern, msg in _ZH_PATTERNS:
             for m in pattern.finditer(text):
-                results.append({
-                    "message": msg,
-                    "offset": m.start(),
-                    "length": m.end() - m.start(),
-                    "rule": {
-                        "id": "PY-ZH-GRAMMAR",
-                        "category": {"id": "GRAMMAR"},
-                        "issueType": "grammar",
-                    },
-                    "replacements": [],
-                    "context": {"text": text[max(0, m.start() - 10):m.end() + 10]},
-                })
+                results.append(
+                    {
+                        "message": msg,
+                        "offset": m.start(),
+                        "length": m.end() - m.start(),
+                        "rule": {
+                            "id": "PY-ZH-GRAMMAR",
+                            "category": {"id": "GRAMMAR"},
+                            "issueType": "grammar",
+                        },
+                        "replacements": [],
+                        "context": {
+                            "text": text[max(0, m.start() - 10) : m.end() + 10],
+                            "offset": m.start() - max(0, m.start() - 10),
+                            "length": m.end() - m.start(),
+                        },
+                    }
+                )
         return results
 
     def check_chinese_only(self, text: str) -> list[dict[str, Any]]:
@@ -367,6 +411,7 @@ class LanguageToolClient:
         # 先清理 Java 子进程，避免下次探测时端口冲突或僵尸进程
         if self._java_process is not None:
             self._cleanup_java()
+        self.base_url = self._initial_base_url
         self._available = None
         self._backend = None
         self._java_process = None

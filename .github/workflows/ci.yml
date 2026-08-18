@@ -30,6 +30,10 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v
 
+      - name: Run tests with coverage
+        # 覆盖率门槛: src/ 基线 81% (2026-08 实测)，新测试持续提高
+        run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=70
+
       - name: Validate DISPATCH integrity
         run: |
           python -c "from src.auditors.custom_rules import CustomRulesAuditor; errors = CustomRulesAuditor.validate_dispatch(); print(errors); assert errors == [], f'DISPATCH validation failed: {errors}'"
@@ -56,6 +60,9 @@ jobs:
       - name: Run ruff check
         run: ruff check src/ tests/ tools/ scripts/ app.py
 
+      - name: Run ruff format check
+        run: ruff format --check src/ tests/ tools/ scripts/ app.py
+
       - name: Check bare exception handlers
         run: python tools/check_bare_handlers.py
 
@@ -64,6 +71,10 @@ jobs:
 
       - name: Check api-reference.md sync
         run: python tools/check_api_sync.py
+
+      - name: Check skill sync
+        # skills/ 与 .qoder/skills/ 注册副本正文一致性 (prompt 修改后需同步)
+        run: python tools/check_skill_sync.py
 
       - name: Check doc number consistency
         # 防数字漂移复发 (历史 3+ 次: 测试数/规则数/检查数在多处硬编码后漂移)

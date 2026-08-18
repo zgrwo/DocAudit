@@ -272,3 +272,4 @@ fixer.fix_spacing(out, out)          # Step 2: 间距（在 Step 1 输出上继�
 | Finding 的 `rule_id` 与 `rules.md` 不一致 | 用户无法追溯规则来源 | 严格对齐 |
 | `context` 字段不截断 | HTML 报告中显示异常 | 截断到 100-150 字符 |
 | 修改 rules.md 格式但不更新 `rule_parser.py` | 新字段无法解析 | 同步更新 `parse_rules_md()` |
+| falsy 值误判（`0`/`""`/`[]`/`None` 混用布尔判断） | 静默跳过检查或漏报 | Python falsy 陷阱清单 → [falsy-pitfalls.md](falsy-pitfalls.md)（SSOT：本文件只链接引用） |
