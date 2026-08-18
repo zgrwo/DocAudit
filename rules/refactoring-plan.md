@@ -1,6 +1,12 @@
 # DocAudit — 重构计划
 
-> 基于 7 commits 全量历史分析 | 目标：从"可用"到"稳定+易扩展"
+> **执行状态（2026-08-18 批注）**：本文件为 2026-07 制定的历史规划参考，非当前事实。
+> 多数 Phase 已完成或决策已搁置——LICENSE/CONTRIBUTING/CHANGELOG 已补齐、CI 与
+> DISPATCH/裸异常/文档数字门禁已上线、LanguageTool 降级已落地、插件化与七层重构已明确搁置；
+> 文中"7 commits / 25 条规则 / 139 用例"等数字均为规划当时快照，不代表当前状态。
+> **当前事实以 AGENTS.md / README.md / rules.md 为准**，本文件不再逐项更新。
+
+> 基于 7 commits 全量历史分析（规划当时） | 目标：从"可用"到"稳定+易扩展"
 > 项目成熟度：★☆☆☆☆（非常早期，先稳定再扩展，避免过度工程）
 > 对标项目：markdownlint / proselint / retext / GitHub Content Linter
 > ⚠️ 核心审查结论：架构合理但**层数偏多**（5 个 Auditor 不需要 7 层），规则生态薄弱

@@ -263,7 +263,7 @@
 ## CLI 完整参数参考
 
 ```bash
-doc-audit <path> [选项]
+docaudit <path> [选项]
 # 或
 python src/cli.py <path> [选项]
 ```
@@ -386,4 +386,4 @@ PDF 转换仅提取文本和标题级别，无字体/位置元数据。如需完
 
 ---
 
-<!-- last_updated: 2026-07-11 -->
+<!-- last_updated: 2026-08-18 -->

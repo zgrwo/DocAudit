@@ -9,11 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **审查整改批次（2026-08-18，fix）**：eastAsia 中文字体链路打通（docx/pptx 读写字型）、
+  黄金测试升级为真实三路径（CLI/WebUI/Python 同一输入产生相同发现）、幻影规格重写
+  （规则清单逐条对齐 rules.md，删除 LANG/CUSTOM 幻影条目）、安全加固（路径沙箱、
+  localhost 绑定、离线环境变量）、门禁升级与自身测试、CLI 处理失败退出码修复、
+  文档事实冲突修正（命令名统一 docaudit、context.md 移除 jieba 幻影、README 退出码表述对齐）。
+  数字类声明由主代理统一同步。
 - **文档数字一致性 CI 门禁**：`tools/check_doc_numbers.py` 校验白名单文档中的当前事实
   数字（测试用例数/规则数/测试文件数/format.py 检查数）与代码实际值一致；
   历史语境自动排除（「」引号内、CHANGELOG 历史区、规划文档）；已接入 CI lint job，
   首次运行即捕获 2 处真实漂移（测试文件数 12→13、用例数 189→200）
 - **文档数字一致性门禁测试**：`tests/test_check_doc_numbers.py`（TDD，含历史语境排除/多写法识别）
+- **FMT-008 表格文字与底色对比度规则**：深色底色配浅色文字、浅色底色配深色文字
+  （WCAG AA，正文 4.5:1 / 大字 3:1，阈值经 rules.md 配置）；覆盖 PPTX/DOCX 原生表格，
+  仅对 solid 纯色底色判定，无填充/渐变/主题色/嵌入 Excel 降级跳过不误报；
+  `TableCell` 新增 `fill_color` / `font_color` 字段，新增 `tests/test_contrast.py`（含算法/边界/降级用例）
+- 锁定文件 `requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`
+  （由 `scripts/gen_requirements_lock.py` 生成），下载步骤按锁文件解析，版本可复现
+- `tools/check_bare_handlers.py`：AST 感知的裸异常处理器检查（CI 强制），
+  既有 14 处刻意降级路径已附 `# bare-handler-ok` 理由注释
+- `tests/test_scripts.py` 与 `tests/test_check_bare_handlers.py`：脚本与门禁工具测试
+- `rules/tooling-pitfalls.md`、`rules/falsy-pitfalls.md`：工具与 falsy 陷阱清单
+- CI：Python 3.14 加入矩阵；裸异常处理器检查步骤；锁文件解析门禁
+  （windows-latest job，`pip install --dry-run --ignore-installed -r requirements-*.txt .`，
+  防 dependabot 冲突 pin 合入；锁文件为 Windows 生成契约，见 tooling-pitfalls #6b-6d）
+- 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
+- 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
 
 ### Fixed
 
@@ -58,24 +79,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starlette 1.6（streamlit 要求 <1.4）、pydantic-core 2.48（pydantic 精确钉死 2.46.4）、
   mpmath 1.4（sympy 要求 <1.4）——保留 docling-parse/docling-ibm-models/
   mail-parser/marko/typing-inspection 五个合法 bump
-
-### Added
-
-- **FMT-008 表格文字与底色对比度规则**：深色底色配浅色文字、浅色底色配深色文字
-  （WCAG AA，正文 4.5:1 / 大字 3:1，阈值经 rules.md 配置）；覆盖 PPTX/DOCX 原生表格，
-  仅对 solid 纯色底色判定，无填充/渐变/主题色/嵌入 Excel 降级跳过不误报；
-  `TableCell` 新增 `fill_color` / `font_color` 字段，新增 `tests/test_contrast.py`（含算法/边界/降级用例）
-- 锁定文件 `requirements-core.txt` / `requirements-pdf.txt` / `requirements-full.txt`
-  （由 `scripts/gen_requirements_lock.py` 生成），下载步骤按锁文件解析，版本可复现
-- `tools/check_bare_handlers.py`：AST 感知的裸异常处理器检查（CI 强制），
-  既有 14 处刻意降级路径已附 `# bare-handler-ok` 理由注释
-- `tests/test_scripts.py` 与 `tests/test_check_bare_handlers.py`：脚本与门禁工具测试
-- `rules/tooling-pitfalls.md`、`rules/falsy-pitfalls.md`：工具与 falsy 陷阱清单
-- CI：Python 3.14 加入矩阵；裸异常处理器检查步骤；锁文件解析门禁
-  （windows-latest job，`pip install --dry-run --ignore-installed -r requirements-*.txt .`，
-  防 dependabot 冲突 pin 合入；锁文件为 Windows 生成契约，见 tooling-pitfalls #6b-6d）
-- 项目宪法由 `agents.md` 更名为 `AGENTS.md`（2026 跨工具标准），附 `CLAUDE.md` 兼容副本
-- 依赖自动更新配置（dependabot）与 docs/refactor 两类 Issue 模板
 
 ## [0.1.0] - 2026-07-26
 

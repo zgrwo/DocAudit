@@ -90,8 +90,12 @@ CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `_D
 | **python-docx** | OOXML 解析，DOCX 读写 |
 | **Streamlit** | 纯 Python Web UI，零前端代码，适合内部工具 |
 | **YAML** | 术语表人类可读可编辑，比 JSON 更适合非程序员维护 |
-| **jieba** | 中文分词，中英混排段落分区 |
 | **pyspellchecker** | 纯 Python 英文拼写检查（三层降级的最后防线） |
+
+> **中英混排分段实现**：不依赖分词器 — `LanguageAuditor._segment_by_language()` 逐字符扫描
+> （CJK 字符判定 + ASCII 字母判定）将混合文本切分为语言段；数字/标点/空格等中性字符
+> 保持当前语言不切换，过短的连续同语言段自动合并。确定性、零外部依赖，
+> LanguageTool 分语言检查与术语检查均基于该分段结果（见 `src/auditors/language.py`）。
 
 ---
 
@@ -122,4 +126,4 @@ CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `_D
 
 ---
 
-<!-- last_updated: 2026-07-11 -->
+<!-- last_updated: 2026-08-18 -->

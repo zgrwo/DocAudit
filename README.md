@@ -200,7 +200,7 @@ python src/cli.py report.pptx --fix --fix-type font
 
 > 完整参数 &#8594; [用户手册](rules/user-manual.md)
 >
-> **退出码**（markdownlint 风格，便于 CI 集成）：发现 ERROR 级问题 → `1`；仅有 warning/info → `0`；处理失败 → `1`。
+> **退出码**（markdownlint 风格，便于 CI 集成）：发现 ERROR 级问题 → `1`；仅有 warning/info → `0`；任一文件处理失败（解析/转换异常，优先于严重度判断）→ `1`；路径不存在或目录中无支持文件 → `1`。
 
 ### Python API
 
@@ -262,10 +262,11 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **200 个测试用例**：models / auditors / engines / rules / integration / scripts / gates
-- **黄金测试**：CLI = Web UI = Python API 三路径一致
+- **328 个测试用例**：models / auditors / engines / rules / integration / golden paths / scripts / gates
+- **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
+- **技能双份同步检查**：skills/ 与 .qoder/skills/ 注册副本正文一致性门禁（`tools/check_skill_sync.py`）
 
 ---
 
@@ -274,6 +275,8 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **在线语法检查**：LanguageTool 需连接本地 Java 服务（不可用时可跳过）
 - **大文件处理**：>100 MB 的 PPTX/DOCX 需要较多内存
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
+- **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
+- **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
 ---
 
@@ -330,4 +333,4 @@ python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。
 
-<!-- last_updated: 2026-07-26 -->
+<!-- last_updated: 2026-08-18 -->

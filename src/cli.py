@@ -67,8 +67,12 @@ def audit_file(
     for f in all_findings:
         type_counts[f.type.value] = type_counts.get(f.type.value, 0) + 1
     type_labels = {
-        "structure": "结构审查", "format": "格式审查", "language": "语言审查",
-        "terminology": "术语检查", "factual": "事实审查", "custom": "自定义规则",
+        "structure": "结构审查",
+        "format": "格式审查",
+        "language": "语言审查",
+        "terminology": "术语检查",
+        "factual": "事实审查",
+        "custom": "自定义规则",
     }
     for t, count in sorted(type_counts.items()):
         label = type_labels.get(t, t)
@@ -83,12 +87,12 @@ def print_summary(findings: list[AuditFinding]) -> None:
     warnings = [f for f in findings if f.severity == FindingSeverity.WARNING]
     infos = [f for f in findings if f.severity == FindingSeverity.INFO]
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"[SUMMARY] Audit complete: {len(findings)} findings")
     print(f"   [ERROR] {len(errors)}")
     print(f"   [WARN]  {len(warnings)}")
     print(f"   [INFO]  {len(infos)}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if errors:
         print("\n--- Errors ---")
@@ -169,6 +173,7 @@ def doctor_check() -> int:
     if rules_path.exists():
         try:
             from src.engines.rule_parser import parse_rules_md
+
             rules = parse_rules_md(str(rules_path))
             _check("rules.md parsing", True, f"{len(rules)} rules loaded")
         except Exception as e:
@@ -183,6 +188,7 @@ def doctor_check() -> int:
         if yaml_files:
             try:
                 import yaml
+
                 for yf in yaml_files:
                     yaml.safe_load(yf.read_text(encoding="utf-8"))
                 _check("Glossary YAML files", True, f"{len(yaml_files)} files loaded")
@@ -196,6 +202,7 @@ def doctor_check() -> int:
     # 6. LanguageTool connectivity (optional)
     try:
         import requests as req
+
         resp = req.get("http://localhost:8010/v2/languages", timeout=3)
         if resp.status_code == 200:
             _check("LanguageTool server", True, "localhost:8010 reachable")
@@ -236,13 +243,19 @@ def main():
     audit_parser.add_argument("--vocab", default=None, help="词汇表目录")
     audit_parser.add_argument("-o", "--output", help="输出报告文件 (.html 或 .json)")
     audit_parser.add_argument("-v", "--verbose", action="store_true", help="详细输出")
-    audit_parser.add_argument("--format", choices=["pptx", "docx", "pdf", "md", "all"],
-                              default="all", help="按格式过滤 (批量模式)")
-    audit_parser.add_argument("--fix", action="store_true",
-                              help="自动修复简单格式问题")
-    audit_parser.add_argument("--fix-type", choices=["all", "font", "spacing", "overflow", "title_punct", "bullet"],
-                              default="all",
-                              help="指定修复类型 (默认: all)")
+    audit_parser.add_argument(
+        "--format",
+        choices=["pptx", "docx", "pdf", "md", "all"],
+        default="all",
+        help="按格式过滤 (批量模式)",
+    )
+    audit_parser.add_argument("--fix", action="store_true", help="自动修复简单格式问题")
+    audit_parser.add_argument(
+        "--fix-type",
+        choices=["all", "font", "spacing", "overflow", "title_punct", "bullet"],
+        default="all",
+        help="指定修复类型 (默认: all)",
+    )
 
     # Backward compat: if first arg looks like a path, treat as audit
     try:
@@ -250,6 +263,7 @@ def main():
         # 子命令的 invalid choice，由下方回退接管；--help 正常输出不受影响)
         import contextlib
         import io
+
         with contextlib.redirect_stderr(io.StringIO()):
             args, remaining = parser.parse_known_args()
     except SystemExit as e:
@@ -285,6 +299,7 @@ def main():
         files = [path]
     elif path.is_dir():
         from src.engines.pipeline import SUPPORTED_EXTENSIONS
+
         if args.format != "all":
             patterns = [f"*.{args.format}"]
         else:
@@ -302,9 +317,10 @@ def main():
 
     # 处理每个文件
     total_findings = []
+    failed_files = 0  # 处理失败的文件数 (README: 处理失败 → 退出码 1)
     for i, file_path in enumerate(files, 1):
         if len(files) > 1:
-            print(f"\n[{i}/{len(files)}] {'='*40}")
+            print(f"\n[{i}/{len(files)}] {'=' * 40}")
 
         try:
             doc, findings = audit_file(
@@ -321,6 +337,7 @@ def main():
             if args.fix and doc.format in ("pptx", "docx"):
                 from src.engines.autofix import AutoFixer
                 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
+
                 out = file_path.parent / f"{file_path.stem}_fixed{file_path.suffix}"
                 # 从 rules.md 读取允许字体列表（配置驱动，非硬编码）
                 rules = parse_rules_md(args.rules)
@@ -412,18 +429,24 @@ def main():
                     print(f"\n[EXPORT] JSON report saved: {out_path}")
 
         except Exception as e:
+            failed_files += 1
             print(f"[ERROR] Processing failed: {file_path} -- {e}")
             if args.verbose:
                 import traceback
+
                 traceback.print_exc()
 
     # 批量总结
     if len(files) > 1:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"[BATCH] {len(files)} files audited, {len(total_findings)} total findings")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
     # ── Exit code 按严重度 (inspired by markdownlint) ──
+    # 处理失败的文件优先置 1 (README: 处理失败 → 退出码 1)
+    if failed_files:
+        print(f"\n[EXIT] {failed_files} file(s) failed to process → exit 1")
+        sys.exit(1)
     errors = [f for f in total_findings if f.severity == FindingSeverity.ERROR]
     warnings = [f for f in total_findings if f.severity == FindingSeverity.WARNING]
     if errors:
