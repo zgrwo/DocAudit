@@ -142,9 +142,19 @@ bash scripts/setup_offline.sh download full
 >
 > &#9888;&#65039; **packages/ 必须与锁文件一致**：若 `pyproject.toml` / `requirements-*.txt` 有更新（或 packages/ 来自旧版本），请**重新执行 download** 后再拷贝——下载步骤的"离线自检"会直接拦截不一致，避免把装不上的包带到离线机。
 
-**第 2 步：拷贝到离线机器**
+**第 1.5 步（仅 PDF 功能需要）：预下载 docling 布局模型**
 
-将整个项目文件夹（含 `packages/`）复制到离线机器。
+docling 的布局模型**不随 pip 包分发**（2026-08 实证），首次转换 PDF 时会从 HuggingFace Hub 下载。离线机器如需 PDF 审查，请在**有网机器**上执行一次预下载，模型会落在项目内 `packages/hf_cache/`（由 setup_offline 设置的 `HF_HUB_CACHE` 指定），随项目一起拷贝：
+
+```bash
+# 在有网机器上（需已安装 [pdf] 依赖组），把 HF_HUB_OFFLINE 临时关掉执行一次真实转换
+set HF_HUB_CACHE=<项目路径>\packages\hf_cache
+set HF_HUB_OFFLINE=0
+python -c "from docling.document_converter import DocumentConverter; DocumentConverter().convert(r'<任意一个 pdf>')"
+# 成功后 packages/hf_cache/ 出现模型文件，再执行第 2 步拷贝
+```
+
+> &#9888;&#65039; 离线机器上 setup_offline install 已自动设置 `HF_HUB_OFFLINE=1` 与 `HF_HUB_CACHE=packages/hf_cache`，模型缓存随 packages/ 就位后 PDF 转换全程零网络。
 
 **第 3 步：离线安装**
 
@@ -262,7 +272,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **342 个测试用例**：models / auditors / engines / rules / integration / golden paths / scripts / gates
+- **343 个测试用例**：models / auditors / engines / rules / integration / golden paths / scripts / gates
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
@@ -276,6 +286,8 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **大文件处理**：>100 MB 的 PPTX/DOCX 需要较多内存
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
 - **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
+- **PDF 首次转换需 docling 模型缓存**：docling 布局模型不随 pip 包分发（2026-08 实证），首次转换时从 HuggingFace Hub 下载；离线机器需在有网机器上预下载后随项目拷贝（见下方「方案 C」离线章节）
+- **LanguageTool 服务地址限定本机**：`languagetool_url` 仅允许 localhost/127.0.0.1/::1，指向外部地址会报错（防文档文本外发）
 - **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
 ---

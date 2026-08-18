@@ -38,12 +38,16 @@ PROFILES = {
 
 
 def ensure_offline_env() -> None:
-    """设置离线红线环境变量 HF_HUB_OFFLINE=1（未设置时）。
+    """设置离线红线环境变量（未设置时，在 main() 最先调用）。
 
-    防止 docling 等组件首次运行尝试联网下载模型/词典；
-    在 main() 最先调用，使后续所有 pip 子进程继承该环境。
+    - HF_HUB_OFFLINE=1: 防止 docling 首次运行尝试联网下载模型/词典
+    - HF_HUB_CACHE=<项目>/packages/hf_cache: docling 布局模型缓存落在项目内，
+      随 packages/ 一起拷贝到离线机器（2026-08 实证: 模型不随 pip 包分发，
+      离线 PDF 首转前需在有网机器预下载，见 README「已知限制」）
     """
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    hf_cache = Path(__file__).resolve().parent.parent / "packages" / "hf_cache"
+    os.environ.setdefault("HF_HUB_CACHE", str(hf_cache))
 
 
 def main(argv):

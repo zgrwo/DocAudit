@@ -114,6 +114,24 @@ def test_ensure_offline_env_sets_hf_hub_offline(monkeypatch):
     assert os.environ.get("HF_HUB_OFFLINE") == "0"
 
 
+def test_ensure_offline_env_sets_hf_hub_cache(monkeypatch):
+    """离线红线: HF_HUB_CACHE 必须指向项目内 packages/hf_cache。
+
+    docling 布局模型不随包分发 (2026-08 实证: 需从 HuggingFace Hub 下载)，
+    缓存必须落在项目内才能随 packages/ 一起拷贝到离线机器。
+    """
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    setup_offline.ensure_offline_env()
+    cache = os.environ.get("HF_HUB_CACHE", "")
+    assert "packages" in cache and "hf_cache" in cache, (
+        f"HF_HUB_CACHE 应指向项目内 packages/hf_cache: {cache}"
+    )
+    # setdefault 语义: 用户已显式设置时保持原值
+    os.environ["HF_HUB_CACHE"] = "/custom/cache"
+    setup_offline.ensure_offline_env()
+    assert os.environ["HF_HUB_CACHE"] == "/custom/cache"
+
+
 def test_main_sets_offline_env(monkeypatch, tmp_path):
     """main() 必须在任何子进程执行前设置离线环境，download 与 install 两条路径均覆盖。"""
     calls = []
