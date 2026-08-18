@@ -3,11 +3,11 @@
 审查发现 P1：缺少空文档/0 页输入边界测试。本文件补充覆盖。
 """
 
-
 from src.auditors.factual import FactualAuditor
 from src.auditors.format import FormatAuditor
 from src.auditors.structure import StructureAuditor
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
+from src.models.finding import FindingSeverity
 
 
 def _make_doc(pages: list[Page]) -> Document:
@@ -45,6 +45,28 @@ class TestEmptyDocument:
         assert doc.all_text == ""
         assert doc.all_paragraphs == []
 
+    def test_zero_pages_required_sections_specific(self):
+        """0 页文档：必含章节检查返回具体的 CON-002 ERROR (而非仅 isinstance 弱断言)"""
+        doc = _make_doc([])
+        sa = StructureAuditor(config={"required_sections": ["概述"]})
+        findings = sa._check_required_sections(doc)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "CON-002"
+        assert findings[0].severity == FindingSeverity.ERROR
+        assert "概述" in findings[0].message
+
+    def test_zero_pages_conclusion_check_empty(self):
+        """0 页文档：每页结论检查无页面可查 → 空列表"""
+        doc = _make_doc([])
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_every_slide_has_conclusion(doc) == []
+
+    def test_zero_pages_structure_consistency_empty(self):
+        """0 页文档：版式多样性检查无页面 → 不产生 STR-008 (不会因"0 种版式"误报)"""
+        doc = _make_doc([])
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_slide_structure_consistency(doc) == []
+
 
 class TestEmptyPage:
     """单页但无元素"""
@@ -61,6 +83,37 @@ class TestEmptyPage:
         page = Page(index=0, elements=[])
         assert page.flattened_elements == []
         assert page.all_text == ""
+
+    def test_empty_page_conclusion_flagged(self):
+        """空页 (0 元素)：CON-004 每页结论检查必须触发 (无内容/无备注/无关键词)"""
+        doc = _make_doc([Page(index=0, elements=[])])
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_every_slide_has_conclusion(doc)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.rule_id == "CON-004"
+        assert f.severity == FindingSeverity.ERROR
+        assert f.page_index == 0
+        assert f.context == "(空白页)"
+
+    def test_empty_page_with_conclusion_keyword_not_flagged(self):
+        """空页含结论关键词（「结论」）→ CON-004 不触发"""
+        elem = PageElement(
+            type="text_frame", paragraphs=[Paragraph(text="结论：测试完成", runs=[])]
+        )
+        doc = _make_doc([Page(index=0, elements=[elem])])
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_every_slide_has_conclusion(doc) == []
+
+    def test_empty_page_with_three_content_paragraphs_not_flagged(self):
+        """空页含 >=3 个内容段落 → CON-004 不触发 (实质性内容豁免)"""
+        elems = [
+            PageElement(type="text_frame", paragraphs=[Paragraph(text=f"内容 {i}", runs=[])])
+            for i in range(3)
+        ]
+        doc = _make_doc([Page(index=0, elements=elems)])
+        sa = StructureAuditor(config={"required_sections": []})
+        assert sa._check_every_slide_has_conclusion(doc) == []
 
 
 class TestEmptyElements:

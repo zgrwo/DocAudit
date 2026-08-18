@@ -79,6 +79,7 @@ class TestFullPipeline:
     def test_markdown_full_pipeline(self):
         """端到端: 转换 Markdown → 审查 → 报告"""
         import tempfile
+
         md_content = """---
 title: 测试文档
 ---
@@ -201,15 +202,20 @@ title: 测试文档
             "FactualAuditor should be injected into CustomRulesAuditor"
         )
 
-    def test_web_ui_path_equals_cli_path_equals_python_path(self):
-        """验证 Web UI 路径 = CLI 路径 = 直接 Python 调用产生相同结果。
+    def test_pipeline_determinism_three_parameter_variants(self):
+        """流水线确定性回归（间接三路径）。
 
-        这是系统的"黄金测试"：三个执行路径共享同一流水线，必须返回相同的 findings。
+        历史定位: 本方法曾充当"黄金测试"，但它是间接三路径 — 三条路径共享同一函数
+        (find_converter→convert→build_auditors→run_auditors) 的参数写法变体，
+        不跑真实 CLI、不执行 app.py，若 cli.py/app.py 传错参数测试依然全绿。
+        真实三路径黄金测试见 tests/test_golden_paths.py；
+        本方法保留作为"流水线对参数写法 (相对/绝对路径、vocab 显式/缺省) 不确定"的回归。
         """
         test_file = "tests/fixtures/sample.pptx"
         project_root = Path(__file__).parent.parent
         if not (project_root / test_file).exists():
             import pytest
+
             pytest.skip("Test fixture tests/fixtures/sample.pptx not found")
 
         # ── 路径 1: 直接 Python (基准/真理) ──────────────────
@@ -224,6 +230,7 @@ title: 测试文档
 
         # ── 路径 2: 模拟 CLI (相对路径, 无显式 vocab) ────────
         import os
+
         original_cwd = os.getcwd()
         try:
             os.chdir(str(project_root))
@@ -263,7 +270,10 @@ title: 测试文档
             for f in findings:
                 counts[f.severity.value] = counts.get(f.severity.value, 0) + 1
             return counts
-        assert severity_counts(findings1) == severity_counts(findings2) == severity_counts(findings3), (
+
+        assert (
+            severity_counts(findings1) == severity_counts(findings2) == severity_counts(findings3)
+        ), (
             f"Severity distribution mismatch:\n"
             f"  Python: {severity_counts(findings1)}\n"
             f"  CLI:    {severity_counts(findings2)}\n"
@@ -276,6 +286,7 @@ title: 测试文档
             for f in findings:
                 counts[f.type.value] = counts.get(f.type.value, 0) + 1
             return counts
+
         assert type_counts(findings1) == type_counts(findings2) == type_counts(findings3), (
             f"Type distribution mismatch:\n"
             f"  Python: {type_counts(findings1)}\n"
@@ -290,6 +301,7 @@ title: 测试文档
                 rid = f.rule_id or "None"
                 counts[rid] = counts.get(rid, 0) + 1
             return counts
+
         assert rule_counts(findings1) == rule_counts(findings2) == rule_counts(findings3), (
             f"Rule distribution mismatch:\n"
             f"  Python: {rule_counts(findings1)}\n"
@@ -308,7 +320,7 @@ title: 测试文档
         )
 
     def test_golden_path_docx(self, tmp_path):
-        """黄金测试扩展: DOCX 格式三路径一致性"""
+        """确定性回归: DOCX 相同参数两次执行结果一致 (真实三路径见 test_golden_paths.py)"""
         from docx import Document as DocxDocument
 
         # 创建测试 DOCX
@@ -349,7 +361,7 @@ title: 测试文档
         assert keys1 == keys2
 
     def test_golden_path_markdown(self, tmp_path):
-        """黄金测试扩展: Markdown 格式三路径一致性"""
+        """确定性回归: Markdown 相同参数两次执行结果一致 (真实三路径见 test_golden_paths.py)"""
         md_content = "# 概述\n\n这是测试文档，介绍 TSV 技术。\n\n## 结论\n\n测试完成。\n"
         md_path = tmp_path / "golden.md"
         md_path.write_text(md_content, encoding="utf-8")
@@ -396,12 +408,19 @@ class TestCliArgumentParsing:
 
         project_root = Path(__file__).parent.parent
         result = subprocess.run(
-            [sys.executable, str(project_root / "src" / "cli.py"),
-             str(project_root / "tests" / "fixtures" / "sample.pptx"),
-             "--rules", str(project_root / "rules.md")],
-            capture_output=True, text=True, timeout=300,
+            [
+                sys.executable,
+                str(project_root / "src" / "cli.py"),
+                str(project_root / "tests" / "fixtures" / "sample.pptx"),
+                "--rules",
+                str(project_root / "rules.md"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
             cwd=str(project_root),
-            encoding="utf-8", errors="replace",  # CLI 在 Windows 上输出 UTF-8
+            encoding="utf-8",
+            errors="replace",  # CLI 在 Windows 上输出 UTF-8
         )
         # exit 2 = argparse 用法错误 (回退失败); 首次解析的报错文本会残留在
         # stderr 中，故用正向断言 (审查完成必打印 SUMMARY) 而非检查 stderr
@@ -415,12 +434,20 @@ class TestCliArgumentParsing:
 
         project_root = Path(__file__).parent.parent
         result = subprocess.run(
-            [sys.executable, str(project_root / "src" / "cli.py"), "audit",
-             str(project_root / "tests" / "fixtures" / "sample.docx"),
-             "--rules", str(project_root / "rules.md")],
-            capture_output=True, text=True, timeout=300,
+            [
+                sys.executable,
+                str(project_root / "src" / "cli.py"),
+                "audit",
+                str(project_root / "tests" / "fixtures" / "sample.docx"),
+                "--rules",
+                str(project_root / "rules.md"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
             cwd=str(project_root),
-            encoding="utf-8", errors="replace",  # CLI 在 Windows 上输出 UTF-8
+            encoding="utf-8",
+            errors="replace",  # CLI 在 Windows 上输出 UTF-8
         )
         assert result.returncode != 2, f"CLI 用法错误: {result.stderr}"
         assert "SUMMARY" in result.stdout
