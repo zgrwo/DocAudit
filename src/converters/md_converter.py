@@ -17,7 +17,8 @@ from src.models.document import (
 logger = logging.getLogger(__name__)
 
 # 常用 Markdown 标题正则
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+# 允许 0-3 前缀空白 (与 _split_into_pages 的页面分割正则 s{0,3} 一致，P1-8)
+HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.+)$", re.MULTILINE)
 
 # 编码回退顺序 (UTF-8 优先，然后是常见中文编码，最后 Latin-1 兜底)
 _FALLBACK_ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "gbk", "gb2312", "shift-jis", "latin-1")
@@ -44,18 +45,7 @@ class MarkdownConverter(BaseConverter):
         text = text.lstrip("\ufeff")
 
         # --- 解析 YAML frontmatter (可选) ---
-        frontmatter: dict = {}
-        body = text
-        if text.startswith("---"):
-            parts = text.split("---", 2)
-            if len(parts) >= 3:
-                try:
-                    import yaml
-
-                    frontmatter = yaml.safe_load(parts[1]) or {}
-                except Exception:
-                    pass  # bare-handler-ok — frontmatter 解析失败时忽略，按纯正文处理
-                body = parts[2]
+        frontmatter, body = _parse_frontmatter(text)
 
         # --- 元数据 (优先使用 frontmatter 中的 title/author) ---
         metadata = DocumentMetadata(
@@ -254,8 +244,9 @@ class MarkdownConverter(BaseConverter):
         rows: list[list[TableCell]] = []
         for row_idx, line in enumerate(lines):
             line = line.strip()
-            # 跳过分隔行 (|---|---|)
-            if re.match(r"^[\|\s\-:]+$", line):
+            # 跳过分隔行 (|---|---|)：每格须为 3+ 连字符 (可带冒号对齐)，
+            # 避免把内容为纯 "-" 的数据行当分隔行 (P1-8)
+            if _is_separator_row(line):
                 continue
             cells = [c.strip() for c in line.split("|")]
             # 去掉首尾空元素
@@ -269,6 +260,47 @@ class MarkdownConverter(BaseConverter):
             if row_cells:
                 rows.append(row_cells)
         return rows
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """严格 frontmatter 判定 (P1-8)。
+
+    仅当首行为独立 "---" 行且存在独立闭合 "---" 行时视为 frontmatter，
+    且中间内容须能被 yaml 解析为 mapping——否则整体按正文处理，
+    避免正文以 "---" 开头 (横向分隔线) 时被误判吞掉正文。
+    返回 (frontmatter, body)；解析失败时返回 ({}, 原文)。
+    """
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() != "---":
+        return {}, text
+    for i in range(1, len(lines)):
+        if lines[i].rstrip() == "---":
+            fm_text = "\n".join(lines[1:i])
+            try:
+                import yaml
+
+                frontmatter = yaml.safe_load(fm_text) or {}
+            except Exception:
+                return {}, text  # bare-handler-ok — frontmatter 解析失败，按纯正文处理
+            if not isinstance(frontmatter, dict) or not frontmatter:
+                # 中间内容非 YAML mapping 或为空 (如正文段落/纯注释) → 误判，整体按正文
+                return {}, text
+            body = "\n".join(lines[i + 1 :])
+            return frontmatter, body
+    return {}, text
+
+
+def _is_separator_row(line: str) -> bool:
+    """GFM 表格分隔行判定: 每个单元格为 3+ 连字符 (可带 : 对齐)，如 |---|---|。
+
+    内容为纯 "-" 的数据行 (| - | - |) 不匹配，保留为数据 (P1-8)。
+    """
+    cells = [c.strip() for c in line.split("|")]
+    if cells and cells[0] == "":
+        cells = cells[1:]
+    if cells and cells[-1] == "":
+        cells = cells[:-1]
+    return bool(cells) and all(re.match(r"^:?-{3,}:?$", c) for c in cells)
 
 
 def _read_with_fallback(path: Path) -> str:

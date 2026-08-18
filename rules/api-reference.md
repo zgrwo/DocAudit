@@ -292,8 +292,8 @@
 | `is_title` | `bool` | 是否为标题占位符 |
 | `is_body` | `bool` | 是否为正文占位符 |
 | `is_placeholder` | `bool` | 是否为占位符 |
-| `image_blob` / `image_ext` | `bytes \| None` / `str \| None` | 图片数据 |
-| `chart_type` / `chart_data` | `str \| None` / `dict \| None` | 图表数据 |
+| `image_ext` | `str \| None` | 图片扩展名 ("png" \| "jpg" \| "emf"；图片二进制不载入模型，见 P1-5) |
+| `chart_type` | `str \| None` | 图表类型 ("bar" \| "line" \| ...；内嵌 Excel 数据不再装载，chart_data 恒为 None) |
 | `iter_flat()` | 生成器 | 递归展开自身 + 所有子孙 |
 
 ### `TableCell` `src/models/document.py`
@@ -359,4 +359,4 @@
 
 ---
 
-<!-- last_updated: 2026-08-05 -->
+<!-- last_updated: 2026-08-19 -->

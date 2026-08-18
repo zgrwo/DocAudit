@@ -1,6 +1,7 @@
 """PDF 转换器 — 使用 Docling 解析，保留标题层级和表格结构"""
 
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 from src.converters.base import BaseConverter
@@ -61,59 +62,19 @@ class PdfConverter(BaseConverter):
         pages: list[Page] = []
 
         if docling_doc.pages:
-            for page_idx, page_key in enumerate(sorted(docling_doc.pages.keys())):
-                docling_page = docling_doc.pages[page_key]
-                elements: list[PageElement] = []
-
-                # 提取页面上的文本项 (适配 Docling 不同版本 API)
-                try:
-                    uses_cells = False
-                    if hasattr(docling_page, "cells"):
-                        uses_cells = True
-                        for cell in docling_page.cells:
-                            elem = self._convert_cell(cell)
-                            if elem is not None:
-                                elements.append(elem)
-                        # cells API 已包含表格内容，不重复提取
-                    elif hasattr(docling_page, "items"):
-                        for item in docling_page.items:
-                            elem = self._convert_item(item)
-                            if elem is not None:
-                                elements.append(elem)
-                    else:
-                        # 未知 Docling API: 回退到文本导出，避免静默丢页
-                        logger.debug("Docling page %d 结构未知，回退到文本导出", page_idx)
-                        try:
-                            page_text = (
-                                docling_page.export_to_markdown()
-                                if hasattr(docling_page, "export_to_markdown")
-                                else ""
-                            )
-                        except Exception:
-                            page_text = ""
-                        if page_text.strip():
-                            elements.append(
-                                PageElement(
-                                    type="text_frame",
-                                    paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
-                                )
-                            )
-                    # 非 cells API 路径: 尝试提取结构化表格 (统一处理，避免 items/fallback 分支重复)
-                    if not uses_cells and hasattr(docling_page, "tables"):
-                        for table in docling_page.tables:
-                            elem = self._convert_docling_table(table)
-                            if elem is not None:
-                                elements.append(elem)
-                except Exception as e:
-                    logger.warning("Docling 页面 %d 解析失败: %s，跳过该页", page_idx, e)
-
-                pages.append(
-                    Page(
-                        index=page_idx,
-                        elements=elements,
-                        slide_number=page_idx + 1,
-                    )
-                )
+            # 适配不同 docling 版本的页面结构:
+            # - 旧版: pages 值为 DlPage，自带 cells/items/tables 内容
+            # - >= 2.119: pages 值为 PageItem 引用 (仅 size/image/page_no，无内容)，
+            #   内容在 document 级 texts/tables，按 item.prov[0].page_no 归属页面
+            first_page = next(iter(docling_doc.pages.values()))
+            if (
+                hasattr(first_page, "cells")
+                or hasattr(first_page, "items")
+                or hasattr(first_page, "tables")
+            ):
+                pages = self._convert_pages_from_page_objects(docling_doc)
+            else:
+                pages = self._convert_pages_from_document_items(docling_doc)
         else:
             # 回退：使用 Markdown 导出并按页拆分
             md_text = docling_doc.export_to_markdown()
@@ -154,6 +115,118 @@ class PdfConverter(BaseConverter):
             pages=pages,
         )
 
+    def _convert_pages_from_page_objects(self, docling_doc) -> list[Page]:
+        """旧版 docling 路径: 每页对象自带 cells/items/tables 内容"""
+        pages: list[Page] = []
+
+        for page_idx, page_key in enumerate(sorted(docling_doc.pages.keys())):
+            docling_page = docling_doc.pages[page_key]
+            elements: list[PageElement] = []
+
+            # 提取页面上的文本项 (适配 Docling 不同版本 API)
+            try:
+                uses_cells = False
+                if hasattr(docling_page, "cells"):
+                    uses_cells = True
+                    for cell in docling_page.cells:
+                        elem = self._convert_cell(cell)
+                        if elem is not None:
+                            elements.append(elem)
+                    # cells API 已包含表格内容，不重复提取
+                elif hasattr(docling_page, "items"):
+                    for item in docling_page.items:
+                        elem = self._convert_item(item)
+                        if elem is not None:
+                            elements.append(elem)
+                else:
+                    # 未知 Docling API: 回退到文本导出，避免静默丢页
+                    logger.debug("Docling page %d 结构未知，回退到文本导出", page_idx)
+                    try:
+                        page_text = (
+                            docling_page.export_to_markdown()
+                            if hasattr(docling_page, "export_to_markdown")
+                            else ""
+                        )
+                    except Exception:
+                        page_text = ""
+                    if page_text.strip():
+                        elements.append(
+                            PageElement(
+                                type="text_frame",
+                                paragraphs=[Paragraph(text=page_text.strip(), runs=[])],
+                            )
+                        )
+                # 非 cells API 路径: 尝试提取结构化表格 (统一处理，避免 items/fallback 分支重复)
+                if not uses_cells and hasattr(docling_page, "tables"):
+                    for table in docling_page.tables:
+                        elem = self._convert_docling_table(table)
+                        if elem is not None:
+                            elements.append(elem)
+            except Exception as e:
+                logger.warning("Docling 页面 %d 解析失败: %s，跳过该页", page_idx, e)
+
+            pages.append(
+                Page(
+                    index=page_idx,
+                    elements=elements,
+                    slide_number=page_idx + 1,
+                )
+            )
+        return pages
+
+    def _convert_pages_from_document_items(self, docling_doc) -> list[Page]:
+        """docling >= 2.119 路径: pages 值为无内容的 PageItem 引用。
+
+        内容在 document 级 texts/tables，按 item.prov[0].page_no 归属到各页；
+        无 prov 归属的项并入第一页，避免内容丢失。
+        """
+        page_texts: dict[int | None, list] = defaultdict(list)
+        for item in getattr(docling_doc, "texts", []) or []:
+            page_texts[self._item_page_no(item)].append(item)
+        page_tables: dict[int | None, list] = defaultdict(list)
+        for table in getattr(docling_doc, "tables", []) or []:
+            page_tables[self._item_page_no(table)].append(table)
+
+        page_keys = sorted(docling_doc.pages.keys())
+        fallback_page_no = page_keys[0] if page_keys else None
+        orphan_texts = page_texts.get(None, [])
+        orphan_tables = page_tables.get(None, [])
+
+        pages: list[Page] = []
+        for page_idx, page_key in enumerate(page_keys):
+            elements: list[PageElement] = []
+            page_items = page_texts.get(page_key, [])
+            if page_key == fallback_page_no:
+                page_items = page_items + orphan_texts
+            for item in page_items:
+                elem = self._convert_item(item)
+                if elem is not None:
+                    elements.append(elem)
+            page_tables_on_page = page_tables.get(page_key, [])
+            if page_key == fallback_page_no:
+                page_tables_on_page = page_tables_on_page + orphan_tables
+            for table in page_tables_on_page:
+                elem = self._convert_docling_table(table)
+                if elem is not None:
+                    elements.append(elem)
+
+            pages.append(
+                Page(
+                    index=page_idx,
+                    elements=elements,
+                    slide_number=page_idx + 1,
+                )
+            )
+        return pages
+
+    @staticmethod
+    def _item_page_no(item) -> int | None:
+        """取 item 归属页码 (docling >= 2.119: item.prov[0].page_no)"""
+        prov = getattr(item, "prov", None)
+        if prov:
+            return getattr(prov[0], "page_no", None)
+        return None
+
     def _convert_cell(self, cell) -> PageElement | None:
         """Docling cell → PageElement
 
@@ -174,8 +247,16 @@ class PdfConverter(BaseConverter):
         if not item_text or not str(item_text).strip():
             return None
 
-        # 尝试获取标题层级
+        # 尝试获取标题层级: 旧版 heading_level 属性 / docling >= 2.119 label 枚举
         level = getattr(item, "heading_level", None)
+        if level is None:
+            label = getattr(item, "label", None)
+            if label is not None:
+                label_str = label.value if hasattr(label, "value") else str(label)
+                if label_str == "title":
+                    level = 1
+                elif label_str == "section_header":
+                    level = 2
 
         return PageElement(
             type="text_frame",

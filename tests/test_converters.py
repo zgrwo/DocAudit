@@ -1,6 +1,8 @@
 """Converter 单元测试 — DocxConverter 字段正确性 + MarkdownConverter 边界"""
 
+import io
 import logging
+from pathlib import Path
 
 import pytest
 from docx import Document as DocxDocument
@@ -8,6 +10,8 @@ from docx.shared import Pt
 
 from src.converters.docx_converter import DocxConverter
 from src.converters.md_converter import MarkdownConverter
+from src.converters.pptx_converter import PptxConverter
+from src.models.document import Page, PageElement
 
 
 @pytest.fixture
@@ -581,3 +585,306 @@ class TestDocxNestedContentWarnings:
         assert any("脚注" in r.message for r in caplog.records), (
             f"应输出脚注跳过警告, got: {[r.message for r in caplog.records]}"
         )
+
+
+class TestPptxConverterMemory:
+    """P1-5: PPTX 图片/内嵌 Excel 不再整包载入内存 (WP-D)"""
+
+    # 1x1 透明 PNG — 最小合法图片文件
+    MINIMAL_PNG = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d49444154789c6360000002000154a24f9f0000000049454e44ae426082"
+    )
+
+    @staticmethod
+    def _make_image_pptx(path) -> None:
+        """构造含一张 PNG 图片的 PPTX"""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        slide.shapes.add_picture(
+            io.BytesIO(TestPptxConverterMemory.MINIMAL_PNG),
+            Inches(1),
+            Inches(1),
+            Inches(2),
+            Inches(2),
+        )
+        prs.save(str(path))
+
+    @staticmethod
+    def _make_chart_pptx(path) -> None:
+        """构造含内嵌 Excel 图表的 PPTX (python-pptx add_chart 会自动嵌入 xlsx part)"""
+        from pptx import Presentation
+        from pptx.chart.data import CategoryChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        chart_data = CategoryChartData()
+        chart_data.categories = ["A", "B", "C"]
+        chart_data.add_series("系列1", (1, 2, 3))
+        slide.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(1), Inches(4), Inches(3), chart_data
+        )
+        prs.save(str(path))
+
+    def test_image_element_keeps_ext_only(self, tmp_path):
+        """图片元素只保留 image_ext，不再暴露 image_blob 字段"""
+        path = tmp_path / "img.pptx"
+        self._make_image_pptx(path)
+        doc = PptxConverter().convert(str(path))
+        images = [e for p in doc.pages for e in p.flattened_elements if e.type == "image"]
+        assert images, "应有图片元素"
+        img = images[0]
+        assert img.image_ext == "png"
+        assert not hasattr(img, "image_blob"), "image_blob 字段应已移除 (整图内存红线)"
+
+    def test_pageelement_model_has_no_image_blob(self):
+        """模型层: PageElement / Page 均不再有 image_blob 字段"""
+        elem = PageElement(type="image")
+        assert not hasattr(elem, "image_blob")
+        page = Page(index=0)
+        assert not hasattr(page, "image_blob")
+
+    def test_chart_keeps_type_but_no_data_blob(self, tmp_path):
+        """图表保留 chart_type；chart_data 不再装载内嵌 Excel (恒为 None)"""
+        path = tmp_path / "chart.pptx"
+        self._make_chart_pptx(path)
+        doc = PptxConverter().convert(str(path))
+        charts = [e for p in doc.pages for e in p.flattened_elements if e.type == "chart"]
+        assert charts, "应有图表元素"
+        chart = charts[0]
+        assert chart.chart_type is not None
+        assert chart.chart_data is None, "chart_data 不应再装载内嵌 Excel blob"
+
+
+class TestPdfConverterDocling119:
+    """P1-6: docling 2.119 页面结构适配 (pages 值为无内容的 PageItem 引用)"""
+
+    def test_convert_document_items_path(self, tmp_path, monkeypatch):
+        """2.119 路径: pages 无 cells/items → 从 document 级 texts/tables 按 prov.page_no 归属页面"""
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeProv:
+            def __init__(self, page_no):
+                self.page_no = page_no
+
+        class FakeTextItem:
+            """模拟 docling 2.119 TextItem (label 为枚举, 带 value)"""
+
+            def __init__(self, text, page_no, label=None):
+                self.text = text
+                self.prov = [FakeProv(page_no)]
+                self.label = label
+
+        class FakeTableItem:
+            def __init__(self, rows, page_no):
+                self._rows = rows
+                self.prov = [FakeProv(page_no)]
+
+            def export_to_dataframe(self):
+                class FakeDataFrame:
+                    def __init__(self, rows):
+                        self._rows = rows
+
+                    def iterrows(self):
+                        yield from enumerate(self._rows)
+
+                return FakeDataFrame(self._rows)
+
+        class FakePageItem:
+            """2.119 PageItem: 仅 size/image/page_no，无 cells/items/tables"""
+
+            pass
+
+        class FakeDoclingDoc:
+            pages = {1: FakePageItem(), 2: FakePageItem()}
+            texts = [
+                FakeTextItem("第一页正文", page_no=1),
+                FakeTextItem("第二页标题", page_no=2, label="title"),
+                FakeTextItem("第二页正文", page_no=2),
+            ]
+            tables = [FakeTableItem([["A", "B"], ["1", "2"]], page_no=1)]
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        fake = tmp_path / "sample.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        assert doc.metadata.page_count == 2
+        assert len(doc.pages) == 2
+        # 结构路径: 每页都有 text_frame 元素 (非纯 fallback 空页)
+        for page in doc.pages:
+            text_frames = [e for e in page.flattened_elements if e.type == "text_frame"]
+            assert text_frames, f"page {page.index} 应有 text_frame 元素"
+        assert "第一页正文" in doc.pages[0].all_text
+        assert "第二页标题" in doc.pages[1].all_text
+        # label=title → level 1 / is_title
+        page2_titles = [
+            p for e in doc.pages[1].flattened_elements for p in e.paragraphs if p.level == 1
+        ]
+        assert page2_titles and page2_titles[0].text == "第二页标题"
+        # 表格归属第 1 页
+        tables = [e for e in doc.pages[0].flattened_elements if e.type == "table"]
+        assert len(tables) == 1
+        assert [c.text for row in tables[0].tables for c in row] == ["A", "B", "1", "2"]
+
+    def test_convert_orphan_items_go_to_first_page(self, tmp_path, monkeypatch):
+        """无 prov 归属的文本并入第一页，不丢内容"""
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeTextItem:
+            def __init__(self, text, page_no=None):
+                self.text = text
+                self.prov = [type("P", (), {"page_no": page_no})()] if page_no else []
+
+        class FakePageItem:
+            pass
+
+        class FakeDoclingDoc:
+            pages = {1: FakePageItem()}
+            texts = [FakeTextItem("孤儿文本", page_no=None)]
+            tables = []
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        fake = tmp_path / "orphan.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        assert "孤儿文本" in doc.pages[0].all_text
+
+    def test_real_conversion_with_docling(self, tmp_path):
+        """真实集成测试: docling 可用时真实转换 sample.pdf。
+
+        断言 pages >= 1、文本包含 DocAuditTest、走结构路径 (元素含 text_frame 而非纯 fallback)。
+        注意: 评估环境沙箱会拦截 docling-parse 的 C fopen (伪"文件不存在")，真实环境不受影响。
+        """
+        pytest.importorskip("docling")
+        from src.converters.pdf_converter import PdfConverter
+
+        sample_pdf = Path(__file__).parent / "fixtures" / "sample.pdf"
+        assert sample_pdf.exists(), f"fixture 缺失: {sample_pdf}"
+
+        doc = PdfConverter().convert(str(sample_pdf))
+        assert doc.format == "pdf"
+        assert doc.metadata.page_count is not None
+        assert doc.metadata.page_count >= 1
+        assert len(doc.pages) >= 1
+        assert "DocAuditTest" in doc.all_text
+        # 结构路径: 有 text_frame 元素，而非最终回退的空页
+        text_frames = [
+            e for page in doc.pages for e in page.flattened_elements if e.type == "text_frame"
+        ]
+        assert len(text_frames) >= 1
+
+
+class TestMarkdownFrontmatterStrict:
+    """P1-8: frontmatter 严格判定 (首行独立 --- + 闭合行 + YAML mapping)"""
+
+    def test_proper_frontmatter_still_parsed(self, md_converter, tmp_path):
+        """触发: 标准三行式 frontmatter → title/author 提取 + 正文完整"""
+        md = "---\ntitle: 测试文档\nauthor: 张三\n---\n\n# 标题\n\n正文内容\n"
+        path = tmp_path / "fm.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert doc.metadata.title == "测试文档"
+        assert doc.metadata.author == "张三"
+        assert "正文内容" in doc.all_text
+
+    def test_body_starting_with_dashes_not_swallowed(self, md_converter, tmp_path):
+        """不触发: 正文以 '---' 开头 (横向分隔线) → 不吞正文、不崩溃"""
+        md = "---\n正文第一段\n---\n正文第二段\n"
+        path = tmp_path / "dash.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert "正文第一段" in doc.all_text
+        assert "正文第二段" in doc.all_text
+
+    def test_dash_separated_sections_not_swallowed(self, md_converter, tmp_path):
+        """不触发: '---' 装饰线开头 + 章节分隔 → 各章节完整保留"""
+        md = "---\n# 章节一\n\n---\n# 章节二\n"
+        path = tmp_path / "sections.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert "章节一" in doc.all_text
+        assert "章节二" in doc.all_text
+
+    def test_non_standalone_dash_line_not_frontmatter(self, md_converter, tmp_path):
+        """不触发: 首行 '--- 装饰线' (非独立 ---) → 按正文保留"""
+        md = "--- 装饰线\n正文内容\n"
+        path = tmp_path / "deco.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        assert "--- 装饰线" in doc.all_text
+        assert "正文内容" in doc.all_text
+
+
+class TestMarkdownTableAndHeadingFixes:
+    """P1-8: 表格分隔行误判 + 标题前缀空格一致"""
+
+    def test_separator_row_still_skipped(self, md_converter, tmp_path):
+        """触发: 标准分隔行 (|---|) 仍被跳过"""
+        md = "| 名称 | 数值 |\n| --- | --- |\n| A | 1 |\n"
+        path = tmp_path / "sep.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        tables = [e for p in doc.pages for e in p.flattened_elements if e.type == "table"]
+        assert len(tables) >= 1
+        cells = [c.text for row in tables[0].tables for c in row]
+        assert "---" not in cells
+        assert "A" in cells
+
+    def test_dash_data_row_not_treated_as_separator(self, md_converter, tmp_path):
+        """不触发: 内容为纯 '-' 的数据行不得被当分隔行跳过"""
+        md = "| 名称 | 数值 |\n| --- | --- |\n| - | - |\n| A | 1 |\n"
+        path = tmp_path / "dashrow.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        tables = [e for p in doc.pages for e in p.flattened_elements if e.type == "table"]
+        assert len(tables) >= 1
+        cells = [c.text for row in tables[0].tables for c in row]
+        assert "-" in cells, f"'-' 数据行被误当分隔行跳过: {cells}"
+        assert "A" in cells and "1" in cells
+
+    def test_heading_with_leading_spaces_detected(self, md_converter, tmp_path):
+        """触发: 0-3 空格前缀的标题被识别为标题 (与页面分割正则 s{0,3} 一致)"""
+        md = "# 一级\n\n正文段落\n   #### 缩进四级标题\n"
+        path = tmp_path / "indent.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        levels = [p.level for p in doc.all_paragraphs if p.level is not None]
+        assert 4 in levels, f"带 3 空格前缀的 #### 标题应识别为 level 4: {levels}"
+        assert "缩进四级标题" in doc.all_text
+
+    def test_four_space_indent_not_heading(self, md_converter, tmp_path):
+        """不触发: 4 空格缩进 (代码) 不误判为标题"""
+        md = "# 标题\n\n    #### 代码缩进\n"
+        path = tmp_path / "codeindent.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        levels = [p.level for p in doc.all_paragraphs if p.level is not None]
+        assert 4 not in levels, f"4 空格缩进不应识别为标题: {levels}"
+        assert "#### 代码缩进" in doc.all_text

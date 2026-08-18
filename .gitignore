@@ -40,6 +40,7 @@ packages/
 *.pdf
 !tests/fixtures/*.pptx
 !tests/fixtures/*.docx
+!tests/fixtures/*.pdf
 
 # Streamlit
 .streamlit/secrets.toml

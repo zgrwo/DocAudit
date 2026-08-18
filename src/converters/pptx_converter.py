@@ -295,8 +295,7 @@ class PptxConverter(BaseConverter):
         )
 
     def _convert_image(self, shape: Any) -> PageElement:
-        """转换图片"""
-        image_blob = shape.image.blob if shape.image else None
+        """转换图片 — 仅保留格式信息 (image_ext)，不把整图 blob 载入内存 (P1-5)"""
         image_ext = "unknown"
         if shape.image and shape.image.content_type:
             image_ext = shape.image.content_type.split("/")[-1]
@@ -309,21 +308,17 @@ class PptxConverter(BaseConverter):
             width=_emu_to_pt(shape.width) if shape.width is not None else None,
             height=_emu_to_pt(shape.height) if shape.height is not None else None,
             shape_name=shape.name,
-            image_blob=image_blob,
             image_ext=image_ext,
         )
 
     def _convert_chart(self, shape: Any) -> PageElement:
-        """转换图表 — 尝试提取内嵌 Excel 数据"""
+        """转换图表 — 仅保留 chart_type，不读内嵌 Excel 整包 blob (P1-5)"""
         chart_type = None
-        chart_data = None
         try:
             chart = shape.chart
             chart_type = str(chart.chart_type) if chart.chart_type else None
-            # 从内嵌 Excel 读取原始数据
-            chart_data = self._extract_chart_data(shape)
         except Exception:
-            pass  # bare-handler-ok — 图表数据提取降级，失败时保留 None，不阻塞审查
+            pass  # bare-handler-ok — 图表类型提取降级，失败时保留 None，不阻塞审查
 
         return PageElement(
             type="chart",
@@ -333,7 +328,6 @@ class PptxConverter(BaseConverter):
             height=_emu_to_pt(shape.height) if shape.height is not None else None,
             shape_name=shape.name,
             chart_type=chart_type,
-            chart_data=chart_data,
         )
 
     def _convert_group(self, shape: Any) -> PageElement:
@@ -356,22 +350,7 @@ class PptxConverter(BaseConverter):
         )
 
     # ── 图表数据提取 ─────────────────────────────────────────
-
-    def _extract_chart_data(self, shape: Any) -> dict | None:
-        """从 PPTX 图表中提取内嵌的 Excel 数据"""
-        try:
-            # 查找嵌入的 Excel 包 (reltype 包含 "package")
-            chart_part = shape.chart.part
-            for rel in chart_part.rels.values():
-                if "package" not in rel.reltype:
-                    continue
-                if hasattr(rel, "target_part") and rel.target_part.blob:
-                    blob = rel.target_part.blob
-                    if blob and len(blob) > 0:
-                        return {"source": "embedded_excel", "size": len(blob)}
-        except Exception:
-            pass  # bare-handler-ok — 内嵌 Excel 提取降级，失败时返回 None
-        return None
+    # (P1-5: 不再读取内嵌 Excel 整包 blob — chart_data 无消费者，字段恒为 None)
 
 
 # ── 工具函数 ────────────────────────────────────────────────

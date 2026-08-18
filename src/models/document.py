@@ -77,8 +77,7 @@ class PageElement:
     is_body: bool = False  # 是否为正文占位符
     is_placeholder: bool = False  # 是否为占位符
 
-    # 图片特有
-    image_blob: bytes | None = None
+    # 图片特有 (不载入二进制数据 — P1-5 内存红线: 图片内容不进入统一模型)
     image_ext: str | None = None  # "png" | "jpg" | "emf"
 
     # 图表特有
@@ -104,7 +103,6 @@ class Page:
     layout_name: str | None = None  # PPTX 母版/版式名称
     slide_number: int | None = None  # 幻灯片编号 (1-indexed)
     notes: str | None = None  # 演讲者备注 (PPTX)
-    image_blob: bytes | None = None  # 幻灯片缩略图
 
     def invalidate_cache(self) -> None:
         """清除 flattened_elements / all_text 缓存（当 elements 被修改后调用）"""
