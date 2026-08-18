@@ -191,7 +191,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (200 用例)
+└── tests/                           # 🧪 测试 (328 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -199,17 +199,25 @@ DocAudit/
     │   └── sample_round2_test.pptx  #     第二轮测试 PPTX
     ├── test_models.py               #     Document + Finding 模型测试
     ├── test_auditors.py             #     Structure + Format + Factual 审计器测试
-    ├── test_engines.py              #     Terminology + Vocabulary + 语言分段测试
+    ├── test_engines.py              #     Terminology + Vocabulary + 语言分段 + LT 客户端测试
     ├── test_rules.py                #     规则解析 + DISPATCH 验证
-    ├── test_integration.py          #     全流水线集成测试 (含黄金测试)
+    ├── test_integration.py          #     全流水线集成测试 (流水线确定性回归)
+    ├── test_golden_paths.py         #     真实三路径黄金测试 (API=CLI=AppTest) + run_auditors 行为
+    ├── test_rule_coverage.py        #     零断言规则定向覆盖测试
+    ├── test_html_report_security.py #     HTML 转义红线 (XSS 载荷)
+    ├── test_app_ui.py               #     app.py 过滤器/扫描器 + AppTest 冒烟
+    ├── test_cli_exit_codes.py       #     CLI 退出码契约
     ├── test_autofix.py              #     AutoFixer 修复链路
     ├── test_converters.py           #     四格式转换器
     ├── test_edge_cases.py           #     边界输入
     ├── test_language_auditor.py     #     语言审计器细节
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
-    ├── test_contrast.py              #     FMT-008 WCAG 对比度算法 + 表格检查
-    ├── test_check_doc_numbers.py     #     文档数字一致性检查器门禁
-    └── test_check_bare_handlers.py  #     裸异常检查器门禁
+    ├── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
+    ├── test_check_doc_numbers.py    #     文档数字一致性检查器门禁
+    ├── test_check_bare_handlers.py  #     裸异常检查器门禁
+    ├── test_check_api_sync.py       #     API 同步检查器门禁
+    ├── test_check_html_escape.py    #     HTML 转义检查器门禁
+    └── test_check_skill_sync.py     #     技能双份同步检查器门禁
 ```
 
 ---

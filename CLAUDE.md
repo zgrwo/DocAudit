@@ -76,7 +76,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `.qoder/prompts/`、`.qoder/better-harness/` 是平台本地资产（不入库）；prompt 修改后需同步 `.qoder/skills/` 注册副本
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（200 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（328 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
 
@@ -100,10 +100,10 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 200 个用例（13 个文件，含黄金测试）
+├── tests/                            # 328 个用例（21 个文件，含黄金测试）
 ├── rules/                            # 规范文档
 ├── skills/                           # Skill 定义
-├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync）
+├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync / check_skill_sync）
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
 ├── requirements-{core,pdf,full}.txt  # 离线依赖锁定文件（生成物）
 ├── AGENTS.md                         # 本文件（Claude Code 用 CLAUDE.md 副本）
@@ -160,15 +160,20 @@ DocAudit/
 
 ## 测试
 
-200 个用例，13 个文件：
+328 个用例，21 个文件：
 
 | 文件 | 内容 |
 |------|------|
 | test_models.py | Document + AuditFinding 模型 |
 | test_auditors.py | Structure + Format + Factual 审计器 |
-| test_engines.py | Terminology + Vocabulary + 语言分段 |
+| test_engines.py | Terminology + Vocabulary + 语言分段 + LanguageTool 客户端 |
 | test_rules.py | 规则解析 + DISPATCH 验证 |
-| test_integration.py | 全流水线 + 黄金测试（CLI=WebUI=Python） |
+| test_integration.py | 全流水线 + 流水线确定性回归 |
+| test_golden_paths.py | 真实三路径黄金测试（Python API = 真实 CLI subprocess = AppTest WebUI）+ run_auditors 行为 |
+| test_rule_coverage.py | 13 条零断言规则的触发/不触发定向测试 |
+| test_html_report_security.py | HTML 转义红线（XSS 载荷注入） |
+| test_app_ui.py | app.py 过滤器/扫描器纯函数 + AppTest 冒烟 |
+| test_cli_exit_codes.py | CLI 退出码契约（损坏文件/干净/含 error/路径不存在） |
 | test_autofix.py | AutoFixer 修复链路 |
 | test_converters.py | 四格式转换器 |
 | test_edge_cases.py | 边界输入 |
@@ -177,10 +182,13 @@ DocAudit/
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
 | test_check_doc_numbers.py | 文档数字一致性检查器门禁 |
 | test_check_bare_handlers.py | 裸异常检查器门禁 |
+| test_check_api_sync.py | API 同步检查器门禁 |
+| test_check_html_escape.py | HTML 转义检查器门禁 |
+| test_check_skill_sync.py | 技能双份同步检查器门禁 |
 
 ### 黄金测试
 
-验证 3 个执行路径（CLI / Web UI / Python API）为同一输入产生完全相同的发现。
+验证 3 个执行路径（Python API / 真实 CLI subprocess / AppTest WebUI）为同一输入产生完全相同的发现（tests/test_golden_paths.py）。
 
 ## 构建与测试
 
@@ -209,6 +217,10 @@ DocAudit/
 | Group 子元素未递归展开 | 2 | 直接遍历 page.elements 漏检嵌套 |
 | 文档数字漂移 | 3+ | CHANGELOG「53 用例」实际 200、agents.md 测试表 5 文件实际 13、README 引用 `tests/data/` 不存在路径；2026-08 已修，由 check_doc_numbers 门禁持续守护 |
 | pip download 不产构建依赖 | 1 | `pip download <本地项目>` 只保存运行时 wheel，setuptools/wheel 需显式下载（2026-08 实证），否则离线安装 PEP 517 构建失败 |
+| 中文字体盲点 | 1 | python-docx font.name 只读 w:ascii/w:hAnsi、python-pptx 只读 a:latin，中文显示字体在 w:eastAsia/a:ea；2026-08 转换器+autofix 补全链路并加 Run.font_name_east_asia |
+| 幻影规格 | 1 | specification.md 规则清单语义与 rules.md 错位（数字对、语义全错，数字门禁检测不到）；2026-08 以 rules.md 重写 |
+| 黄金测试名不副实 | 1 | 旧"三路径"实为同一函数参数变体；2026-08 升级为真实 CLI subprocess + AppTest WebUI 比对 |
+| Windows pytest 清理 symlink 报错 | 1 | %TEMP% 下 pytest-current 清理 PermissionError 致退出码 1（环境性）；CI ubuntu 不受影响 |
 
 ### 关键设计决策
 
@@ -237,7 +249,10 @@ DocAudit/
 
 - [ ] `pytest tests/ -v` 全绿
 - [ ] `python tools/check_bare_handlers.py` 通过
-- [ ] `ruff check src/ tests/ tools/ scripts/ app.py` 通过
+- [ ] `python tools/check_html_escape.py` 通过
+- [ ] `python tools/check_api_sync.py` 通过
+- [ ] `python tools/check_skill_sync.py` 通过（改 skills/ 后）
+- [ ] `ruff check` + `ruff format --check` 通过
 - [ ] 新增 check_type 已完成 3 步注册（Auditor方法 + _DISPATCH + _skip_checks）
 - [ ] 所有用户文本已 `html.escape()`
 - [ ] 新增 Public 接口已同步 api-reference.md
