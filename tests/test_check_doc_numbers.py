@@ -103,6 +103,26 @@ def test_rule_count_variants_detected():
     assert errors == []
 
 
+def test_rule_count_exemption_context_ignored():
+    """LOW12: 「（N 条豁免」语境 (豁免/排除数量) 不算规则数声明 — 防误报"""
+    doc = "上述规则中（3 条豁免仅限本次审查），其余（26 条均生效）"
+    errors = check_declarations(
+        [("README.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
+    )
+    assert errors == []
+
+
+def test_rule_count_exemption_with_space_ignored():
+    """LOW12: 「（N 条 豁免」带空格同样排除"""
+    doc = "（3 条 豁免处理）"
+    errors = check_declarations(
+        [("README.md", doc)],
+        {"test_count": 189, "rule_count": 26, "file_count": 12, "format_checks": 11},
+    )
+    assert errors == []
+
+
 def test_changelog_historical_section_ignored():
     """CHANGELOG 0.1.0 历史区不检查 (119 个测试用例是历史事实)"""
     doc = _lines(

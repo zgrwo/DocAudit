@@ -13,6 +13,10 @@ from pathlib import Path
 
 def strip_frontmatter(text: str) -> str:
     """去除文档开头的 YAML frontmatter 块（--- 到 --- 之间），返回正文。"""
+    if text.startswith("\ufeff"):
+        # LOW13: BOM 容错 — utf-8 读取保留 BOM，且 \ufeff 不属于空白 (strip 不剥离)，
+        # 须先显式剥除再判 frontmatter，否则带 BOM 的文件会被整体当作正文误报不一致
+        text = text[1:]
     lines = text.splitlines()
     if lines and lines[0].strip() == "---":
         end = next((i for i, line in enumerate(lines[1:], start=1) if line.strip() == "---"), None)
@@ -47,6 +51,21 @@ def check_skill_sync(skills_dir: Path, qoder_skills_dir: Path) -> list[str]:
         if body_a != body_b:
             problems.append(
                 f"{skill_file.name} 与 .qoder/skills/{name}/SKILL.md 正文不一致 (去 frontmatter 后)"
+            )
+    # LOW13: 双向检查 — .qoder/skills 下多余的注册副本 (skills/ 无对应源文件) 也报。
+    # 例外: 源在 .qoder/prompts/<name>.prompt.md 的平台本地资产 (不入库, 如 deep-code-review)
+    prompts_dir = qoder_skills_dir.parent / "prompts"
+    for reg_dir in sorted(qoder_skills_dir.iterdir()) if qoder_skills_dir.is_dir() else []:
+        if not reg_dir.is_dir():
+            continue
+        name = reg_dir.name
+        source = skills_dir / f"{name}-SKILL.md"
+        if not source.exists():
+            source = skills_dir / f"{name}.md"
+        if not source.exists() and not (prompts_dir / f"{name}.prompt.md").exists():
+            problems.append(
+                f"多余注册副本 .qoder/skills/{name}/SKILL.md — skills/ 无对应源文件 "
+                f"({name}-SKILL.md / {name}.md)，且无平台本地源 (.qoder/prompts/{name}.prompt.md)"
             )
     return problems
 

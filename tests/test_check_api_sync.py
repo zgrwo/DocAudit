@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from check_api_sync import (  # noqa: E402
     check_api_reference,
     extract_public_names,
+    extract_public_signatures,
     is_documented,
 )
 
@@ -108,6 +109,87 @@ def test_check_api_reference_all_documented():
         content, ["parse_rules_md", "AuditRule"], "src/engines/rule_parser.py"
     )
     assert missing == []
+
+
+# ── 签名一致性 (M10) ────────────────────────────────────────
+
+
+def test_extract_public_signatures(tmp_path):
+    """extract_public_signatures: 提取 def 形参名列表 (类/私有/无参函数处理)。"""
+    src = tmp_path / "sig.py"
+    src.write_text(
+        textwrap.dedent(
+            """\
+            def foo(a, b, c=None):
+                pass
+
+            def no_args():
+                pass
+
+            class PublicClass:
+                pass
+
+            def _private(x):
+                pass
+
+            def main():
+                pass
+            """
+        ),
+        encoding="utf-8",
+    )
+    sigs = extract_public_signatures(src)
+    assert sigs == {"foo": ["a", "b", "c"], "no_args": []}
+
+
+def test_signature_mismatch_flagged():
+    """形参名不在文档行内 (签名不符) → 报错"""
+    content = "| `foo` | `(x, y)` | 函数说明 |"
+    errors = check_api_reference(content, ["foo"], "src/engines/x.py", sigs={"foo": ["a", "b"]})
+    assert len(errors) == 1
+    assert "foo" in errors[0]
+    assert "形参" in errors[0]
+
+
+def test_signature_params_in_line_passes():
+    """文档行内含形参名 (含类型注解/默认值) → 通过"""
+    content = "| `foo` | `(a: str, b: int = 1)` | 函数说明 |"
+    errors = check_api_reference(content, ["foo"], "src/engines/x.py", sigs={"foo": ["a", "b"]})
+    assert errors == []
+
+
+def test_signature_subset_majority_passes():
+    """行内含多数形参名 (子集容错) → 通过"""
+    content = "| `foo` | `(a, c)` | 说明省略了 b |"
+    errors = check_api_reference(
+        content, ["foo"], "src/engines/x.py", sigs={"foo": ["a", "b", "c"]}
+    )
+    assert errors == []
+
+
+def test_noarg_function_requires_empty_parens():
+    """无参函数文档行须含 () — 缺 () 报错, 有 () 通过"""
+    bad = "| `doctor_check` | `(doc)` | 环境诊断 |"
+    errors = check_api_reference(bad, ["doctor_check"], "src/cli.py", sigs={"doctor_check": []})
+    assert len(errors) == 1
+    assert "()" in errors[0]
+
+    ok = "| `doctor_check` | `()` | 环境诊断 |"
+    assert check_api_reference(ok, ["doctor_check"], "src/cli.py", sigs={"doctor_check": []}) == []
+
+
+def test_signature_exemption_marker():
+    """行尾豁免标记 (<!-- api-sync-exempt -->) → 签名差异不报错 (名称仍需条目存在)"""
+    content = "| `foo` | `(x)` | 确有差异的签名 | <!-- api-sync-exempt -->"
+    errors = check_api_reference(content, ["foo"], "src/engines/x.py", sigs={"foo": ["a", "b"]})
+    assert errors == []
+
+
+def test_signature_checked_without_names_present():
+    """名称未以条目形式记录 → 名称检查报告 (签名检查不重复报)"""
+    content = "foo 在正文散文里提到 (a, b)。"
+    errors = check_api_reference(content, ["foo"], "src/engines/x.py", sigs={"foo": ["a", "b"]})
+    assert errors == ["src/engines/x.py: foo"]
 
 
 # ── 端到端: 临时模块 + 临时文档 ─────────────────────────────

@@ -11,11 +11,15 @@ FactualAuditor 方法 (不经 pipeline dispatch)；FMT-003~007 直接调用 Form
 dispatch 集成测试证明 wiring 未断。
 """
 
+from pathlib import Path
+
 from src.auditors.factual import FactualAuditor
 from src.auditors.format import FormatAuditor
 from src.auditors.structure import StructureAuditor
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import FindingSeverity
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _doc(pages: list[Page], fmt: str = "md", custom_properties: dict | None = None) -> Document:
@@ -325,7 +329,11 @@ class TestFmt005ElementOverflow:
         from src.engines.pipeline import build_auditors, run_auditors
 
         d = _doc([_page([_text_frame([], left=1000.0, top=100.0, width=100.0, height=50.0)])])
-        auditors = build_auditors("rules.md", "glossary", "vocab")
+        auditors = build_auditors(
+            str(PROJECT_ROOT / "rules.md"),
+            str(PROJECT_ROOT / "glossary"),
+            str(PROJECT_ROOT / "vocab"),
+        )
         findings = run_auditors(d, auditors)
         fmt005 = [f for f in findings if f.rule_id == "FMT-005"]
         assert fmt005, "流水线未产生 FMT-005 — element_overflow 检查静默失效"

@@ -267,12 +267,13 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - &#128308; **HTML 转义**：报告中所有用户文本必须 `html.escape()`
 - **路径限定**：文件路径限定在用户指定目录
 - **无数据上报**：代码中不存在任何网络请求
+- **LanguageTool 仅限本机**：语法检查服务地址可由 `rules.md` 配置，但仅允许 localhost/127.0.0.1/::1，指向外部地址会报错（防文档文本外发）
 
 ---
 
 ## 质量保证
 
-- **343 个测试用例**：models / auditors / engines / rules / integration / golden paths / scripts / gates
+- **411 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / gates
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
@@ -287,7 +288,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
 - **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
 - **PDF 首次转换需 docling 模型缓存**：docling 布局模型不随 pip 包分发（2026-08 实证），首次转换时从 HuggingFace Hub 下载；离线机器需在有网机器上预下载后随项目拷贝（见下方「方案 C」离线章节）
-- **LanguageTool 服务地址限定本机**：`languagetool_url` 仅允许 localhost/127.0.0.1/::1，指向外部地址会报错（防文档文本外发）
+- **LanguageTool 服务地址**：`languagetool_url` 可由 `rules.md` 配置（M3，仅允许 localhost/127.0.0.1/::1），指向外部地址会报错（防文档文本外发）
 - **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
 ---

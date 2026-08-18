@@ -96,3 +96,62 @@ def test_plain_name_mapping_syncs(tmp_path):
         "---\ndescription: x\ntrigger: y\n---\n" + body, encoding="utf-8"
     )
     assert check_skill_sync(skills_dir, qoder_dir) == []
+
+
+# ── LOW13 增强: BOM 容错 + 双向检查 ─────────────────────────
+
+
+def test_bom_prefix_tolerated(tmp_path):
+    """LOW13①: 带 frontmatter 的 BOM (\ufeff) 前缀 → 正文比较不受影响"""
+    skills_dir, qoder_dir = _make_dirs(tmp_path)
+    body = "# 正文\n内容一致\n"
+    (skills_dir / "python-SKILL.md").write_bytes(
+        ("\ufeff---\nname: python\n---\n" + body).encode("utf-8")
+    )
+    target = qoder_dir / "python"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: python\ntrigger: x\n---\n" + body, encoding="utf-8"
+    )
+    assert check_skill_sync(skills_dir, qoder_dir) == []
+
+
+def test_bom_without_frontmatter_tolerated(tmp_path):
+    """LOW13①: 无 frontmatter 但带 BOM 前缀 → 不误报正文不一致"""
+    skills_dir, qoder_dir = _make_dirs(tmp_path)
+    text = "# 正文\n内容一致\n"
+    (skills_dir / "python-SKILL.md").write_bytes(("\ufeff" + text).encode("utf-8"))
+    target = qoder_dir / "python"
+    target.mkdir()
+    (target / "SKILL.md").write_text(text, encoding="utf-8")
+    assert check_skill_sync(skills_dir, qoder_dir) == []
+
+
+def test_extra_registered_copy_flagged(tmp_path):
+    """LOW13②: .qoder/skills 下多余注册副本 (skills/ 无对应源文件) → 报告"""
+    skills_dir, qoder_dir = _make_dirs(tmp_path)
+    (skills_dir / "python-SKILL.md").write_text("# 正文\n", encoding="utf-8")
+    qp = qoder_dir / "python"
+    qp.mkdir()
+    (qp / "SKILL.md").write_text("# 正文\n", encoding="utf-8")
+    extra = qoder_dir / "orphan-skill"
+    extra.mkdir()
+    (extra / "SKILL.md").write_text("# 孤儿副本\n", encoding="utf-8")
+    problems = check_skill_sync(skills_dir, qoder_dir)
+    assert len(problems) == 1
+    assert "orphan-skill" in problems[0]
+    assert "多余" in problems[0]
+
+
+def test_plain_name_extra_copy_also_flagged(tmp_path):
+    """LOW13②: 无 -SKILL 后缀技能的源文件匹配 (name.md) 同样校验"""
+    skills_dir, qoder_dir = _make_dirs(tmp_path)
+    (skills_dir / "refactoring-guardian.md").write_text("# 正文\n", encoding="utf-8")
+    t = qoder_dir / "refactoring-guardian"
+    t.mkdir()
+    (t / "SKILL.md").write_text("# 正文\n", encoding="utf-8")
+    extra = qoder_dir / "unrelated"
+    extra.mkdir()
+    (extra / "SKILL.md").write_text("x\n", encoding="utf-8")
+    problems = check_skill_sync(skills_dir, qoder_dir)
+    assert any("unrelated" in p for p in problems)

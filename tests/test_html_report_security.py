@@ -52,8 +52,8 @@ class TestPayloadEscaping:
         """message/context/suggestion/location 四字段的 <script> 载荷全部转义。"""
         html = generate_html_report(_doc(), [_finding()])
         escaped = "&lt;script&gt;alert(1)&lt;/script&gt;"
-        # 四个字段各渲染一次
-        assert html.count(escaped) == 4, (
+        # 四个字段各渲染一次 (LOW11: 用 >= 避免新字段加入后误报)
+        assert html.count(escaped) >= 4, (
             f"四个用户字段都应转义渲染, 实际出现 {html.count(escaped)} 次"
         )
         assert XSS_SCRIPT not in html, "原始 <script> 载荷不得出现在报告中"

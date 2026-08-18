@@ -118,8 +118,9 @@ DocAudit/
 ├── tools/                           # 🔧 CI 门禁工具
 │   ├── check_bare_handlers.py       #   裸异常处理器检查 (AST 感知)
 │   ├── check_doc_numbers.py         #   文档数字一致性检查 (防数字漂移)
-│   ├── check_html_escape.py         #   html.escape 合规性检查
-│   └── check_api_sync.py            #   api-reference.md 同步检查
+│   ├── check_html_escape.py         #   html.escape 合规性检查 (报告器 + app.py)
+│   ├── check_api_sync.py            #   api-reference.md 同步检查 (含签名一致性)
+│   └── check_skill_sync.py          #   技能双份同步检查 (skills/ ↔ .qoder/skills/)
 │
 ├── .github/
 │   ├── dependabot.yml               # 依赖自动更新 (每周)
@@ -191,7 +192,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (343 用例)
+└── tests/                           # 🧪 测试 (411 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -209,6 +210,7 @@ DocAudit/
     ├── test_html_report_security.py #     HTML 转义红线 (XSS 载荷)
     ├── test_app_ui.py               #     app.py 过滤器/扫描器 + AppTest 冒烟
     ├── test_cli_exit_codes.py       #     CLI 退出码契约
+    ├── test_cli_direct.py           #     CLI 直接单测 (audit_file/--fix 链路)
     ├── test_autofix.py              #     AutoFixer 修复链路
     ├── test_converters.py           #     四格式转换器
     ├── test_edge_cases.py           #     边界输入
@@ -249,7 +251,7 @@ DocAudit/
 | `structure.py` | `StructureAuditor` | STR-001~008 | 10 |
 | `format.py` | `FormatAuditor` | FMT-001~008 | 11 |
 | `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED | 语言+术语+词汇 |
-| `factual.py` | `FactualAuditor` | CON-001~003-C | 6 |
+| `factual.py` | `FactualAuditor` | CON-001~003-C | 5 |
 | `custom_rules.py` | `CustomRulesAuditor` | 路由所有 check_type | 中枢路由器 |
 
 ### 引擎层 (`src/engines/`)
@@ -279,4 +281,4 @@ DocAudit/
 
 ---
 
-<!-- last_updated: 2026-07-26 -->
+<!-- last_updated: 2026-08-19 -->

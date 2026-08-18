@@ -27,11 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install .[dev]
 
-      - name: Run tests
-        run: pytest tests/ -v
-
       - name: Run tests with coverage
-        # 覆盖率门槛: src/ 基线 81% (2026-08 实测)，新测试持续提高
+        # M14: 合并重复运行 (删除冗余 -v 步骤，-q 已够定位失败)
+        # 覆盖率门槛: src/ 基线 77% (2026-08 实测)，新测试持续提高；
+        # 口径说明: cli.py 覆盖率为 0% — CLI 路径由真实 subprocess 测试
+        # (test_golden_paths/test_cli_exit_codes) 覆盖，不纳入 pytest-cov 统计
         run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=70
 
       - name: Validate DISPATCH integrity

@@ -16,6 +16,7 @@ from check_html_escape import (  # noqa: E402
     REQUIRED_ESCAPE_FIELDS,
     check_escape_import,
     check_field_escaping,
+    check_streamlit_escaping,
     find_escaped_variables,
 )
 
@@ -131,3 +132,83 @@ def test_non_field_vars_ignored():
         """
     )
     assert check_field_escaping(content) == []
+
+
+# ── app.py 扫描 (M13) ───────────────────────────────────────
+
+
+def test_app_markdown_direct_field_flagged():
+    """st.markdown 模板表达式直接引用用户字段 → 报错"""
+    content = textwrap.dedent(
+        """\
+        st.markdown(f"<div>{f.message}</div>")
+        """
+    )
+    errors = check_streamlit_escaping(content)
+    assert len(errors) == 1
+    assert "message" in errors[0]
+
+
+def test_app_expander_direct_field_flagged():
+    """st.expander 标题直接引用 finding.message (含切片) → 报错"""
+    content = textwrap.dedent(
+        """\
+        with st.expander(
+            f"{sev_icon} [{type_label}] {finding.message[:80]}"
+            f"{'...' if len(finding.message) > 80 else ''}",
+            expanded=True,
+        ):
+            pass
+        """
+    )
+    errors = check_streamlit_escaping(content)
+    assert len(errors) >= 1
+    assert "message" in errors[0]
+
+
+def test_app_static_markdown_not_flagged():
+    """静态 st.markdown (无用户字段) → 不报错"""
+    content = 'st.markdown("### 内容结构\\n- ✅ 标题页检测")'
+    assert check_streamlit_escaping(content) == []
+
+
+def test_app_escaped_variable_ok():
+    """转义结果先存变量再引用 (含切片/长度判断) → 合规"""
+    content = textwrap.dedent(
+        """\
+        import html
+        _msg = html.escape(finding.message or "")
+        with st.expander(
+            f"{_msg[:80]}"
+            f"{'...' if len(_msg) > 80 else ''}",
+            expanded=True,
+        ):
+            pass
+        """
+    )
+    assert check_streamlit_escaping(content) == []
+
+
+def test_app_unescaped_var_assignment_flagged():
+    """变量持有用户字段值但未转义: msg = finding.message 后 {msg} → 报错"""
+    content = textwrap.dedent(
+        """\
+        msg = finding.message
+        st.expander(f"{msg[:80]}")
+        """
+    )
+    errors = check_streamlit_escaping(content)
+    assert len(errors) == 1
+    assert "message" in errors[0]
+
+
+def test_app_non_render_calls_out_of_scope():
+    """st.caption/st.info/st.code 不在扫描范围 (M13 仅 st.markdown/st.expander)"""
+    content = textwrap.dedent(
+        """\
+        st.caption(f"📍 {finding.location}")
+        st.info(f"💡 {finding.suggestion}")
+        st.code(finding.context, language=None)
+        """
+    )
+    assert check_streamlit_escaping(content) == []

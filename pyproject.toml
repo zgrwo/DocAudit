@@ -40,7 +40,7 @@ pdf = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "ruff>=0.3",
+    "ruff==0.16.2",  # M14: pin 防 format 漂移 (CI 实测版本)
 ]
 # 注意: 不能用 "docaudit[pdf,dev]" 自引用 — pip 解析 .[all] 时不会展开
 # 自引用 extras 的依赖，导致 full profile 漏装 pdf/dev (实测缺失 docling/pytest/ruff)
