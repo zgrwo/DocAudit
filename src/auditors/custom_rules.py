@@ -158,7 +158,7 @@ class CustomRulesAuditor(BaseAuditor):
                 #  rule_id/page, 若 context 为 None 则全部碰撞)
                 findings.append(
                     AuditFinding(
-                        type=FindingType.CUSTOM,
+                        type=FindingType.SYSTEM,
                         severity=FindingSeverity.ERROR,
                         message=f"规则 '{rule.rule_id}' 执行失败: {e}",
                         rule_id="SYS-ERROR",
@@ -287,7 +287,7 @@ class CustomRulesAuditor(BaseAuditor):
             # 与"失败可见性"哲学一致: 未知 check_type 转 SYS-ERROR, UI 可见
             findings.append(
                 AuditFinding(
-                    type=FindingType.CUSTOM,
+                    type=FindingType.SYSTEM,
                     severity=FindingSeverity.ERROR,
                     message=f"规则 '{rule.rule_id}' 的 check_type '{check_type}' 未注册，检查未执行",
                     rule_id="SYS-ERROR",

@@ -195,7 +195,7 @@ def run_auditors(
             # 生成 error-level AuditFinding 确保 UI 层可见
             all_findings.append(
                 AuditFinding(
-                    type=FindingType.CUSTOM,
+                    type=FindingType.SYSTEM,
                     severity=FindingSeverity.ERROR,
                     message=f"审计器 '{name}' 执行失败: {e}",
                     rule_id="SYS-ERROR",

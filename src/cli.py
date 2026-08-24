@@ -73,6 +73,7 @@ def audit_file(
         "terminology": "术语检查",
         "factual": "事实审查",
         "custom": "自定义规则",
+        "system": "系统错误",
     }
     for t, count in sorted(type_counts.items()):
         label = type_labels.get(t, t)

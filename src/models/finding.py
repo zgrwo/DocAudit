@@ -24,6 +24,7 @@ class FindingType(str, Enum):
     TERMINOLOGY = "terminology"  # 术语问题
     FACTUAL = "factual"  # 事实精准问题
     CUSTOM = "custom"  # 自定义规则
+    SYSTEM = "system"  # 系统错误 (审计器/规则执行失败, SYS-ERROR)
 
 
 @dataclass

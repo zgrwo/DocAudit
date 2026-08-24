@@ -308,7 +308,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `type` | `FindingType` | `structure` \| `format` \| `language` \| `terminology` \| `factual` \| `custom` |
+| `type` | `FindingType` | `structure` \| `format` \| `language` \| `terminology` \| `factual` \| `custom` \| `system` |
 | `severity` | `FindingSeverity` | `error` \| `warning` \| `info` |
 | `message` | `str` | 问题描述 |
 | `rule_id` | `str \| None` | 触发的规则 ID |

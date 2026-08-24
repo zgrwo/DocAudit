@@ -758,6 +758,7 @@ if st.session_state.doc and st.session_state.findings:
                 "terminology": "术语",
                 "factual": "事实",
                 "custom": "自定义",
+                "system": "系统",
             }.get(finding.type.value, finding.type.value)
 
             # 用户文本渲染前必须转义 (红线 #2) — Streamlit 默认转义 HTML，此处防御性转义

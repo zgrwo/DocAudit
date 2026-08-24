@@ -287,7 +287,9 @@ class TestRunAuditorsBehavior:
         assert len(sys_errors) == 1, f"应产生 1 条 SYS-ERROR, got: {findings}"
         f = sys_errors[0]
         assert f.severity == FindingSeverity.ERROR
-        assert f.type == FindingType.CUSTOM
+        assert (
+            f.type == FindingType.SYSTEM
+        )  # SYS-ERROR 归 system 类型 (二轮审查修复: 曾误归 CUSTOM)
         assert "甲" in f.message and "甲 崩溃" in f.message
 
     def test_two_different_exceptions_not_collapsed_by_dedup(self):
