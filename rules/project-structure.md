@@ -66,10 +66,14 @@
 | UI/CLI | Reporter, Auditor, Engine, Converter, Model | — |
 | Reporter | Model (AuditFinding) | Auditor, Engine |
 | Auditor | Engine, Model | UI, Reporter, Converter |
-| Engine | Model, Converter (仅 pipeline) | UI, Reporter, Auditor |
+| Engine | Model, Converter (仅 pipeline), Auditor (仅 pipeline 编排器) | UI, Reporter |
 | Converter | Model | 以上所有 |
 | Model | —（独立层） | 以上所有 |
 | Config | —（被 Engine 读取） | — |
+
+> **编排器例外**：`pipeline.py` 位于 Engine 层，但它是唯一跨层编排器——
+> 其职责是构建并运行全部 5 个 Auditor，故需依赖 Auditor 层（`build_auditors`/
+> `run_auditors`）。除 pipeline 外，其余 Engine 模块不得反向依赖 Auditor/UI/Reporter。
 
 ---
 
@@ -192,7 +196,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (412 用例)
+└── tests/                           # 🧪 测试 (419 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX

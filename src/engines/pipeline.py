@@ -69,6 +69,7 @@ def build_auditors(
     structure_auditor = StructureAuditor(
         config={
             "required_sections": config.get("required_sections", []),
+            "required_sections_severity": config.get("required_sections_severity", "error"),
             "conclusion_keywords": config.get(
                 "conclusion_keywords",
                 [

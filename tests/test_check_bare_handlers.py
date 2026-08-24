@@ -122,6 +122,25 @@ def test_allows_noqa_comment(tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_allows_noqa_comment_on_previous_line(tmp_path):
+    """缺陷 A 修复: '# bare-handler-ok' 写在 except 语句上一行时同样豁免
+    (常见的「# 降级」注释写在 except 之前的习惯, 2026-08 P1)。
+    """
+    src = write_sample(
+        tmp_path,
+        """
+        def f():
+            try:
+                return 1
+            # bare-handler-ok — 降级路径，任何异常均可安全忽略
+            except Exception:
+                pass
+        """,
+    )
+    r = run_tool([src])
+    assert r.returncode == 0, r.stdout
+
+
 def test_allows_handler_with_return(tmp_path):
     src = write_sample(
         tmp_path,

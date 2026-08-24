@@ -58,6 +58,20 @@ def test_check_test_count_mismatch():
     assert "测试用例数" in errors[0] and "189" in errors[0]
 
 
+def test_check_test_count_skipped_when_unknown():
+    """P0-2: test_count == -1 (收集不完整/未知) 时跳过测试数检查，避免误报。
+
+    门禁在缺失可选依赖 (如 streamlit) 的解释器下运行时，pytest --collect-only
+    会报 error 且测试数不完整，此时不应误报数字漂移。
+    """
+    doc = "全量 pytest tests/ -v（412 用例）"
+    errors = check_declarations(
+        [("AGENTS.md", doc)],
+        {"test_count": -1, "rule_count": 26, "file_count": 22, "format_checks": 11},
+    )
+    assert errors == [], f"test_count=-1 应跳过测试数检查，got: {errors}"
+
+
 def test_check_rule_count_mismatch():
     doc = "本地离线文档审查系统：PPTX/DOCX/PDF/MD → 25 条规则"
     errors = check_declarations(

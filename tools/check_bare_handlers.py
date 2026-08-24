@@ -1,12 +1,18 @@
 """CI 验证脚本：裸异常处理器检查（AST 感知）。
 
 规则:
-- `except:`（裸捕获）→ 违规
-- `except BaseException` → 违规（会吞掉 KeyboardInterrupt / SystemExit）
+- `except:`（裸捕获）→ 违规（无条件禁止，不可豁免）
+- `except BaseException` → 违规（会吞掉 KeyboardInterrupt / SystemExit，不可豁免）
 - `except Exception`（含 `as e`）体为空或只有 `pass` → 违规，
-  除非该行带 `# bare-handler-ok` 注释（刻意的降级路径须附理由）
+  除非附 `# bare-handler-ok` 注释（刻意的降级路径须附理由）
 - 具体异常类型（ValueError / yaml.YAMLError / (A, B) 元组）→ 放行
-- 处理器体内有 return / raise / 调用 / 赋值等语句 → 放行（视为已处理）
+- 处理器体内有 return / raise / 调用 / 赋值 / 日志等语句 → 放行（视为已处理）；
+  其中"赋值降级"（如 `x = None`）属已处理，但仍建议附 `# bare-handler-ok — 理由`
+  说明刻意降级意图，便于后续读者理解
+
+豁免标记位置：`# bare-handler-ok` 可出现在 except 语句**上一行**到最后一个
+body 语句行之间的任意行（含 except 上一行——常见的「# 降级」注释写在 except
+之前的习惯也被识别）。
 
 与裸 grep 不同：AST 解析天然跳过 docstring / 注释中的教学文字（
 如「禁止写 `except:`」这类反例），不会误报。
@@ -68,9 +74,11 @@ def check_file(path: Path) -> list[str]:
         if body_stmts:
             continue  # 有实际处理语句（return/raise/调用/赋值/日志）→ 放行
 
-        # noqa 标记可出现在 except 行到最后一个 body 语句行之间的任意行
+        # noqa 标记可出现在 except 语句上一行 到 最后一个 body 语句行 之间的任意行
+        # (含 except 上一行 — 常见的「# 降级」注释写在 except 之前的习惯, 2026-08 P1 修复)
         end_line = node.body[-1].end_lineno if node.body else node.lineno
-        window = lines[node.lineno - 1 : end_line]
+        start = max(0, node.lineno - 2)  # 含 except 上一行 (0-indexed)
+        window = lines[start:end_line]
         if any(NOQA_MARKER in line for line in window):
             continue
         findings.append(

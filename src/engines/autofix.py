@@ -8,10 +8,17 @@ Inspired by intern's `intern fix` command.
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# 标题末尾标点去除正则 (模块级预编译，避免每次 fix 调用重复编译)
+_TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
+
+# 文本开头的简单符号类项目标记 (模块级预编译)
+_BULLET_RE = re.compile(r"^\s*[-*]\s")
 
 
 class AutoFixer:
@@ -308,7 +315,6 @@ class AutoFixer:
 
         PPTX only。使用原子写入。
         """
-        import re
         import tempfile
 
         from pptx import Presentation
@@ -318,9 +324,6 @@ class AutoFixer:
 
         if source.suffix.lower() != ".pptx":
             raise ValueError(f"fix_title_punctuation 仅支持 PPTX 格式，不支持: {source.suffix}")
-
-        # 匹配标题末尾标点
-        trailing_re = re.compile(r"[。，、.!,;；：…—]+$")
 
         self._fix_count = 0
         tmp_fd, tmp_path = tempfile.mkstemp(
@@ -355,7 +358,7 @@ class AutoFixer:
                     for para in shape.text_frame.paragraphs:
                         for run in para.runs:
                             old = run.text
-                            new = trailing_re.sub("", old)
+                            new = _TRAILING_PUNCT_RE.sub("", old)
                             if old != new:
                                 run.text = new
                                 self._fix_count += 1
@@ -377,7 +380,6 @@ class AutoFixer:
         将文本开头的 '-' 或 '*' 替换为 preferred。
         PPTX only。使用原子写入。
         """
-        import re
         import tempfile
 
         from pptx import Presentation
@@ -387,9 +389,6 @@ class AutoFixer:
 
         if source.suffix.lower() != ".pptx":
             raise ValueError(f"fix_bullet_style 仅支持 PPTX 格式，不支持: {source.suffix}")
-
-        # 匹配文本开头的简单符号类项目标记
-        bullet_re = re.compile(r"^\s*[-*]\s")
 
         self._fix_count = 0
         tmp_fd, tmp_path = tempfile.mkstemp(
@@ -408,7 +407,7 @@ class AutoFixer:
                     for para in shape.text_frame.paragraphs:
                         for run in para.runs:
                             old = run.text
-                            new = bullet_re.sub(f"{preferred} ", old)
+                            new = _BULLET_RE.sub(f"{preferred} ", old)
                             if old != new:
                                 run.text = new
                                 self._fix_count += 1

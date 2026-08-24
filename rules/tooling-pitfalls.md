@@ -42,6 +42,12 @@
 | 16 | **测试文件命名不匹配框架 glob** → 测试永不运行、CI 静默通过 | 本项目 pytest `python_files = ["test_*.py"]`，新测试必须 `test_*.py` 命名（tests/ 根目录） |
 | 17 | **ruff per-file-ignores / noqa 无理由注释** | 每条豁免必须附中文理由（如 `# bare-handler-ok — 降级路径...`），防止 copy-paste 豁免 |
 
+## 运行时陷阱（第三方库）
+
+| # | 陷阱 | 正确做法 |
+|---|------|----------|
+| 18 | **docling-parse C++ 层无法处理含非 ASCII 字符的安装路径**（Windows ANSI fopen）：项目/虚拟环境路径含中文时，docling 加载自身资源文件（`pdf_resources/glyphs/*.dat`）会报 `filename does not exists`，PDF 转换 100% 失败（2026-08 实测） | ① 项目与 venv 放在纯英文 (ASCII) 目录；② `pdf_converter.convert()` 已在非 ASCII 路径下提前抛可操作错误（非 docling 晦涩报错）；③ `test_real_conversion_with_docling` 在非 ASCII 路径下自动 skip |
+
 ## 提交前自查
 
 ```bash

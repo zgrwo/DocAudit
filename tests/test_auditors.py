@@ -86,6 +86,18 @@ class TestStructureAuditor:
         sa = StructureAuditor(config={"exempt_layouts": ["封面页"]})
         assert sa.exempt_layouts == ["封面页"]
 
+    def test_required_sections_severity_configurable(self):
+        """P1-3: CON-002 严重度配置驱动 — 显式声明 warning 时生效 (曾硬编码 ERROR)"""
+        sa = StructureAuditor(
+            config={"required_sections": ["概述"], "required_sections_severity": "warning"}
+        )
+        assert sa.required_sections_severity == FindingSeverity.WARNING
+
+    def test_required_sections_severity_default_error(self):
+        """P1-3: CON-002 严重度未声明时默认 error (向后兼容)"""
+        sa = StructureAuditor(config={"required_sections": ["概述"]})
+        assert sa.required_sections_severity == FindingSeverity.ERROR
+
     def test_every_slide_conclusion_non_pptx_no_findings(self):
         """CON-004: 非 PPTX (MD) 不执行每页结论检查 (修复: 曾对 DOCX/PDF/MD 每页误报 error)"""
         doc = _text_doc("这是第一段普通正文，第二段补充说明，第三段技术描述。")
@@ -438,7 +450,8 @@ class TestFactualAuditor:
         for f in con003_findings:
             assert "未给出全称" in f.message, f"Unexpected message: {f.message}"
             assert f.type.value == "factual"
-            assert f.severity == FindingSeverity.WARNING
+            # CON-003 严重度与 rules.md 声明一致 (error; 二轮审查修复独立模式兜底值曾为 WARNING)
+            assert f.severity == FindingSeverity.ERROR
 
     def test_common_uppercase_words_skipped(self):
         """CON-003: 常见英语大写单词 (THE, AND, NEW 等) 不应被标记为未定义缩写"""

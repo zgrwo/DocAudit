@@ -380,7 +380,7 @@ class FactualAuditor(BaseAuditor):
                 findings.append(
                     AuditFinding(
                         type=FindingType.FACTUAL,
-                        severity=FindingSeverity.WARNING,
+                        severity=FindingSeverity.ERROR,
                         message=f"缩写「{abbr}」首次出现时未给出全称",
                         rule_id="CON-003",
                         page_index=first_occ["page_index"],

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **二轮发行前深度审查整改批次**（2026-08-24，发行前复审）：
+  - PDF 中文路径防护：`pdf_converter` 非 ASCII 安装路径检测（限 Windows，docling C++ ANSI fopen 限制），提前抛可操作错误替代晦涩报错；真实 docling 集成测试在非 ASCII 路径自动 skip
+  - 门禁健壮性：`check_doc_numbers` 收集含 error（如缺 streamlit）时跳过测试数检查，不再误报数字漂移；`check_bare_handlers` 豁免窗口扩展含 except 上一行（常见「# 降级」注释习惯）
+  - 配置流：CON-002 严重度由 rules.md 声明驱动（曾硬编码 ERROR）；`_create_auditor` 回退路径 `exempt_layouts` 默认值对齐 `build_auditors`（曾空列表覆盖默认豁免）
+  - 一致性：CON-003 独立模式兜底 severity 对齐 rules.md（WARNING→error）；架构文档 `project-structure.md` 依赖表修正（pipeline 跨层编排例外）
+  - 清理：删除死代码 `LATIN_RE`；图/表编号、图表标题、标题英文词、autofix 标题标点/项目符号正则提升为模块级预编译
+
 - **max level 深度审查整改批次**（2026-08-19，HEAD 94bf3b0 复审）：
   - DOCX 标题层级提取补样式级回退（styles.xml outlineLvl + Heading N 样式名正则），修复 add_heading 等样式型标题 level=None 导致的标题类检查/语义分页静默盲区
   - setup_offline.sh 项目根路径修复（PROJECT_DIR 派生）；run.sh grep -oP 改 grep -Eo（macOS 兼容）

@@ -337,11 +337,13 @@ class CustomRulesAuditor(BaseAuditor):
             return StructureAuditor(
                 config={
                     "required_sections": cfg.get("required_sections", []),
+                    "required_sections_severity": cfg.get("required_sections_severity", "error"),
                     "conclusion_keywords": cfg.get("conclusion_keywords", []),
-                    "exempt_layouts": cfg.get("exempt_layouts", []),
+                    # 陷阱 #4: 与 build_auditors 一致 — 未声明时传 None (而非 []),
+                    # 否则空列表覆盖 StructureAuditor 内置默认豁免版式 (2026-08 审查 P1-1)
+                    "exempt_layouts": cfg.get("exempt_layouts"),
                     "max_english_words": cfg.get("max_english_words", 10),
                     "max_chinese_chars_title": cfg.get("max_chinese_chars_title", 40),
-                    # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
                     "min_title_font_size": cfg.get("min_title_font_size", 28),
                 }
             )

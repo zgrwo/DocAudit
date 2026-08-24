@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -35,6 +36,31 @@ def _inject_hf_cache_env() -> None:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
+def _ensure_ascii_install_path() -> None:
+    """P0-1: Windows 下检测 Python 安装前缀路径是否含非 ASCII 字符。
+
+    docling-parse 的 C++ 层在 Windows 上用 ANSI 代码页 fopen 打开其资源文件
+    (pdf_resources/glyphs/*.dat)，路径含中文等非 ASCII 字符时 fopen 会拿到乱码
+    文件名 → 资源"文件不存在" → PDF 转换必然失败 (详见 tooling-pitfalls #18)。
+
+    仅 Windows 受限 (ANSI 代码页)；macOS/Linux 文件系统用 UTF-8 字节，中文路径
+    可正常工作，无需检测。
+
+    此函数在实例化 DoclingConverter 前调用，提前抛出可操作的错误，而非让
+    docling 抛出晦涩的 "filename does not exists"。
+    """
+    if sys.platform != "win32":
+        return  # 仅 Windows 存在 ANSI fopen 编码问题
+    prefix = str(sys.prefix)
+    if any(ord(c) >= 128 for c in prefix):
+        raise RuntimeError(
+            "PDF 转换依赖的 docling 引擎无法处理含非 ASCII 字符的安装路径 (Windows 限制)：\n"
+            f"  当前 Python 安装路径: {prefix}\n"
+            "请将项目与虚拟环境移动到纯英文 (ASCII) 目录后重试。\n"
+            "参见 rules/tooling-pitfalls.md #18。"
+        )
+
+
 class PdfConverter(BaseConverter):
     """将 PDF 文件转换为统一 Document 模型。
 
@@ -64,6 +90,9 @@ class PdfConverter(BaseConverter):
             )
 
         logger.info("使用 Docling 解析 PDF: %s", source_path.name)
+
+        # P0-1: 非 ASCII 安装路径下 docling C++ 层必然失败，提前抛出可操作错误
+        _ensure_ascii_install_path()
 
         # M5: 在实例化 DoclingConverter 前注入 HF 环境变量 (项目内离线模型缓存)
         _inject_hf_cache_env()

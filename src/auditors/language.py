@@ -20,9 +20,6 @@ from src.text_utils import (
 
 logger = logging.getLogger(__name__)
 
-# 英文字符检测
-LATIN_RE = re.compile(r"[a-zA-Z]{2,}")
-
 
 class LanguageAuditor(BaseAuditor):
     """语言与术语审查器

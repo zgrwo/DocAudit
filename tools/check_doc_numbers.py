@@ -95,12 +95,14 @@ def check_declarations(files: list[tuple[str, str]], actual: dict) -> list[str]:
             content = _unreleased_section(content)
         content = strip_quoted_context(content)
 
-        for value in _declared_values(content, _TEST_COUNT_RES):
-            if value != actual["test_count"]:
-                errors.append(
-                    f"{rel_path}: 测试用例数声明 {value} ≠ 实际 {actual['test_count']} "
-                    f"(pytest --collect-only 实测)"
-                )
+        # test_count == -1 表示"收集不完整/未知"，跳过测试数检查避免误报
+        if actual["test_count"] != -1:
+            for value in _declared_values(content, _TEST_COUNT_RES):
+                if value != actual["test_count"]:
+                    errors.append(
+                        f"{rel_path}: 测试用例数声明 {value} ≠ 实际 {actual['test_count']} "
+                        f"(pytest --collect-only 实测)"
+                    )
         for value in _declared_values(content, _RULE_COUNT_RES):
             if value != actual["rule_count"]:
                 errors.append(
@@ -147,14 +149,26 @@ def collect_actual_counts(root: Path) -> dict:
         capture_output=True,
         text=True,
     )
-    m = re.search(r"(\d+) tests? collected", r.stdout)
+    combined = (r.stdout or "") + "\n" + (r.stderr or "")
+    m = re.search(r"(\d+) tests? collected", combined)
     if m is None:
-        # 收集失败 (如环境未装 pytest) — 输出诊断, 避免 -1 无差别报红难排查
+        # 收集完全失败 (如未装 pytest) — 输出诊断，-1 表示"未知"
         print(
             f"[警告] pytest --collect-only 失败 (exit={r.returncode}): "
             f"{r.stderr.strip()[-300:] or r.stdout.strip()[-300:]}"
         )
-    test_count = int(m.group(1)) if m else -1
+        test_count = -1
+    else:
+        test_count = int(m.group(1))
+        # 收集有 error (如缺失 streamlit 等可选依赖导致部分测试模块收集失败)
+        # → 测试数不完整，不可作为"实际值"比对，否则误报数字漂移 (2026-08 P0-2)
+        if re.search(r"\berrors?\b", combined, re.IGNORECASE) or "Interrupted" in combined:
+            print(
+                f"[警告] pytest --collect-only 存在 error，收集到 {test_count} 个用例不完整"
+                f"（可能缺失依赖，如 streamlit）。已跳过测试数检查。\n"
+                f"  请使用完整依赖的解释器 (如 .venv/Scripts/python.exe) 运行本门禁。"
+            )
+            test_count = -1
 
     rules_md = (root / "rules.md").read_text(encoding="utf-8")
     return {

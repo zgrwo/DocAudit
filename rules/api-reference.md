@@ -58,7 +58,7 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `required_sections`, `conclusion_keywords`, `exempt_layouts`, `max_english_words`, `max_chinese_chars_title`, `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `required_sections`, `required_sections_severity`, `conclusion_keywords`, `exempt_layouts`, `max_english_words`, `max_chinese_chars_title`, `min_title_font_size`, `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_title_slide` | `(doc: Document)` | STR-001 | 首张幻灯片必须为标题版式 |
 | `_check_heading_levels` | `(doc: Document)` | STR-003 | 标题层级不跳级 (H1→H2→H3) |

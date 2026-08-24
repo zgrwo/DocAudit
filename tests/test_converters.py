@@ -407,9 +407,15 @@ class TestMarkdownConverter:
 
 
 def _inject_fake_docling(monkeypatch, converter_cls) -> None:
-    """封闭式注入假 docling 模块到 sys.modules (不触发真实 import, CI 无依赖也可跑)。"""
+    """封闭式注入假 docling 模块到 sys.modules (不触发真实 import, CI 无依赖也可跑)。
+
+    mock 场景不碰真实 docling 的 C++ 资源加载，故同时绕过 ASCII 安装路径检测
+    (该检测仅防护真实 docling 在中文路径下的 C++ fopen 失败)。
+    """
     import sys
     import types
+
+    import src.converters.pdf_converter as pdf_mod
 
     fake_pkg = types.ModuleType("docling")
     fake_conv = types.ModuleType("docling.document_converter")
@@ -417,6 +423,8 @@ def _inject_fake_docling(monkeypatch, converter_cls) -> None:
     fake_pkg.document_converter = fake_conv
     monkeypatch.setitem(sys.modules, "docling", fake_pkg)
     monkeypatch.setitem(sys.modules, "docling.document_converter", fake_conv)
+    # mock docling 不触发真实 C++ 资源加载 → ASCII 检测置为 no-op
+    monkeypatch.setattr(pdf_mod, "_ensure_ascii_install_path", lambda: None)
 
 
 class TestPdfConverter:
@@ -1074,9 +1082,17 @@ class TestPdfConverterDocling119:
         """真实集成测试: docling 可用时真实转换 sample.pdf。
 
         断言 pages >= 1、文本包含 DocAuditTest、走结构路径 (元素含 text_frame 而非纯 fallback)。
-        注意: 评估环境沙箱会拦截 docling-parse 的 C fopen (伪"文件不存在")，真实环境不受影响。
+        注意: docling-parse 的 C++ 层 (Windows ANSI fopen) 无法处理含非 ASCII 字符的
+        安装路径，中文路径下该测试必然失败 → 此时 skip (非代码缺陷，见 tooling-pitfalls #18)。
         """
         pytest.importorskip("docling")
+        import sys
+
+        if sys.platform == "win32" and any(ord(c) >= 128 for c in str(sys.prefix)):
+            pytest.skip(
+                "Windows 安装路径含非 ASCII 字符，docling-parse C++ 层无法加载资源 "
+                f"(sys.prefix={sys.prefix})，详见 tooling-pitfalls #18"
+            )
         from src.converters.pdf_converter import PdfConverter
 
         sample_pdf = Path(__file__).parent / "fixtures" / "sample.pdf"
@@ -1220,3 +1236,39 @@ class TestMarkdownTableAndHeadingFixes:
         levels = [p.level for p in doc.all_paragraphs if p.level is not None]
         assert 4 not in levels, f"4 空格缩进不应识别为标题: {levels}"
         assert "#### 代码缩进" in doc.all_text
+
+
+class TestPdfConverterAsciiPath:
+    """P0-1: 非 ASCII 安装路径检测 (docling C++ 层 Windows ANSI fopen 限制)"""
+
+    def test_ascii_path_passes(self, monkeypatch):
+        import sys
+
+        from src.converters.pdf_converter import _ensure_ascii_install_path
+
+        monkeypatch.setattr(sys, "prefix", r"C:\venv\pure_ascii")
+        _ensure_ascii_install_path()  # 不抛异常
+
+    def test_non_ascii_path_raises_on_windows(self, monkeypatch):
+        """Windows: 非 ASCII 前缀路径抛可操作错误；非 Windows 无此限制。"""
+        import sys
+
+        import pytest
+
+        from src.converters.pdf_converter import _ensure_ascii_install_path
+
+        if sys.platform != "win32":
+            pytest.skip("非 Windows 平台无 ANSI fopen 限制")
+        monkeypatch.setattr(sys, "prefix", r"C:\文档审查套件\.venv")
+        with pytest.raises(RuntimeError, match="ASCII"):
+            _ensure_ascii_install_path()
+
+    def test_non_ascii_path_noop_on_non_windows(self, monkeypatch):
+        """非 Windows: 检测为 no-op，不误伤中文路径。"""
+        import sys
+
+        from src.converters.pdf_converter import _ensure_ascii_install_path
+
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(sys, "prefix", "/Users/文档审查/.venv")
+        _ensure_ascii_install_path()  # 不抛异常

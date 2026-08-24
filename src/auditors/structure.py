@@ -11,6 +11,21 @@ from src.text_utils import is_cjk_char as _is_cjk_char
 # 标题末尾标点检测正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每页重复编译)
 _TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
 
+# 图/表编号提取 (排除章节式编号 "图1-1": 数字后跟 [-–—]数字 跳过)
+_FIG_NUMBER_RE = re.compile(
+    r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)(?![-–—]\d)",
+    re.IGNORECASE,
+)
+
+# 图表标题格式指纹提取 (Fig.1: / 图1： / Figure 1 - 等)
+_CAPTION_RE = re.compile(
+    r"(?:Fig\.?|Figure|图|Table|Tab\.?|表)\s*(\d+)\s*[:：\-—–]\s*",
+    re.IGNORECASE,
+)
+
+# 标题英文词提取 (连续字母序列，含撇号缩写如 don't)
+_TITLE_EN_WORD_RE = re.compile(r"[a-zA-Z]+(?:'[a-z]+)?")
+
 
 class StructureAuditor(BaseAuditor):
     """检查文档的内容结构"""
@@ -19,6 +34,13 @@ class StructureAuditor(BaseAuditor):
         super().__init__(config)
         cfg = config or {}
         self.required_sections = cfg.get("required_sections", [])
+        # P1-3: CON-002 严重度配置驱动 (默认 error，可经 rules.md 声明覆盖)
+        try:
+            self.required_sections_severity = FindingSeverity(
+                cfg.get("required_sections_severity", "error")
+            )
+        except ValueError:
+            self.required_sections_severity = FindingSeverity.ERROR
         if "conclusion_keywords" in cfg:
             self.keywords = cfg["conclusion_keywords"]
         elif "keywords" in cfg:
@@ -198,15 +220,11 @@ class StructureAuditor(BaseAuditor):
 
         # 提取所有图/表编号 (排除章节式编号 "图1-1": 数字后跟 [-–—]数字 跳过,
         # 避免 "图1-1/图1-2" 被误解析为重复的 "图1")
-        fig_pattern = re.compile(
-            r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)(?![-–—]\d)",
-            re.IGNORECASE,
-        )
         all_numbers: list[tuple[int, int, str]] = []  # (page_index, number, match_text)
 
         for page in doc.pages:
             text = page.all_text
-            for m in fig_pattern.finditer(text):
+            for m in _FIG_NUMBER_RE.finditer(text):
                 num = int(m.group(1))
                 all_numbers.append((page.index, num, m.group(0)))
 
@@ -299,16 +317,12 @@ class StructureAuditor(BaseAuditor):
 
         # 图表标题格式指纹提取
         # 匹配模式并生成格式指纹（如 "Fig.N:", "图N：", "Figure N -"）
-        caption_re = re.compile(
-            r"(?:Fig\.?|Figure|图|Table|Tab\.?|表)\s*(\d+)\s*[:：\-—–]\s*",
-            re.IGNORECASE,
-        )
 
         fingerprints: dict[str, list[str]] = {}  # fingerprint → [example captions]
 
         for page in doc.pages:
             text = page.all_text
-            for m in caption_re.finditer(text):
+            for m in _CAPTION_RE.finditer(text):
                 full_match = m.group(0)
                 # 生成格式指纹: 将数字替换为 N，统一标点
                 fp = re.sub(r"\d+", "N", full_match)
@@ -380,7 +394,7 @@ class StructureAuditor(BaseAuditor):
             findings.append(
                 AuditFinding(
                     type=FindingType.STRUCTURE,
-                    severity=FindingSeverity.ERROR,
+                    severity=self.required_sections_severity,
                     message=f"缺少必须的章节: {section}",
                     rule_id="CON-002",
                     location="全文",
@@ -494,8 +508,6 @@ class StructureAuditor(BaseAuditor):
         findings: list[AuditFinding] = []
         max_en = self.max_english_words
         max_zh = self.max_chinese_chars_title
-        # 英文词提取: 连续字母序列视为一个英文词
-        en_word_re = re.compile(r"[a-zA-Z]+(?:'[a-z]+)?")
 
         for page in doc.pages:
             page_label = f"第 {page.slide_number or page.index + 1} 页"
@@ -509,7 +521,7 @@ class StructureAuditor(BaseAuditor):
                     if not title_text:
                         continue
                     # 英文词数: 仅统计拉丁字母序列 (排除中文干扰)
-                    english_words = len(en_word_re.findall(title_text))
+                    english_words = len(_TITLE_EN_WORD_RE.findall(title_text))
                     chinese_count = sum(1 for c in title_text if _is_cjk_char(c))
 
                     if english_words > max_en or chinese_count > max_zh:

@@ -356,8 +356,12 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
                         config["max_chinese_chars_title"],
                     )
 
-        elif rid.startswith("CON-002") and "required_sections" in rule.params:
-            config["required_sections"] = rule.params["required_sections"]
+        elif rid.startswith("CON-002"):
+            if "required_sections" in rule.params:
+                config["required_sections"] = rule.params["required_sections"]
+            # P1-3: 严重度配置驱动 — 原先 _check_required_sections 硬编码 ERROR，
+            # 用户改 rules.md 的 CON-002 严重度不生效；现由声明驱动。
+            config["required_sections_severity"] = rule.severity
 
         elif rid.startswith("CON-004"):
             if "关键词" in rule.params:

@@ -273,7 +273,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **412 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / gates
+- **419 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / gates
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
@@ -288,6 +288,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
 - **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
 - **PDF 首次转换需 docling 模型缓存**：docling 布局模型不随 pip 包分发（2026-08 实证），首次转换时从 HuggingFace Hub 下载；离线机器需在有网机器上预下载后随项目拷贝（见下方「方案 C」离线章节）
+- **PDF 转换要求纯英文 (ASCII) 安装路径**（Windows）：docling-parse 的 C++ 层无法处理含中文等非 ASCII 字符的项目/虚拟环境路径，路径含中文时 PDF 转换必然失败（报 `filename does not exists`）。请将项目与 venv 放在纯英文目录；程序会在该情况下提前抛出可操作提示（详见 `rules/tooling-pitfalls.md` #18）
 - **LanguageTool 服务地址**：`languagetool_url` 可由 `rules.md` 配置（M3，仅允许 localhost/127.0.0.1/::1），指向外部地址会报错（防文档文本外发）
 - **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
