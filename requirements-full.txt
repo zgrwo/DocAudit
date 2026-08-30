@@ -45,7 +45,7 @@ jsonschema-specifications==2025.9.1
 jsonschema==4.26.0
 latex2mathml==3.81.0
 lxml==6.1.2
-mail-parser==4.6.3
+mail-parser==4.6.4
 markdown-it-py==4.2.0
 marko==2.2.4
 markupsafe==3.0.3
