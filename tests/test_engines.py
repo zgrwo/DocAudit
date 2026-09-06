@@ -269,15 +269,27 @@ class TestLanguageToolFallback:
         # 端口 1 无服务 → tier-1 失败; auto_start=False → 跳过 Java
         return LanguageToolClient(base_url="http://localhost:1/v2", timeout=1, auto_start=False)
 
-    def test_fallback_backend_selection(self):
+    @staticmethod
+    def _mock_probe(monkeypatch):
+        """mock 探活 (2026-09-06 r5 审查 F-08): 测试套件零真实 socket——
+
+        tier-1 探活改由 mock 决定 (localhost:1 真实探测虽 fails fast,
+        但属环境噪声源); tier-2 由 auto_start=False 跳过。
+        """
+        from src.engines.languagetool import LanguageToolClient
+
+        monkeypatch.setattr(LanguageToolClient, "_try_connect", lambda self, url: False)
+
+    def test_fallback_backend_selection(self, monkeypatch):
         """tier-1/2 不可用 → 降级到 python 或完全不可用 (不崩溃)"""
+        self._mock_probe(monkeypatch)
         client = self._make_offline_client()
         if client.is_available:
             assert client._backend == "python"
         else:
             assert client.check("any text") == []
 
-    def test_python_fallback_chinese_patterns(self):
+    def test_python_fallback_chinese_patterns(self, monkeypatch):
         """tier-3 中文语法正则检查生效 (如 '仔细的' → 建议 '仔细地')"""
         try:
             import spellchecker  # noqa: F401
@@ -286,13 +298,14 @@ class TestLanguageToolFallback:
 
             pytest.skip("pyspellchecker 未安装，tier-3 不可用")
 
+        self._mock_probe(monkeypatch)
         client = self._make_offline_client()
         assert client.is_available
         results = client.check("他仔细的看了看晶圆表面", language="zh-CN")
         messages = [r["message"] for r in results]
         assert any("仔细地" in m for m in messages), f"未命中中文语法模式: {messages}"
 
-    def test_python_fallback_offset_and_length(self):
+    def test_python_fallback_offset_and_length(self, monkeypatch):
         """tier-3 结果含正确的 offset/length 字段"""
         try:
             import spellchecker  # noqa: F401
@@ -301,6 +314,7 @@ class TestLanguageToolFallback:
 
             pytest.skip("pyspellchecker 未安装，tier-3 不可用")
 
+        self._mock_probe(monkeypatch)
         client = self._make_offline_client()
         text = "重复逗号，，测试"
         results = client.check(text, language="zh-CN")

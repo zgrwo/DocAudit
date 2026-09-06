@@ -10,6 +10,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PACKAGES_DIR="$SCRIPT_DIR/packages"
+# 2026-09-06 r5 审查 F-03: venv 绝对路径, 与 .py 孪生 (common.venv_python) 对齐,
+# 免 CWD 强依赖 (相对 .venv + 裸 pip 从非项目根调用会装错位置)
+VENV_DIR="$PROJECT_DIR/.venv"
 PROFILE="${2:-core}"
 
 case "$PROFILE" in
@@ -66,22 +69,22 @@ install_offline() {
         exit 1
     fi
 
-    if [ ! -d ".venv" ]; then
+    if [ ! -d "$VENV_DIR" ]; then
         echo "[0/2] 创建虚拟环境..."
-        python3 -m venv .venv
+        python3 -m venv "$VENV_DIR"
     else
         echo "[0/2] 虚拟环境已存在"
     fi
 
     echo "[1/2] 从本地 packages/ 安装依赖 (profile=$PROFILE)..."
-    source .venv/bin/activate
+    source "$VENV_DIR/bin/activate"
     # pip 升级必须离线 (完全离线红线); packages/ 无 pip wheel 时跳过升级
     pip install --upgrade pip -q --no-index --find-links="$PACKAGES_DIR" \
         || echo "[警告] pip 升级失败 (packages/ 中无 pip wheel 属正常)，使用现有 pip 继续"
     pip install --no-index --find-links="$PACKAGES_DIR" "$PROJECT_DIR$EXTRAS"
 
     echo "[2/2] 验证安装..."
-    python -c "import streamlit; from src.converters import PptxConverter; from src.auditors import StructureAuditor; print('        核心模块导入成功')" || echo "[警告] 模块导入验证失败"
+    "$VENV_DIR/bin/python" -c "import streamlit; from src.converters import PptxConverter; from src.auditors import StructureAuditor; print('        核心模块导入成功')" || echo "[警告] 模块导入验证失败"
 
     echo ""
     echo "========================================"

@@ -7,6 +7,7 @@
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -165,3 +166,30 @@ def test_parse_would_install():
 
 def test_parse_would_install_empty():
     assert parse_would_install("Processing something\n") == []
+
+
+def test_shell_scripts_use_project_root_semantics():
+    """2026-09-06 r5 审查 F-01/F-02/F-03: .sh 三件套必须项目根语义 + venv 绝对路径。
+
+    install.sh 曾 `pip install "$SCRIPT_DIR[all]"` 指向 scripts/ 自身（无 pyproject
+    必失败），且相对 `.venv` + 裸 pip 有 CWD 强依赖 — 静态断言防「脚本双轨制失配」
+    同族复发（tooling-pitfalls ⑪）。
+    """
+    for name in ("install.sh", "run.sh", "setup_offline.sh"):
+        content = (SCRIPTS / name).read_text(encoding="utf-8")
+        # 只检查执行行 — 注释中的历史模式引用（如修复说明）不参与断言
+        code = "\n".join(line for line in content.splitlines() if not line.lstrip().startswith("#"))
+        assert re.search(r'PROJECT_DIR="\$\(cd .*&& pwd\)"', content), (
+            f"{name}: 必须从脚本位置派生项目根 PROJECT_DIR"
+        )
+        assert "$SCRIPT_DIR[all]" not in code and "$SCRIPT_DIR$EXTRAS" not in code, (
+            f"{name}: 不得以 scripts/ 自身作为 pip 安装目标"
+        )
+        assert "venv .venv" not in code, (
+            f"{name}: venv 必须经 $VENV_DIR 绝对路径创建（相对路径有 CWD 强依赖）"
+        )
+        # 行首直接 source 相对 venv 才算执行行; echo 提示文本（用户在项目根执行
+        # 的操作指引）合法含 "source .venv/bin/activate" 字样
+        assert not re.search(r"^\s*source \.venv", code, re.MULTILINE), (
+            f"{name}: 不得 source 相对路径 venv（执行行须用 $VENV_DIR）"
+        )

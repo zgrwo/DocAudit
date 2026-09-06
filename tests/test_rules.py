@@ -429,6 +429,30 @@ class TestRuleParser:
         msgs = " | ".join(f.message for f in sys_errors)
         assert "FMT 崩溃" in msgs and "FCA 崩溃" in msgs, f"两条失败信息都应保留: {msgs}"
 
+    def test_sys_errors_same_exception_text_not_deduped(self, monkeypatch):
+        """回归: 两条不同规则抛出逐字节相同异常文本时, SYS-ERROR 不得折叠为一条
+        (2026-09-06 四轮审查 N-3: 上方用例用不同异常文本, 旧代码本就能区分,
+        拦不住同文本折叠; 本用例锚定 context 前缀带 rule_id 的修复)。"""
+        from src.auditors.factual import FactualAuditor
+        from src.auditors.format import FormatAuditor
+        from src.models.finding import AuditFinding
+
+        def boom_same(self, *args, **kwargs):
+            raise RuntimeError("IDENTICAL-BOOM")
+
+        monkeypatch.setattr(FormatAuditor, "_check_bullet_consistency", boom_same)
+        monkeypatch.setattr(FactualAuditor, "_check_numeric_consistency", boom_same)
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        findings = AuditFinding.deduplicate(auditor.audit(_md_doc("测试")))
+        sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
+        assert len(sys_errors) == 2, (
+            f"两条规则相同异常文本应保留 2 条 SYS-ERROR, 实际 {len(sys_errors)}: {sys_errors}"
+        )
+        assert all("IDENTICAL-BOOM" in (f.context or "") for f in sys_errors)
+        rules = {f.metadata.get("rule_id") for f in sys_errors}
+        assert "FMT-007" in rules and "CON-001" in rules, f"两条 SYS-ERROR 应分属两规则: {rules}"
+
 
 class TestDispatchValidation:
     def test_all_dispatch_entries_valid(self):

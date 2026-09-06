@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **五轮审查整改批次**（2026-09-06，r5 报告 F-01~F-11 全数处理）：
+  - `scripts/install.sh` 安装目标修复（F-01）：曾 `pip install "$SCRIPT_DIR[all]"`
+    指向 scripts/ 自身（无 pyproject，macOS/Linux 手动安装必失败）；派生
+    `PROJECT_DIR` + `VENV_DIR` 绝对路径，与 run.sh/install.py 双轨对齐
+  - 脚本 CWD 强依赖消除（F-02/F-03）：install.sh 与 setup_offline.sh 的 venv
+    创建/激活/pip 调用全部改 `$VENV_DIR` 绝对路径；install.sh 验证导入补
+    streamlit（F-11，与 install.py 对齐）
+  - `scripts/common.py` find_python 版本扫描 glob 化（F-04）：`Python3*/python.exe`
+    全版本扫描替代硬编码清单（Python 3.14 曾被漏扫），免支持矩阵前移再漂移
+  - test_gates 三门禁负向锚定（F-05）：裸异常/(api-reference 同步)/文档数字
+    门禁各补「注入违例必 FAIL」负测试（门禁实现腐化时不再假绿）；
+    RULE_COUNT_RES 兼容 `**规则**: N 条` 粗体形态（F-06：api-reference 头部
+    声明曾因粗体零命中而脱保），并加「白名单文档至少命中一类数字声明」断言
+  - 黄金测试比对键纳入 metadata（F-07）：CON-001 values / SYS-ERROR error 等
+    细节漂移不再漏拦；WebUI 三用例补 `assert baseline` 空守卫（与 CLI 孪生对称）
+  - LanguageTool 降级测试 mock 探活（F-08）：测试套件零真实 socket
+  - FMT-001 默认严重度断言改从 rules.md 声明读取（F-09，用户调整 rules.md
+    不再误报测试失败）；补建 AGENTS.md 声明的两个薄 skill（F-10：
+    `skills/rules.md`、`skills/deep-code-review.md`，均指针型保 SSOT）
+  - test_scripts.py 新增 .sh 路径语义静态断言（PROJECT_DIR 派生/绝对 venv/
+    禁 scripts/ 自身安装目标，防「脚本双轨制失配」同族复发）
+  - 测试用例 368→369（白名单文档已同步）
+
+- **四轮发行前深度审查整改批次**（2026-09-06，四轮审查 5 项发现全数处理）：
+  - CON-001 章节式图表编号子号误报修复（N-1）：编号跳过守卫扩展，`图2-1`/`表3-1`/
+    `Fig. 2.1` 的子号与点分隔图号不再漏过滤 —— 同句式跨页引用不同子号时不再误报
+    ERROR「数值不一致」；关键词与分隔符间兼容 ≤8 非数字字符（`to fig. 2-` 等长前缀）
+  - CON-001 截断防护补强（N-2）：小数/千分位延续（`3.3Vs`→`3`、`1,000`→`000`）与
+    版本号残缺值（`2.5.1`→`2.5`）一律整值跳过，宁缺毋滥不出错值
+  - SYS-ERROR 同异常文本折叠补测（N-3）：两条不同规则抛逐字节相同异常文本不再折叠
+    （context 前缀带 rule_id 的修复此前仅不同异常文本场景有测试锚定）
+  - rule_severities 提取测试去耦合（N-4）：改自引用断言（值 = rules.md 规则自身声明），
+    用户合理修改 rules.md 严重度不再误报测试失败
+  - ai-review-prompt 事实基准 HEAD 括注校准（N-5）
+  - 测试用例 363→369（四轮补测；白名单文档已同步）
+
 - **三轮发行前深度审查整改批次**（2026-09-06，全量审查 14 项发现全数处理）：
   - STR-002 图表编号正则防回溯：`(?!\d|-\d)` 双重负向断言替代 `(?![-–—]\d)`，
     两位数章节号（图11-2/图10-1）不再被回溯截为「图1」产生 ERROR 级「编号重复」

@@ -95,6 +95,45 @@ def test_bare_handlers_gate():
     assert not findings, "裸异常处理器检查失败:\n" + "\n".join(f"  - {f}" for f in findings)
 
 
+def test_bare_handlers_gate_catches_violation(tmp_path):
+    """负向锚定 (2026-09-06 r5 审查 F-05)：门禁必须咬人。
+
+    注入裸 `except:` 与静默吞异常的 `except Exception`（体空、无豁免标记），
+    内层检查函数必须各产出一条指名违规；附豁免标记后放行。
+    门禁实现自身腐化（AST 分支漏判）时本测试 FAIL，防正样本假绿。
+    """
+    bad = tmp_path / "bad.py"
+    bad.write_text(
+        "def f():\n"
+        "    try:\n"
+        "        pass\n"
+        "    except:\n"
+        "        pass\n"
+        "\n"
+        "def g():\n"
+        "    try:\n"
+        "        pass\n"
+        "    except Exception:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    findings = check_bare_handlers_in_file(bad)
+    assert len(findings) == 2, f"两类违例都应被检出, got: {findings}"
+    assert "裸 except" in findings[0]
+    assert "静默吞异常" in findings[1]
+
+    # 豁免标记放行路径 (except 行内附标记)
+    bad.write_text(
+        "def g():\n"
+        "    try:\n"
+        "        pass\n"
+        f"    except Exception:  {BARE_HANDLER_MARKER} — 刻意降级\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    assert check_bare_handlers_in_file(bad) == [], f"附豁免标记应放行, got: {findings}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 门禁 2：html.escape 合规性检查（移植自 tools/check_html_escape.py）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -402,6 +441,29 @@ def test_api_sync_gate():
     )
 
 
+def test_api_sync_gate_catches_violation():
+    """负向锚定 (2026-09-06 r5 审查 F-05)：签名漂移与名称缺失必须被检出。
+
+    篡改 api-reference 中 parse_rules_md 的签名行（形参全删），
+    _check_signatures 必报不一致；_is_documented 对未记录名称必须返回 False。
+    （_extract_public_signatures 只提取顶层函数 — rule_parser.py 有顶层公开函数，
+    format.py 等纯类方法模块签名集为空、仅受名称记录检查。）
+    """
+    api_content = API_REF_PATH.read_text(encoding="utf-8")
+    sigs = _extract_public_signatures(PROJECT_ROOT / "src/engines/rule_parser.py")
+    assert "parse_rules_md" in sigs and sigs["parse_rules_md"], (
+        f"前置: rule_parser.py 应含顶层公开函数, got: {sorted(sigs)}"
+    )
+
+    corrupted = api_content.replace(
+        "`parse_rules_md` | `(file_path: str \\| Path)`", "`parse_rules_md` | `()`", 1
+    )
+    assert corrupted != api_content, "前置: 篡改目标行应存在"
+    errors = _check_signatures(corrupted, sigs, "rule_parser.py")
+    assert any("parse_rules_md" in e for e in errors), f"签名漂移应被检出, got: {errors}"
+    assert not _is_documented("definitely_not_documented_xyz", api_content)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 门禁 4：文档数字一致性检查（移植自 tools/check_doc_numbers.py）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -423,11 +485,13 @@ TEST_COUNT_RES = [
     re.compile(r"(\d+)\s*用例"),
     re.compile(r"(\d+)\s*个测试用例"),
 ]
-# 规则数: "26 条规则" / "26 条审查规则" / "规则: 26 条"
+# 规则数: "26 条规则" / "26 条审查规则" / "规则: 26 条" / "**规则**: 26 条"
 # 「（N 条豁免」是豁免/排除数量语境，不是规则数声明 — 用否定前瞻排除
+# (?:\*\*)? 兼容 markdown 粗体形态 (2026-09-06 r5 审查 F-06: api-reference
+# 头部 '**规则**: 26 条' 曾因粗体零命中而脱离门禁保护)
 RULE_COUNT_RES = [
     re.compile(r"(\d+)\s*条(?:审查|配置驱动)?规则"),
-    re.compile(r"规则[：:]\s*(\d+)\s*条"),
+    re.compile(r"(?:\*\*)?规则(?:\*\*)?[：:]\s*(\d+)\s*条"),
     re.compile(r"（(\d+)\s*条(?!\s*豁免)"),
 ]
 # 测试文件数: "18 个文件" (排除 "超过 5 个文件" 会话管理指南语境)
@@ -518,4 +582,37 @@ def test_doc_numbers_gate():
             errors.append(
                 f"{rel}: format.py 检查数声明 {m.group(1)} ≠ 实际 {actual['format_checks']}"
             )
+        # 脱保防护 (2026-09-06 r5 审查 F-06): _declared_values 措辞变更时返回空集,
+        # 门禁对该文档静默放行 — 每个白名单文档至少命中三类声明之一
+        has_declaration = bool(
+            _declared_values(content, TEST_COUNT_RES)
+            or _declared_values(content, RULE_COUNT_RES)
+            or _declared_values(content, FILE_COUNT_RES)
+            or FORMAT_CHECK_RE.search(content)
+        )
+        if not has_declaration:
+            errors.append(
+                f"{rel}: 未命中任何数字声明句式 (用例数/规则数/文件数/format 检查数) "
+                "— 该文档已脱离门禁保护，措辞变更后需同步 test_gates.py"
+            )
     assert not errors, "文档数字一致性检查失败:\n" + "\n".join(f"  - {e}" for e in errors)
+
+
+def test_doc_numbers_gate_catches_drift():
+    """负向锚定 (2026-09-06 r5 审查 F-05)：声明数字与实际不符时比对逻辑必报错。
+
+    以真实 README 与实测用例数为基准，注入 +1 漂移后过 gate 同款比对，
+    必须产出 error——防止正则实现腐化后文档漂移静默脱保。
+    """
+    import pytest
+
+    actual = _collect_actual_counts()
+    if actual["test_count"] == -1:
+        pytest.skip("测试收集不完整，无法锚定漂移检测")
+    content = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    drifted = content.replace(str(actual["test_count"]), str(actual["test_count"] - 1), 1)
+    assert drifted != content, "前置: README 应含当前用例数声明"
+    declared = _declared_values(_strip_quoted_context(drifted), TEST_COUNT_RES)
+    drift_errors = [v for v in declared if v != actual["test_count"]]
+    assert actual["test_count"] - 1 in declared, "漂移数字应进入声明集"
+    assert drift_errors, f"漂移应被比对逻辑检出, got: {declared}"

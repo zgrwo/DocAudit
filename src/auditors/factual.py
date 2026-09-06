@@ -244,11 +244,22 @@ class FactualAuditor(BaseAuditor):
                 start = m.start()
                 end = m.end()
 
-                # 截断防护 (2026-09-06 审查 D-3): 匹配值后紧跟数字说明
-                # (?![a-zA-Z]) 守卫触发了回溯截断 (表外单位 "28xyz" 被截为 "2"),
+                # 截断防护 (2026-09-06 审查 D-3): (?![a-zA-Z]) 守卫触发回溯截断时
+                # （表外单位 "28xyz" 被截为 "2"、"3.3Vs" 被截为 "3"、"1,000" 被截为 "1"），
                 # 该值不可信 — 宁可跳过也不产出错误数值参与一致性比较。
-                # 单位表内匹配 (如 "28pt") 完整到达单位末尾, end 处必非数字。
-                if end < len(text) and text[end].isdigit():
+                # 判定: 匹配后紧跟数字 (单位表内完整匹配如 "28pt" 已到单位末尾, 必非数字),
+                # 或紧跟 "."/"," 且再后一位是数字 (截断的小数/千分位延续)。
+                # 或匹配起始紧前是数字 (长数串的尾部残余), 或其前是 ","/"." 且更前是
+                # 数字 (千分位/小数延续, 如 "1,000" 的尾 "000"、"5,5" 欧式小数)。
+                # 注意: 版本号 "2.5.1" 截取 "2.5" 属残缺值, 一并跳过 (宁缺毋滥)。
+                if end < len(text) and (
+                    text[end].isdigit()
+                    or (text[end] in ".," and end + 1 < len(text) and text[end + 1].isdigit())
+                ):
+                    continue
+                if start > 0 and text[start - 1].isdigit():
+                    continue
+                if start > 1 and text[start - 1] in ".," and text[start - 2].isdigit():
                     continue
 
                 # 提取上下文 (前后各 30 字符，避免跨越其他数值)
@@ -257,13 +268,19 @@ class FactualAuditor(BaseAuditor):
                 context = f"{prefix} {value_str} {suffix}"
 
                 # 页码/图表编号跳过检测: 紧邻前缀 (10 字符) + 值为纯整数
+                # (点分隔章节式如 "Fig. 2.1" 为小数形态, 一并跳过 — 图号语义非指标数值)。
                 # 旧逻辑依赖 re.sub(r"\d+", "N", prefix) 在 prefix 中找占位符 N，
                 # 但 _NUMERIC_VALUE_RE 只匹配数值本身，前缀从不含数字，
                 # 导致 N 永不存在 → 页码不过滤 + 远处 "Page N" 污染后续值前缀。
                 # 新逻辑: 紧邻前缀含页码/图表关键词 + 值为无单位的纯整数 → 跳过。
+                # 第二分支 (2026-09-06 审查 N-1): 章节式图表编号的子号 "图2-1"/"Fig. 2.1"
+                # 中的 "1" 紧邻前缀是 "图2-"/"fig. 2." (以连字符/点结尾), 原关键词后缀
+                # 分支不匹配 → 子号漏过滤 → 同句式跨页引用不同子号时误报 CON-001。
+                # 关键词与分隔符间允许 ≤8 非数字字符 (兼容 "to fig. 2-" 等较长前缀)。
                 _narrow_prefix = text[max(0, start - 10) : start].lower().strip()
-                if re.match(r"^\d+$", value_str) and re.search(
-                    r"(?:page|slide|fig|figure|table|tab|图|表|第)\s*\.?\s*$",
+                if re.match(r"^\d+(?:\.\d+)?$", value_str) and re.search(
+                    r"(?:(?:fig|figure|table|tab|图|表|第)[^\d]{0,8}\d+\s*[-–—.]|"
+                    r"(?:page|slide|fig|figure|table|tab|图|表|第)\s*\.?\s*)$",
                     _narrow_prefix,
                     re.IGNORECASE,
                 ):

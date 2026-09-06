@@ -296,10 +296,12 @@ class TestFormatAuditor:
         """FMT-001/002/004 严重度由 rules.md 声明驱动 (2026-09-06 审查 C-1: 曾硬编码 WARNING,
         用户改 rules.md 严重度静默失效)"""
         doc = PptxConverter().convert("tests/fixtures/sample.pptx")
-        # 默认 (无 rule_severities): 代码内置兜底 WARNING
+        # 默认 (无 rule_severities): 代码内置兜底 — 值从 rules.md 声明读取,
+        # 用户合理调整 rules.md 严重度时本测试不碎 (2026-09-06 r5 审查 F-09)
+        declared = next(r.severity for r in parse_rules_md(RULES_MD) if r.rule_id == "FMT-001")
         default_findings = [f for f in FormatAuditor().audit(doc) if f.rule_id == "FMT-001"]
         assert default_findings, "前置: sample.pptx 应触发 FMT-001"
-        assert all(f.severity == FindingSeverity.WARNING for f in default_findings)
+        assert all(f.severity == FindingSeverity(declared) for f in default_findings)
         # rule_severities 声明 error → audit() 统一覆盖为 ERROR
         auditor = FormatAuditor(config={"rule_severities": {"FMT-001": "error"}})
         findings = [f for f in auditor.audit(doc) if f.rule_id == "FMT-001"]
@@ -307,13 +309,21 @@ class TestFormatAuditor:
         assert all(f.severity == FindingSeverity.ERROR for f in findings)
 
     def test_rule_severities_extracted_from_rules_md(self):
-        """extract_auditor_config 为无 check_type 的 FMT 规则收集 severity (C-1 五节点链路)"""
+        """extract_auditor_config 为无 check_type 的 FMT 规则收集 severity (C-1 五节点链路)
+
+        N-4 (2026-09-06 四轮审查): 原测试硬编码 'warning' 与 rules.md 当前内容耦合,
+        用户合理修改 rules.md 严重度会误报测试失败 — 改为自引用断言 (值 = 规则自身声明),
+        测链不测值。
+        """
         rules = parse_rules_md(RULES_MD)
         config = extract_auditor_config(rules)
         rs = config.get("rule_severities", {})
-        assert rs.get("FMT-001") == "warning"
-        assert rs.get("FMT-002") == "warning"
-        assert rs.get("FMT-004") == "warning"
+        declared = {
+            r.rule_id: r.severity for r in rules if r.rule_id in ("FMT-001", "FMT-002", "FMT-004")
+        }
+        for rid in ("FMT-001", "FMT-002", "FMT-004"):
+            assert rid in rs, f"{rid} 应进入 rule_severities 通道"
+            assert rs[rid] == declared[rid], f"{rid} 收集值应与 rules.md 声明一致"
         # 有 check_type 的规则不进该通道 (严重度由 custom_rules dispatch 覆盖)
         assert "FMT-003" not in rs
 
@@ -506,12 +516,48 @@ class TestFactualAuditor:
         assert _NUMERIC_VALUE_RE.findall("良率 99%") == ["99%"]
 
     def test_numeric_extraction_truncation_guard_skips_untrusted(self):
-        """CON-001: 表外单位触发回溯时整值跳过, 不产出错误数值 (2026-09-06 审查 D-3)"""
+        """CON-001: 表外单位触发回溯时整值跳过, 不产出错误数值 (2026-09-06 审查 D-3)
+
+        N-2 (四轮审查): 截断防护扩至非数字后缀 — "3.3Vs" 被截为 "3"、小数/千分位
+        延续 ("1,000" 被截为 "1") 亦不得进入一致性比较。
+        """
         fa = FactualAuditor()
-        doc = _text_doc("输出 28xyz 与 29xyz 为表外单位。")
+        doc = _text_doc("输出 28xyz 与 29xyz 为表外单位。电压 3.3Vs。容量 1.5Ah。带宽 1,000MHz。")
         entries = fa._extract_numeric_values(doc)
         values = [e["value"] for e in entries]
         assert 2.0 not in values, f"截断值 2 不得进入一致性比较, got: {values}"
+        assert 3.0 not in values, f"截断值 3 (来自 3.3Vs) 不得进入, got: {values}"
+        assert 1.0 not in values, f"截断值 1 (来自 1.5Ah/1,000) 不得进入, got: {values}"
+
+    def test_numeric_consistency_figure_subnumber_not_flagged(self):
+        """CON-001: 章节式图表编号子号跨页同句式引用不得误报 (2026-09-06 四轮审查 N-1)
+
+        修复前: "图2-1" 的子号 "1" 紧邻前缀 "图2-" 以连字符结尾, 编号跳过守卫
+        (关键词后缀分支) 不匹配 → 子号进入数值池 → 同句式跨页引用不同子号时
+        误报 ERROR "数值不一致" (values=[1.0, 2.0])。
+        本用例覆盖 图/表、中英文引用 4 组同句式场景, 全部应 0 条。
+        """
+        fa = FactualAuditor()
+        scenarios = [
+            (["详细参数见图2-1。", "详细参数见图2-2。"], "图中文章节式"),
+            (["流程如图2-1 所示。", "流程如图2-2 所示。"], "图-所示句式"),
+            (["参数见表3-1。", "参数见表3-2。"], "表中文章节式"),
+            (["See Fig.2-1 for detail.", "See Fig.2-2 for detail."], "图英文章节式"),
+        ]
+        for texts, label in scenarios:
+            pages = [
+                Page(
+                    index=i,
+                    slide_number=i + 1,
+                    elements=[
+                        PageElement(type="text_frame", paragraphs=[Paragraph(text=t, runs=[])])
+                    ],
+                )
+                for i, t in enumerate(texts)
+            ]
+            doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=pages)
+            con1 = [f for f in fa.audit(doc) if f.rule_id == "CON-001"]
+            assert len(con1) == 0, f"{label} 不应误报 CON-001, got: {con1}"
 
     def test_numeric_consistency_with_pt_units_not_missed(self):
         """CON-001: 28pt vs 29pt 同指标不一致应报 (修复前截断同值导致漏报, D-3)"""

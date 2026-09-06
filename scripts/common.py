@@ -139,12 +139,12 @@ def find_python():
         if exe:
             consider(exe, _version_text(exe))
 
-    # 3. 常见安装路径
+    # 3. 常见安装路径 — glob 全版本扫描而非硬编码清单
+    #    (2026-09-06 r5 审查 F-04: 硬编码 ("313","312","311","310") 随支持矩阵
+    #     前进必然漂移, Python 3.14 曾被漏扫; Python3* 前缀限定排除非版本目录)
     for base in _python_install_bases():
-        for ver in ("313", "312", "311", "310"):
-            exe = base / ("Python" + ver) / "python.exe"
-            if exe.exists():
-                consider(str(exe), _version_text(str(exe)))
+        for exe in sorted(base.glob("Python3*/python.exe"), reverse=True):
+            consider(str(exe), _version_text(str(exe)))
 
     if not candidates:
         return None

@@ -37,8 +37,14 @@ _MIME_BY_SUFFIX = {
 }
 
 
+def _metadata_key(metadata) -> str:
+    """metadata → 稳定字符串比较键 (2026-09-06 r5 审查 F-07: metadata 纳入比对,
+    CON-001 values / SYS-ERROR error 等细节漂移不再漏拦; sort_keys 保证确定性)。"""
+    return json.dumps(metadata, sort_keys=True, ensure_ascii=False, default=str)
+
+
 def _finding_key(f: AuditFinding) -> tuple:
-    """AuditFinding → 比较键 (排除随机 id / element_index / metadata)。"""
+    """AuditFinding → 比较键 (排除随机 id / element_index)。"""
     return (
         f.type.value,
         f.severity.value,
@@ -48,6 +54,7 @@ def _finding_key(f: AuditFinding) -> tuple:
         f.context,
         f.suggestion,
         f.location,
+        _metadata_key(f.metadata),
     )
 
 
@@ -62,6 +69,7 @@ def _finding_key_from_dict(d: dict) -> tuple:
         d["context"],
         d["suggestion"],
         d["location"],
+        _metadata_key(d.get("metadata")),
     )
 
 
@@ -183,6 +191,7 @@ class TestGoldenPathPptx:
     def test_pptx_webui_matches_baseline(self):
         """真实 WebUI (AppTest) 与基准 (Python API) 的 findings 完全一致。"""
         baseline = _baseline_findings(FIXTURE_PPTX)
+        assert baseline, "基准 findings 不应为空 (防空洞断言)"
         webui = _webui_findings(FIXTURE_PPTX)
         _assert_keys_equal(
             sorted(_finding_key(f) for f in webui),
@@ -210,6 +219,7 @@ class TestGoldenPathDocx:
         docx_path = tmp_path / "golden.docx"
         _generate_docx(docx_path)
         baseline = _baseline_findings(docx_path)
+        assert baseline, "基准 findings 不应为空 (防空洞断言)"
         webui = _webui_findings(docx_path)
         _assert_keys_equal(
             sorted(_finding_key(f) for f in webui),
@@ -237,6 +247,7 @@ class TestGoldenPathMarkdown:
         md_path = tmp_path / "golden.md"
         _generate_markdown(md_path)
         baseline = _baseline_findings(md_path)
+        assert baseline, "基准 findings 不应为空 (防空洞断言)"
         webui = _webui_findings(md_path)
         _assert_keys_equal(
             sorted(_finding_key(f) for f in webui),
