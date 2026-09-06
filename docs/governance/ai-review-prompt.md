@@ -2,7 +2,7 @@
 
 > 本文档是**一份可直接投喂给任意 AI 审查代理的 Prompt 模板**，用于对本项目的任何变更（PR / 提交 / 发版前全量）做一次"先想后写、实证优先、杜绝假阳性"的深度审查。
 > 配套治理规则见 [documentation.md](documentation.md)；项目宪法见 [AGENTS.md](../../AGENTS.md)；审查产出报告一律归档 `logs/reports/`（`logs/` 已 gitignore，**不入库**）。
-> **事实基准**：文中数字（26 条规则 / 19 个 _DISPATCH 条目 / 349 用例 / 17 测试文件 / CI 3 job）已于 2026-09-06 对照 v0.1.0（HEAD 5f78e4c）逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
+> **事实基准**：文中数字（26 条规则 / 19 个 _DISPATCH 条目 / 353 用例 / 18 测试文件 / CI 3 job）已于 2026-09-06 对照 v0.1.0（HEAD 5f78e4c）逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
 
 ---
 
@@ -86,18 +86,17 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 ### 3.4 验证体系（黄金测试 + 门禁）
 
 ```
-① 全量测试      pytest tests/ -v（349 用例 / 17 文件，2026-09-06 快照，当轮重测）
+① 全量测试      pytest tests/ -v（353 用例 / 18 文件，2026-09-06 快照，当轮重测）
 ② 黄金测试      tests/test_golden_paths.py — Python API = 真实 CLI subprocess = AppTest WebUI
                 三路径对同一输入必须产生完全相同的发现
 ③ DISPATCH 验证 python -c "from src.auditors.custom_rules import CustomRulesAuditor; \
                 print(CustomRulesAuditor.validate_dispatch())"   # 必须 []
 ④ lint          ruff check + ruff format --check（ruff==0.16.3 钉版，src/tests/scripts/app.py）
-⑤ CLI 退出码    0=成功且无 error 级 finding；1=处理失败/导出失败/含 error finding；2=不支持扩展名/路径不存在
+⑤ 治理门禁      pytest tests/test_gates.py -v（裸异常 AST / HTML 转义 / api-reference 同步 /
+                文档数字一致性——原 tools/ 五门禁 2026-09-06 5S 移除后 pytest 化回归；
+                skill 双份同步门禁因 .qoder/ 移除不再需要）
+⑥ CLI 退出码    0=成功且无 error 级 finding；1=处理失败/导出失败/含 error finding；2=不支持扩展名/路径不存在
                 （契约以 tests/test_cli_exit_codes.py 实测为准）
-
-注：原 tools/ 五门禁（裸异常 / HTML 转义 / api 同步 / skill 同步 / 文档数字）已于
-2026-09-06 随 5S 移除——对应语义面（XSS 转义、裸异常、文档数字同步、DISPATCH 三方对账）
-全部转为测试锚定 + 人工审查把关，审查时按本模板维度 F/H 逐项人工覆盖。
 ```
 
 - CI（`.github/workflows/ci.yml`，仅此一个工作流）：`test`（矩阵 Python 3.10–3.14 + 覆盖率 `--cov-fail-under=70`，src 基线 84% / 2026-08-19 实测 + ② + ③ + rules 解析 ≥20 断言）、`lint`（ruff check + format）、`lockfile`（**windows-latest 专属**：三份 requirements-*.txt `pip install --dry-run` 解析自洽）。
@@ -110,7 +109,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 | 完全离线 | 文档不上传任何服务器；无网络调用（`requests` 仅限 localhost LanguageTool）；无遥测 |
 | HTML 安全 | 报告中所有用户文本必须 `html.escape()`：message / context / suggestion / location / source_path / title（`tests/test_html_report_security.py` XSS 载荷测试 + 人工自查强制） |
 | 配置驱动 | rules.md 唯一入口；代码零硬编码规则参数 |
-| 异常纪律 | 禁裸 `except:` / `except BaseException`；`except Exception` 不得静默吞（体空/仅 pass），豁免必须附 `# bare-handler-ok — 理由`（人工自查，原 AST 门禁已随 5S 移除） |
+| 异常纪律 | 禁裸 `except:` / `except BaseException`；`except Exception` 不得静默吞（体空/仅 pass），豁免必须附 `# bare-handler-ok — 理由`（`tests/test_gates.py` AST 断言强制） |
 | 文档同步 | 新增 Public 接口 → api-reference.md；文件/目录变更 → project-structure.md；rules.md 格式变更 → rule_parser.py |
 | git push | 必须经用户明确同意 |
 
@@ -153,7 +152,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 | 引擎 / pipeline | `tests/test_engines.py` + `tests/test_golden_paths.py`（pipeline 是三路径唯一真相来源，改动必须验证三路径一致） |
 | 脚本（scripts/） | `tests/test_scripts.py`；.py 与 .bat/.sh 双轨语义同步核对（tooling-pitfalls #7–#10） |
 | 依赖（pyproject / requirements-*） | `requirements-*.txt` 是**生成物勿手改**（`scripts/gen_requirements_lock.py` 生成）；dependabot 单点 bump 可能破坏锁文件约束（CI lockfile job 在 windows-latest 验证；历史：pyarrow 25 违反 streamlit<25 等 5 起）；`pip download` 不保存构建依赖 setuptools/wheel（离线安装 PEP 517 必需） |
-| 文档 | 白名单文档（AGENTS / CLAUDE / README / api-reference / project-structure / specification / CHANGELOG-Unreleased）中的用例数、规则数、测试文件数**人工核对**（原 check_doc_numbers 门禁已随 5S 移除）；文件/目录变更核对 project-structure.md 目录树 |
+| 文档 | 白名单文档（AGENTS / CLAUDE / README / api-reference / project-structure / specification / CHANGELOG-Unreleased）中的用例数、规则数、测试文件数由 `test_doc_numbers_gate` 强制；文件/目录变更核对 project-structure.md 目录树 |
 
 > 若环境问题导致某步无法执行（如未装 pdf extra、非 ASCII 安装路径下 docling 集成测试自动 skip），在报告中**明确声明未执行的步骤**，不挪用旧结论。
 
@@ -258,7 +257,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 
 ### 维度 H：文档 / 门禁 / CI 一致性（Docs & Gates）
 
-- H1 数字基准：api-reference.md 是签名唯一信源（15 模块 / 26 规则口径）；白名单文档（AGENTS / CLAUDE / README / api-reference / project-structure / specification / CHANGELOG-Unreleased）中的用例数、规则数、测试文件数、format.py 检查数与实测一致（人工核对——原 check_doc_numbers 门禁已随 5S 移除）。
+- H1 数字基准：api-reference.md 是签名唯一信源（15 模块 / 26 规则口径）；白名单文档（AGENTS / CLAUDE / README / api-reference / project-structure / specification / CHANGELOG-Unreleased）中的用例数、规则数、测试文件数、format.py 检查数由 `test_doc_numbers_gate` 强制。
 - H2 结构树：文件/目录增删移同步 project-structure.md（本文件自身的变更也要过此检查）。
 - H3 技能文档：skills/*.md 的陷阱清单与源码行为同步（历史：模板滞后于代码）；skills/ 是唯一定义处（.qoder 注册副本已随 5S 移除）。
 - H4 治理文档一致性：falsy-pitfalls / tooling-pitfalls / ai-review-prompt 与代码现状同步；noqa / 豁免注释必须附中文理由（tooling-pitfalls #17）。
@@ -292,22 +291,22 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 
 ### 6.3 回归测试假绿（Regression False-Green）
 
-原 `tools/` 五门禁已于 2026-09-06 随 5S 移除（历史教训保留于此：check_api_sync 曾漏 3 个模块、check_doc_numbers 曾被历史语境误伤、check_skill_sync 曾无 BOM 容错）。现在**测试套件是唯一的自动防线**，对测试/门禁语义的改动必须负向注入实测：
+原 `tools/` 五门禁已于 2026-09-06 随 5S 移除，四个仍有意义的门禁已按原逻辑 pytest 化为 `tests/test_gates.py`（历史教训保留于此：check_api_sync 曾漏 3 个模块、check_doc_numbers 曾被历史语境误伤、check_skill_sync 曾无 BOM 容错）。现在**测试套件是唯一的自动防线**（含门禁测试），对测试语义的改动必须负向注入实测：
 
 1. 构造一个确定应被拦下的违例（如：注入一个真裸 `except:`、删一个 `html.escape()`、在 api-reference 改错一个签名、给 DOCX 构造 H0→H2 跳级、新增规则漏注册 _DISPATCH）。
 2. 运行对应测试/流水线 → 必须 **FAIL 且指名**（输出含具体规则/断言），退出码非 0。
 3. **恢复注入**，重跑 → 全绿。
-4. 若无任何测试拦截该违例 = 防线缺口，按 P1 报"测试缺口"并建议补测试（不再建议新建门禁工具，除非用户明确要求）。
+4. 若无任何测试拦截该违例 = 防线缺口，按 P1 报"测试缺口"并建议补测试或扩展 test_gates.py 断言（不重建独立门禁脚本，除非用户明确要求）。
 5. 报告中记录注入内容、预期 FAIL 文本、恢复后结果。
 
-**防线盲区排查**：测试只覆盖它们认识的模式——转义测试查不到新渲染路径、DISPATCH 验证查不出标志位语义漂移（STR-003 曾漏网）、文档数字无自动门禁。审查时对"无测试锚定的语义面"单独列清单。
+**防线盲区排查**：测试只覆盖它们认识的模式——转义测试查不到新渲染路径、DISPATCH 验证查不出标志位语义漂移（STR-003 曾漏网）、test_gates 的静态正则查不出行为级 XSS。审查时对"无测试锚定的语义面"单独列清单。
 
 ### 6.4 复检陷阱（审查者自身的假阳性——reaudit 场景必读）
 
 | 陷阱 | 防控 |
 | :--- | :--- |
 | 把历史已修复项当未修复复报 | CHANGELOG「Unreleased → Fixed」登记了大量已修复项（DOCX 样式级回退、CON-004 格式守卫、SYS-ERROR 不折叠、缓存串档等）。引用旧问题前先对当前 HEAD 重验源码 |
-| 引用过期数字 | 本文档 3.4 节数字是 2026-09-06 快照（349 用例 / 17 文件 / 19 DISPATCH / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
+| 引用过期数字 | 本文档 3.4 节数字是 2026-09-06 快照（353 用例 / 18 文件 / 19 DISPATCH / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
 | 文档表格当代码事实 | api-reference 的 DISPATCH 标志列、documentation.md 的同步链均为人工维护文档——**逐项与源码对照**，表格曾漂移 |
 | 把门禁全绿当语义正确背书 | 本项目多轮 P0 均在门禁全绿状态下合入；全绿只是下限 |
 | 生成物冒充源码 | `build/lib/` 内有 src 副本、`.venv` 有整套第三方库——grep 命中两者 = 扫描范围错误，重跑限定路径的扫描 |
@@ -376,7 +375,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 1. **禁止读取、扫描、审查、修改 `.venv/`**；禁止从仓库根裸跑递归 grep/find/rg（必须限定 `src/ tests/ scripts/ app.py docs/ rules.md` 等项目目录，或显式排除全部生成物目录）。禁止把 `build/`、`docaudit.egg-info/`、`__pycache__/`、`packages/`、`logs/` 的内容当项目实现评述。
 2. 禁止修改任何文件；禁止执行会污染仓库的命令（测试/报告临时产物除外——若污染，事后还原并记录）。
 3. 禁止把验证结论建立在"黄金测试一致性"或"旧报告数字"上——三路径一致只证明封装一致；所有数字当轮重测。
-4. 禁止把测试全绿混同语义正确：pytest 全绿 ≠ 无缺陷（历史 P0 均在全绿时合入；自动门禁已随 5S 收敛为测试 + 人工，语义面更依赖审查）。
+4. 禁止把测试全绿混同语义正确：pytest 全绿 ≠ 无缺陷（历史 P0 均在全绿时合入；自动门禁已随 5S 收敛为 pytest 断言 tests/test_gates.py + 审查，静态断言查不出行为语义）。
 5. 禁止编造外部事实（python-pptx/python-docx/docling API 语义、WCAG 公式、LanguageTool 行为）——用官方文档或**最小可运行脚本实测**验证（不是去阅读 `.venv` 源码），仍无法确认时标注待确认。
 6. 禁止建议架构偏离：Auditor 不硬编码规则参数、CustomRulesAuditor 不写检查逻辑、Engine（非 pipeline）不反向依赖、Model 零外部依赖、不引入任何网络出口（这些是红线，不是建议项）。
 7. 禁止对 P0/P1 打"不建议修改"标签后继续合入——阻塞项必须列入合入前阻断清单。

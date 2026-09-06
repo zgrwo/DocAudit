@@ -273,9 +273,10 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **349 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
+- **353 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
+- **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）
 
 ---
 

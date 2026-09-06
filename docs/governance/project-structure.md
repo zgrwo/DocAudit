@@ -190,7 +190,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (349 用例)
+└── tests/                           # 🧪 测试 (353 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -214,7 +214,8 @@ DocAudit/
     ├── test_edge_cases.py           #     边界输入
     ├── test_language_auditor.py     #     语言审计器细节
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
-    └── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
+    ├── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
+    └── test_gates.py                #     治理门禁 pytest 化（裸异常/HTML 转义/api 同步/文档数字）
 ```
 
 ---

@@ -55,8 +55,9 @@ pytest tests/ -v                         # 全量测试
 ruff check src/ tests/ scripts/ app.py   # lint
 ```
 
-> 原 `tools/` 三个门禁（裸异常 / HTML 转义 / api-reference 同步 / skill 同步 / 文档数字）已于
-> 2026-09-06 随 5S 移除，对应纪律转入人工自查与深度审查流程（见 [ai-review-prompt.md](ai-review-prompt.md)）。
+> 原 `tools/` 五门禁已于 2026-09-06 随 5S 移除，检查逻辑已 pytest 化回归
+> （`tests/test_gates.py`：裸异常 / HTML 转义 / api-reference 同步 / 文档数字；
+> skill 双份同步门禁因 `.qoder/` 移除而失去意义，不再保留）。
 
 ## 维护规则
 

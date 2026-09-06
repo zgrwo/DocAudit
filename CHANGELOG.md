@@ -15,11 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `logs/reports/`（logs/ 已 gitignore，不入库）
   - 移除 `.claude/`（本机配置）、`.qoder/`（含 .qoder/skills 注册副本——skills/ 成为技能
     唯一定义处；.qoder/prompts 历史审查模板语义已并入 docs/governance/ai-review-prompt.md）、
-    `tools/` 五门禁（裸异常 / HTML 转义 / api 同步 / skill 同步 / 文档数字）及其 5 个
-    test_check_* 测试文件；对应纪律转入人工自查与深度审查流程（AGENTS.md 提交前必检、
-    docs/governance/ai-review-prompt.md 已同步改写）
-  - CI lint job 收敛为 ruff check + format（移除 5 个门禁步骤）；test job 的 pytest 矩阵 /
-    DISPATCH 验证 / rules 解析断言不变
+    `tools/` 五门禁及其 5 个 test_check_* 测试文件；四个仍有意义的门禁
+    （裸异常 / HTML 转义 / api-reference 同步 / 文档数字）已原逻辑 pytest 化为
+    `tests/test_gates.py` 持续强制，skill 双份同步门禁因 .qoder/ 移除不再需要
+  - CI lint job 收敛为 ruff check + format（移除 5 个门禁步骤，门禁由 test job 的
+    pytest 承接）；test job 的 pytest 矩阵 / DISPATCH 验证 / rules 解析断言不变
   - 移除本地生成物 `docaudit.egg-info/`（setuptools 构建元数据，gitignore 排除，下次构建自动重建）
 
 ### Fixed
