@@ -175,3 +175,14 @@ language: "zh-CN"
 | PY-ZH-GRAMMAR | 中文基础语法正则检查 | `src/engines/languagetool.py` → `_check_chinese_patterns` |
 | SYS-ERROR | 规则/审计器执行失败的系统错误 (UI 可见) | `src/auditors/custom_rules.py` → `audit`/`_execute_check_rule`；`src/engines/pipeline.py` → `run_auditors` |
 
+以下为代码内置的不可配阈值（2026-09-06 审查 C-2 补录，暂未开放配置；调整需改源码）：
+
+| 阈值 | 值 | 说明 | 实现位置 |
+|------|-----|------|----------|
+| 对齐容差 | 5.0 pt | 元素位置对齐判定偏差 | `src/auditors/format.py` → `DEFAULT_ALIGNMENT_TOLERANCE` |
+| 全局字体种类上限 | 3 | FMT-001 全局统计超过即报混合字体 | `src/auditors/format.py` → `max_font_types` |
+| 画布基准/容差 | 960×540 pt / 5.0 pt | FMT-005 版式一致性基准画布 | `src/auditors/format.py` → `_check_layout_consistency` |
+| CON-004 判断 2 门槛 | ≥3 内容段落 | 同版式页内容段落数达到门槛才触发结论检查 | `src/auditors/structure.py` → `_check_every_slide_has_conclusion` |
+| 语言分段门槛 | 英文 ≥2 词 / 中文 ≥5 字 | 过短语言段并入相邻段 | `src/auditors/language.py` → `_segment_languages` |
+| 上下文窗口 | ±30 字符 | CON-001 数值上下文切片 | `src/auditors/factual.py` → `_extract_numeric_values` |
+

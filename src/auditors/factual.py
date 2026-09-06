@@ -103,8 +103,13 @@ _COMMON_UPPERCASE_WORDS = frozenset(
 # 数值提取正则 — 仅匹配数值+可选单位，上下文通过文本切片获取
 # 避免上下文捕获组吞噬相邻数值
 # 单位后加 (?![a-zA-Z]) 防止 "5 m" 误匹配 "5 minutes" 中的 m
+# 单位表扩充 (2026-09-06 审查 D-3): 表外单位会使 (\d+) 在 (?![a-zA-Z]) 守卫下
+# 回溯截断 ("28pt"→"2"、"500g"→"50"), 导致 CON-001 漏报与数值失真 —
+# 补齐 pt/kg/g/km/dB/Hz/ms 等常见工程单位 (长前缀在前防误配);
+# 表外残余场景由 _extract_numeric_values 的截断防护兜底 (宁跳过不出错值)。
 _NUMERIC_VALUE_RE = re.compile(
-    r"(\d+(?:\.\d+)?\s*(?:%|nm|μm|kV|°[CF]|cm|mm|mV|mA|kW|MHz|GHz|V|A|W|m)?)(?![a-zA-Z])"
+    r"(\d+(?:\.\d+)?\s*(?:%|°[CF]|nm|μm|um|mm|cm|km|dB|kg|pt|ms|μs|us"
+    r"|mV|mA|kV|kW|kHz|MHz|GHz|Hz|GB|MB|KB|TB|ppm|mL|ml|V|A|W|g|m|L|s)?)(?![a-zA-Z])"
 )
 
 # 数值提取后剥离非数字字符 — 比固定单位列表更通用，无需与 _NUMERIC_VALUE_RE 同步
@@ -238,6 +243,13 @@ class FactualAuditor(BaseAuditor):
                 value_str = m.group(1).strip()
                 start = m.start()
                 end = m.end()
+
+                # 截断防护 (2026-09-06 审查 D-3): 匹配值后紧跟数字说明
+                # (?![a-zA-Z]) 守卫触发了回溯截断 (表外单位 "28xyz" 被截为 "2"),
+                # 该值不可信 — 宁可跳过也不产出错误数值参与一致性比较。
+                # 单位表内匹配 (如 "28pt") 完整到达单位末尾, end 处必非数字。
+                if end < len(text) and text[end].isdigit():
+                    continue
 
                 # 提取上下文 (前后各 30 字符，避免跨越其他数值)
                 prefix = text[max(0, start - 30) : start].strip()

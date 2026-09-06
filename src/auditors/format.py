@@ -1,5 +1,6 @@
 """格式审查器 — 字体/字号/颜色/对齐/母版一致性"""
 
+import logging
 import re
 from collections import Counter
 
@@ -7,6 +8,8 @@ from src.auditors.base import BaseAuditor
 from src.models.document import Document, Page, PageElement
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import is_cjk_char as _is_cjk_char
+
+logger = logging.getLogger(__name__)
 
 # ── 项目符号分类正则 (模块级预编译，避免每页重复编译) ──
 # 符号类: • ◦ ▪ ▸ ◆ - *
@@ -102,6 +105,15 @@ class FormatAuditor(BaseAuditor):
             self.large_text_threshold = self.DEFAULT_LARGE_TEXT_THRESHOLD
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
+        # rules.md 严重度声明驱动 (2026-09-06 审查 C-1): 无 check_type 的 format
+        # 规则 (FMT-001/002/004) 不经 dispatch 严重度覆盖通道, 由 audit() 按
+        # rule_id 统一覆盖 — rules.md 是严重度的唯一来源, 硬编码值仅为兜底。
+        self.rule_severities: dict[str, FindingSeverity] = {}
+        for _rid, _sev in (cfg.get("rule_severities") or {}).items():
+            try:
+                self.rule_severities[_rid] = FindingSeverity(str(_sev).lower())
+            except ValueError:
+                logger.warning("rule_severities 中 %s 的严重度无效: %s，忽略", _rid, _sev)
 
     def audit(self, doc: Document) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
@@ -129,6 +141,13 @@ class FormatAuditor(BaseAuditor):
         # PPTX 特有: 母版/版式合规检查
         if doc.format == "pptx":
             findings.extend(self._check_layout_consistency(doc))
+
+        # rules.md 严重度统一覆盖 (2026-09-06 审查 C-1): FMT-001/002/004 等
+        # 无 check_type 规则的 findings 严重度以 rules.md 声明为唯一来源
+        if self.rule_severities:
+            for f in findings:
+                if f.rule_id in self.rule_severities:
+                    f.severity = self.rule_severities[f.rule_id]
 
         return findings
 

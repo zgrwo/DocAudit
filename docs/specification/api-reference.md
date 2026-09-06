@@ -75,7 +75,7 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (西文 latin 与中文 eastAsia 分别判定，按页+字体+作用域聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |

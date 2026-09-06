@@ -2,13 +2,17 @@
 
 import os
 import tempfile
+from pathlib import Path
 
 from src.auditors.factual import FactualAuditor
 from src.auditors.format import FormatAuditor
 from src.auditors.structure import StructureAuditor
 from src.converters.pptx_converter import PptxConverter
+from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import FindingSeverity
+
+RULES_MD = str(Path(__file__).resolve().parent.parent / "rules.md")
 
 
 def _heading_doc(levels: list[int]) -> Document:
@@ -200,6 +204,29 @@ class TestStructureAuditor:
         findings = sa._check_figure_numbering(doc)
         assert len(findings) == 0, f"章节式编号暂不参与连续性校验 (设计取舍), got: {findings}"
 
+    def test_figure_numbering_duplicate_flagged(self):
+        """STR-002: 同页真实重复编号 (图2 出现两次) 应报 '编号重复'。
+
+        2026-09-06 审查 D-2: 该分支曾零测试锚定 (负向注入短路重复检测后
+        85 用例全绿), 本用例为正报锚点。
+        """
+        doc = _text_doc("如图2 所示\n再看图2 的细节")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 1, f"期望 1 条重复编号, got: {findings}"
+        assert "重复" in findings[0].message, f"应报编号重复, got: {findings[0].message}"
+
+    def test_figure_numbering_two_digit_chapter_not_misdetected(self):
+        """STR-002: 两位数章节编号 (图10-1/图11-2/表12-1) 不得回溯误析为 '图1'。
+
+        2026-09-06 审查 D-1: 旧正则 (?![-–—]\\d) 挡不住 (\\d+) 内部回溯,
+        两位数章节号被截为 '图1' → ERROR 级 '编号重复' 误报。
+        """
+        doc = _text_doc("见图10-1。\n接口时序见图11-2 与图11-3。\n附表见表12-1。")
+        sa = StructureAuditor(config={"required_sections": []})
+        findings = sa._check_figure_numbering(doc)
+        assert len(findings) == 0, f"两位数章节号不应触发 STR-002, got: {findings}"
+
     def test_figure_caption_format_space_insensitive(self):
         """STR-007: 指纹对空格不敏感 ('Fig. 1:' 与 'Fig.2:' 视为同一格式)"""
         doc = _text_doc("Fig. 1: 标题甲。\nFig.2: 标题乙。")
@@ -264,6 +291,31 @@ class TestFormatAuditor:
             assert f.type.value == "format"
             assert f.message
             assert f.rule_id == "FMT-001"
+
+    def test_rule_severities_from_config_override(self):
+        """FMT-001/002/004 严重度由 rules.md 声明驱动 (2026-09-06 审查 C-1: 曾硬编码 WARNING,
+        用户改 rules.md 严重度静默失效)"""
+        doc = PptxConverter().convert("tests/fixtures/sample.pptx")
+        # 默认 (无 rule_severities): 代码内置兜底 WARNING
+        default_findings = [f for f in FormatAuditor().audit(doc) if f.rule_id == "FMT-001"]
+        assert default_findings, "前置: sample.pptx 应触发 FMT-001"
+        assert all(f.severity == FindingSeverity.WARNING for f in default_findings)
+        # rule_severities 声明 error → audit() 统一覆盖为 ERROR
+        auditor = FormatAuditor(config={"rule_severities": {"FMT-001": "error"}})
+        findings = [f for f in auditor.audit(doc) if f.rule_id == "FMT-001"]
+        assert findings, "覆盖配置不应影响 FMT-001 触发"
+        assert all(f.severity == FindingSeverity.ERROR for f in findings)
+
+    def test_rule_severities_extracted_from_rules_md(self):
+        """extract_auditor_config 为无 check_type 的 FMT 规则收集 severity (C-1 五节点链路)"""
+        rules = parse_rules_md(RULES_MD)
+        config = extract_auditor_config(rules)
+        rs = config.get("rule_severities", {})
+        assert rs.get("FMT-001") == "warning"
+        assert rs.get("FMT-002") == "warning"
+        assert rs.get("FMT-004") == "warning"
+        # 有 check_type 的规则不进该通道 (严重度由 custom_rules dispatch 覆盖)
+        assert "FMT-003" not in rs
 
     def test_font_consistency_east_asia_flagged(self):
         """FMT-001: 非允许的 eastAsia 中文字体应触发告警 (font_scope=east_asia)"""
@@ -438,6 +490,55 @@ class TestFormatAuditor:
 
 
 class TestFactualAuditor:
+    def test_numeric_extraction_with_common_units(self):
+        """CON-001: 常见工程单位数值完整提取, 不被回溯截断 (2026-09-06 审查 D-3)
+
+        修复前 '28pt'→'2'、'500g'→'50' (单位表外回溯截断)。
+        """
+        from src.auditors.factual import _NUMERIC_VALUE_RE
+
+        assert _NUMERIC_VALUE_RE.findall("字号 28pt") == ["28pt"]
+        assert _NUMERIC_VALUE_RE.findall("净重 500g") == ["500g"]
+        assert _NUMERIC_VALUE_RE.findall("间距 5 km") == ["5 km"]
+        assert _NUMERIC_VALUE_RE.findall("延迟 30ms") == ["30ms"]
+        # 表内原有行为不回归: 电学单位与百分数
+        assert _NUMERIC_VALUE_RE.findall("电压 3.3V") == ["3.3V"]
+        assert _NUMERIC_VALUE_RE.findall("良率 99%") == ["99%"]
+
+    def test_numeric_extraction_truncation_guard_skips_untrusted(self):
+        """CON-001: 表外单位触发回溯时整值跳过, 不产出错误数值 (2026-09-06 审查 D-3)"""
+        fa = FactualAuditor()
+        doc = _text_doc("输出 28xyz 与 29xyz 为表外单位。")
+        entries = fa._extract_numeric_values(doc)
+        values = [e["value"] for e in entries]
+        assert 2.0 not in values, f"截断值 2 不得进入一致性比较, got: {values}"
+
+    def test_numeric_consistency_with_pt_units_not_missed(self):
+        """CON-001: 28pt vs 29pt 同指标不一致应报 (修复前截断同值导致漏报, D-3)"""
+        p1 = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame", paragraphs=[Paragraph(text="标准字号为 28pt。", runs=[])]
+                )
+            ],
+        )
+        p2 = Page(
+            index=1,
+            slide_number=2,
+            elements=[
+                PageElement(
+                    type="text_frame", paragraphs=[Paragraph(text="标准字号为 29pt。", runs=[])]
+                )
+            ],
+        )
+        doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=[p1, p2])
+        findings = FactualAuditor().audit(doc)
+        con1 = [f for f in findings if f.rule_id == "CON-001"]
+        assert len(con1) == 1, f"28pt vs 29pt 不一致应报 1 条 CON-001, got: {con1}"
+        assert 28.0 in con1[0].metadata["values"], f"报告值应含完整 28.0, got: {con1[0].metadata}"
+
     def test_abbreviation_check_via_audit(self):
         """CON-003: 未定义缩写应通过 audit() 被检测"""
         doc = PptxConverter().convert("tests/fixtures/sample.pptx")

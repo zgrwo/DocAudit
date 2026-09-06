@@ -78,6 +78,25 @@ class TestPayloadEscaping:
         assert XSS_SCRIPT not in html, "原始 <script> 载荷不得出现在 source_path 渲染中"
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
+    def test_metadata_title_escaped(self):
+        """Document.metadata.title 含载荷 → <title>/头部转义 (2026-09-06 审查 F-1 补录)。
+
+        html_reporter.py 渲染 metadata.title or source_path, 此前载荷仅经
+        source_path 通道覆盖。
+        """
+        doc = _doc()
+        doc.metadata.title = XSS_SCRIPT
+        html = generate_html_report(doc, [_finding()])
+        assert XSS_SCRIPT not in html, "原始 <script> 载荷不得出现在 metadata.title 渲染中"
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+    def test_rule_id_payload_escaped(self):
+        """rule_id 含载荷 → 转义 (2026-09-06 审查 F-1 补录, 此前固定 SEC-TEST)。"""
+        f = _finding(rule_id=XSS_SCRIPT)
+        html = generate_html_report(_doc(), [f])
+        assert XSS_SCRIPT not in html, "原始 <script> 载荷不得出现在 rule_id 渲染中"
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
     def test_title_escaped(self):
         """title 参数含 HTML → 转义。"""
         html = generate_html_report(_doc(), [_finding()], title="<b>标题</b>")

@@ -165,7 +165,9 @@ class CustomRulesAuditor(BaseAuditor):
                         message=f"规则 '{rule.rule_id}' 执行失败: {e}",
                         rule_id="SYS-ERROR",
                         location="系统",
-                        context=str(e)[:120],
+                        # context 前缀带 rule_id (2026-09-06 审查 E-1): 两条不同规则
+                        # 抛出相同异常文本时 dedup_key 不再碰撞折叠
+                        context=f"rule={rule.rule_id}: {e}"[:120],
                         suggestion="请检查文档内容或规则配置",
                         metadata={"rule_id": rule.rule_id, "error": str(e)},
                     )
@@ -363,6 +365,7 @@ class CustomRulesAuditor(BaseAuditor):
                     "min_contrast": cfg.get("min_contrast", 4.5),
                     "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
                     "large_text_threshold": cfg.get("large_text_threshold", 18),
+                    "rule_severities": cfg.get("rule_severities", {}),
                 }
             )
         elif key == "fca":

@@ -146,7 +146,11 @@ class PptxConverter(BaseConverter):
                 return self._convert_chart(shape)
 
             return None
-        except (ValueError, TypeError, AttributeError, KeyError, IndexError) as e:
+        except Exception as e:
+            # 宽捕获有据 (2026-09-06 审查 B-2): 单 shape 失败降级跳过, 不中断
+            # 整文件转换 — python-pptx/lxml 对损坏 shape 可能抛窄列表
+            # (ValueError/TypeError/...) 之外的异常 (如 OSError), 与 docx_converter
+            # 的宽 Exception 策略对齐
             # 安全获取 shape 标识 — 避免 except 块内二次异常 (shape 属性访问可能同样失败)
             try:
                 shape_label = f"{shape.name} (type={shape.shape_type})"
@@ -185,7 +189,8 @@ class PptxConverter(BaseConverter):
                         text=run_elem.text,
                         font_name=font.name,
                         font_name_east_asia=font_name_east_asia,
-                        font_size=font.size / 12700 if font.size else None,  # EMU → pt
+                        # is not None (falsy 约定): 显式 0 字号是有效信息, 不作 truthy 短路
+                        font_size=font.size / 12700 if font.size is not None else None,  # EMU → pt
                         bold=font.bold,
                         italic=font.italic,
                         underline=font.underline,
@@ -247,7 +252,7 @@ class PptxConverter(BaseConverter):
                 if tf.paragraphs and tf.paragraphs[0].runs:
                     first_run = tf.paragraphs[0].runs[0]
                     font_name = first_run.font.name
-                    if first_run.font.size:
+                    if first_run.font.size is not None:  # falsy 约定: 0 字号不吞
                         font_size = first_run.font.size / 12700
                     try:
                         if first_run.font.color and first_run.font.color.rgb:

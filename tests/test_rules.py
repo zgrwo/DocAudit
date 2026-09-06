@@ -31,7 +31,9 @@ def _md_doc(text: str) -> Document:
 class TestRuleParser:
     def test_parse_rules_md(self):
         rules = parse_rules_md(RULES_MD)
-        assert len(rules) >= 10
+        # 精确锚定 (2026-09-06 审查 G-1): 宽松下限 (>=10) 拦不住规则数缓慢缩减;
+        # 规则数变更需同步 rules.md / api-reference.md / ci.yml 断言 / 白名单文档
+        assert len(rules) == 26
 
     def test_extract_auditor_config(self):
         rules = parse_rules_md(RULES_MD)

@@ -280,6 +280,16 @@ class AutoFixer:
 
             for slide in prs.slides:
                 for shape in slide.shapes:
+                    # 位置继承且继承链上无 xfrm 的形状 left/top/width/height 为 None,
+                    # 直接比较会 TypeError 中止整个修复步骤 (2026-09-06 审查 E-2) —
+                    # 跳过该形状, 其余形状照常修复
+                    if (
+                        shape.left is None
+                        or shape.top is None
+                        or shape.width is None
+                        or shape.height is None
+                    ):
+                        continue
                     changed = False
                     # 左溢出 → 移到左边界
                     if shape.left < 0:

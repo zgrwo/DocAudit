@@ -2,7 +2,7 @@
 
 > 本文档是**一份可直接投喂给任意 AI 审查代理的 Prompt 模板**，用于对本项目的任何变更（PR / 提交 / 发版前全量）做一次"先想后写、实证优先、杜绝假阳性"的深度审查。
 > 配套治理规则见 [documentation.md](documentation.md)；项目宪法见 [AGENTS.md](../../AGENTS.md)；审查产出报告一律归档 `logs/reports/`（`logs/` 已 gitignore，**不入库**）。
-> **事实基准**：文中数字（26 条规则 / 19 个 _DISPATCH 条目 / 353 用例 / 18 测试文件 / CI 3 job）已于 2026-09-06 对照 v0.1.0（HEAD 5f78e4c）逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
+> **事实基准**：文中数字（26 条规则 / 19 个 _DISPATCH 条目 / 363 用例 / 18 测试文件 / CI 3 job）已于 2026-09-06 对照 v0.1.0（HEAD 5f78e4c）逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
 
 ---
 
@@ -86,7 +86,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 ### 3.4 验证体系（黄金测试 + 门禁）
 
 ```
-① 全量测试      pytest tests/ -v（353 用例 / 18 文件，2026-09-06 快照，当轮重测）
+① 全量测试      pytest tests/ -v（363 用例 / 18 文件，2026-09-06 快照，当轮重测）
 ② 黄金测试      tests/test_golden_paths.py — Python API = 真实 CLI subprocess = AppTest WebUI
                 三路径对同一输入必须产生完全相同的发现
 ③ DISPATCH 验证 python -c "from src.auditors.custom_rules import CustomRulesAuditor; \
@@ -306,7 +306,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 | 陷阱 | 防控 |
 | :--- | :--- |
 | 把历史已修复项当未修复复报 | CHANGELOG「Unreleased → Fixed」登记了大量已修复项（DOCX 样式级回退、CON-004 格式守卫、SYS-ERROR 不折叠、缓存串档等）。引用旧问题前先对当前 HEAD 重验源码 |
-| 引用过期数字 | 本文档 3.4 节数字是 2026-09-06 快照（353 用例 / 18 文件 / 19 DISPATCH / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
+| 引用过期数字 | 本文档 3.4 节数字是 2026-09-06 快照（363 用例 / 18 文件 / 19 DISPATCH / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
 | 文档表格当代码事实 | api-reference 的 DISPATCH 标志列、documentation.md 的同步链均为人工维护文档——**逐项与源码对照**，表格曾漂移 |
 | 把门禁全绿当语义正确背书 | 本项目多轮 P0 均在门禁全绿状态下合入；全绿只是下限 |
 | 生成物冒充源码 | `build/lib/` 内有 src 副本、`.venv` 有整套第三方库——grep 命中两者 = 扫描范围错误，重跑限定路径的扫描 |

@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -86,8 +87,7 @@ class TerminologyChecker:
         directory = Path(glossary_dir)
         for yaml_file in directory.glob("*.yaml"):
             try:
-                with open(yaml_file, encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
+                data = self._read_yaml_with_fallback(yaml_file)
                 glossary = self._parse_glossary(data)
                 if glossary:
                     self.glossaries.append(glossary)
@@ -96,6 +96,21 @@ class TerminologyChecker:
                     )
             except Exception as e:
                 logger.warning("术语表加载失败: %s — %s", yaml_file.name, e)
+
+    @staticmethod
+    def _read_yaml_with_fallback(yaml_file: Path) -> Any:
+        """读取 YAML, 编码回退 utf-8 → gbk (2026-09-06 审查 B-1)。
+
+        术语表仅 utf-8 读取时, 用户误存 GBK 会使整张术语表静默丢失
+        (只留一行 warning) — 先尝试 GBK 解码再交给 yaml, 与 vocabulary
+        的回退链对齐; gbk+replace 兜底保证不因编码抛出。
+        """
+        try:
+            text = yaml_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            logger.warning("术语表非 UTF-8 编码，尝试 GBK 回退: %s", yaml_file.name)
+            text = yaml_file.read_text(encoding="gbk", errors="replace")
+        return yaml.safe_load(text)
 
     def _parse_glossary(self, data: dict) -> TermGlossary | None:
         """解析 YAML 术语表"""

@@ -41,7 +41,14 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
         logger.warning("规则文件不存在: %s", file_path)
         return []
 
-    content = path.read_text(encoding="utf-8")
+    # 编码回退 (2026-09-06 审查 B-1): 用户误存 GBK 的 rules.md 不应使整个规则
+    # 配置失效 (UnicodeDecodeError 直接抛出) — 与 vocabulary 的回退链对齐;
+    # gbk+replace 兜底永不失败, 非 GBK 字节以 U+FFFD 可见呈现。
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning("rules.md 非 UTF-8 编码，尝试 GBK 回退读取: %s", file_path)
+        content = path.read_text(encoding="gbk", errors="replace")
 
     # 解析 YAML frontmatter (可选，当前仅用于跳过)
     body = content
@@ -376,5 +383,19 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
         if "languagetool_url" in rule.params:
             config["languagetool_url"] = str(rule.params["languagetool_url"])
             break
+
+    # 无 check_type 的 format 规则严重度通道 (2026-09-06 审查 C-1):
+    # FMT-001/002/004 无 `检查:` 键, 不进 _DISPATCH, 其 findings 严重度原先
+    # 硬编码在 FormatAuditor 内部 — rules.md 的严重度声明静默失效。
+    # 现收集到 rule_severities, 由 FormatAuditor.audit() 按 rule_id 统一覆盖
+    # (与 custom_rules._execute_check_rule 的 dispatch 覆盖同哲学: rules.md
+    # 是严重度的唯一来源)。独立循环收集, 避免与上方 elif 参数分支互斥。
+    rule_severities: dict[str, str] = {
+        rule.rule_id: rule.severity
+        for rule in rules
+        if rule.rule_id.startswith("FMT-") and not rule.check_type
+    }
+    if rule_severities:
+        config["rule_severities"] = rule_severities
 
     return config

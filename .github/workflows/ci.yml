@@ -39,7 +39,7 @@ jobs:
 
       - name: Verify rules.md parsing
         run: |
-          python -c "from src.engines.rule_parser import parse_rules_md; rules = parse_rules_md('rules.md'); print(f'{len(rules)} rules parsed'); assert len(rules) >= 20, f'Expected >=20 rules, got {len(rules)}'"
+          python -c "from src.engines.rule_parser import parse_rules_md; rules = parse_rules_md('rules.md'); print(f'{len(rules)} rules parsed'); assert len(rules) == 26, f'Expected exactly 26 rules (宽松下限拦不住规则数缓慢缩减, 2026-09-06 审查 G-1), got {len(rules)}; 规则数变更需同步 rules.md / api-reference.md / tests/test_rules.py / test_gates 文档数字白名单'"
 
   lint:
     runs-on: ubuntu-latest

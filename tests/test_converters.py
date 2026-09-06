@@ -540,6 +540,40 @@ class TestPdfConverter:
         assert cells == ["表头A", "表头B", "值1", "值2"]
 
 
+class TestPptxConverterNestedGroup:
+    """PPTX 嵌套 Group 递归展开 (2026-09-06 审查 B-3: 转换器层无端到端锚点)"""
+
+    def test_nested_group_text_flat_expanded(self, tmp_path):
+        """嵌套 group (group 内 group) 的文本经 flattened_elements 可达, 不漏检"""
+        from pptx import Presentation
+        from pptx.util import Pt
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        outer = slide.shapes.add_group_shape()
+        tb1 = outer.shapes.add_textbox(Pt(0), Pt(0), Pt(80), Pt(20))
+        tb1.text_frame.text = "外组文本"
+        inner = outer.shapes.add_group_shape()
+        tb2 = inner.shapes.add_textbox(Pt(0), Pt(0), Pt(50), Pt(20))
+        tb2.text_frame.text = "嵌套组内文本"
+
+        path = tmp_path / "nested_group.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        texts = [
+            para.text
+            for elem in doc.pages[0].flattened_elements
+            if elem.type == "text_frame"
+            for para in elem.paragraphs
+        ]
+        joined = "\n".join(t for t in texts if t.strip())
+        assert "外组文本" in joined, f"一阶 group 文本应可达, got: {texts}"
+        assert "嵌套组内文本" in joined, f"嵌套 group 文本应递归可达, got: {texts}"
+
+
 class TestPptxConverterTableColors:
     """PPTX 表格单元格底色/字体色提取 (FMT-008 数据源)"""
 

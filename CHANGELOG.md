@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **三轮发行前深度审查整改批次**（2026-09-06，全量审查 14 项发现全数处理）：
+  - STR-002 图表编号正则防回溯：`(?!\d|-\d)` 双重负向断言替代 `(?![-–—]\d)`，
+    两位数章节号（图11-2/图10-1）不再被回溯截为「图1」产生 ERROR 级「编号重复」
+    误报；补重复编号正报 + 两位数不误报双用例（该分支曾零测试锚定，负向注入实证）
+  - CON-001 数值提取单位表扩充（pt/kg/g/km/dB/Hz/ms 等）+ 截断防护兜底：
+    「28pt→2」「500g→50」类截断漏报与数值失真消除，表外单位整值跳过不出错值
+  - FMT-001/002/004 严重度配置驱动：无 `检查:` 键的 format 规则经
+    `rule_severities` 通道由 FormatAuditor.audit() 统一覆盖（rules.md 是严重度
+    唯一来源；parser/pipeline/format/custom_rules 四处联动，回退路径键集同步）
+  - SYS-ERROR context 前缀带 rule_id：不同规则抛相同异常文本时 dedup 不再折叠
+  - AutoFix 元素溢出修复对 left/top/width/height 为 None 的形状跳过（防御
+    继承链无 xfrm 的 TypeError 中止）
+  - rules.md/术语表编码回退 utf-8→gbk（与 vocabulary 对齐，误存 GBK 不再
+    整配置失效/整表静默丢失）；pptx_converter 单 shape 异常捕获放宽为
+    Exception（与 docx_converter 对齐，损坏 shape 不中断整文件转换）
+  - font_size 判断规范化 `is not None`（structure.py/pptx_converter.py，
+    对齐 falsy-pitfalls 约定）；CI 与 test_rules 规则数断言改精确 `== 26`
+    （宽松下限拦不住缓慢缩减）；Streamlit 显式 `maxUploadSize = 100`
+  - 文档：rules.md 内置检查表补录代码内置不可配阈值（对齐容差/字体种类上限/
+    画布基准/CON-004 门槛/分段门槛/上下文窗口）；api-reference 同步
+    FormatAuditor `rule_severities` 参数；嵌套 Group 转换、metadata.title 与
+    rule_id XSS 载荷补测（用例 353→363）
+
 ### Changed
 
 - **5S 整改批次**（2026-09-06）：

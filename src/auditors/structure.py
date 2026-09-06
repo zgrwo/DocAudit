@@ -11,9 +11,13 @@ from src.text_utils import is_cjk_char as _is_cjk_char
 # 标题末尾标点检测正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每页重复编译)
 _TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
 
-# 图/表编号提取 (排除章节式编号 "图1-1": 数字后跟 [-–—]数字 跳过)
+# 图/表编号提取 (排除章节式编号 "图1-1": 数字后跟 [-–—]数字 跳过)。
+# (?!\d|-\d) 双重负向断言 (2026-09-06 审查 D-1): 旧断言 (?![-–—]\d) 挡不住
+# (\d+) 的内部回溯 — "图11-2" 贪婪匹配 "11" 被拒后回溯到 "1" 误析为图1,
+# 两位数章节号 (≥10 章) 全部误报重复/跳号。(?!\d) 防数字回溯, (?!-\d) 防章节式;
+# "图2-图4" (编号后跟范围连字符) 中 - 后非数字, 仍正常匹配。
 _FIG_NUMBER_RE = re.compile(
-    r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)(?![-–—]\d)",
+    r"(?:图|Fig\.?|Figure|表|Table|Tab\.?)\s*(\d+)(?!\d|-\d)",
     re.IGNORECASE,
 )
 
@@ -161,7 +165,8 @@ class StructureAuditor(BaseAuditor):
                     continue
                 # 检查是否有大字号 Run
                 for run in para.runs:
-                    if run.font_size and run.font_size >= self.min_title_font_size:
+                    # is not None (falsy 约定): 字号 0 虽非正常值, 数值判断不作 truthy 短路
+                    if run.font_size is not None and run.font_size >= self.min_title_font_size:
                         return findings  # 找到大号文本 = 算标题
 
         # 都没找到 → 告警 (严重度对齐 rules.md STR-001: error)

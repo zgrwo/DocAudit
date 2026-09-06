@@ -121,6 +121,9 @@ def build_auditors(
             "min_contrast": config.get("min_contrast", 4.5),
             "large_text_min_contrast": config.get("large_text_min_contrast", 3.0),
             "large_text_threshold": config.get("large_text_threshold", 18),
+            # 无 check_type 的 format 规则 (FMT-001/002/004) 严重度以 rules.md 为准
+            # (2026-09-06 审查 C-1); dispatch 型规则仍由 custom_rules 覆盖, 不经此处
+            "rule_severities": config.get("rule_severities", {}),
             "_skip_checks": [
                 "element_overflow",
                 "per_page_char_limit",

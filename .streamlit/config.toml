@@ -12,6 +12,8 @@ port = 8501
 headless = true
 enableCORS = false
 enableXsrfProtection = true
+# 上传面显式声明 (2026-09-06 审查 F-2): 不依赖 Streamlit 默认 200MB 兜底
+maxUploadSize = 100
 
 [browser]
 gatherUsageStats = false
