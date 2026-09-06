@@ -29,7 +29,9 @@ class CustomRulesAuditor(BaseAuditor):
     _DISPATCH = {
         "first_slide_has_title_layout": ("sa", "_check_title_slide", False, True),
         "figure_numbering_sequential": ("sa", "_check_figure_numbering", False, False),
-        "heading_level_sequential": ("sa", "_check_heading_levels", False, True),
+        # pptx_only 必须 False: 方法内已有 PPTX 守卫 (para.level 是缩进级别),
+        # dispatch 再按 PPTX 过滤会让非 PPTX 的标题层级检查彻底失效 (2026-09-06 回归)
+        "heading_level_sequential": ("sa", "_check_heading_levels", False, False),
         "numeric_cross_reference": ("fca", "_check_numeric_consistency", False, False),
         "abbreviation_first_defined": ("fca", "_check_abbreviation_first_defined", False, False),
         "abbreviation_defined_never_used": (

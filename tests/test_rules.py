@@ -276,7 +276,7 @@ class TestRuleParser:
         assert "table_contras" in sys_errors[0].message
 
     def test_heading_levels_dispatch_skipped_for_pptx(self):
-        """STR-003 dispatch: PPTX 文档不执行标题层级检查 (para.level 是缩进级别)"""
+        """STR-003: PPTX 文档不报标题层级跳级 (para.level 是缩进级别, 方法内守卫早退)"""
         from src.engines.rule_parser import AuditRule
 
         rule = AuditRule(
@@ -308,6 +308,44 @@ class TestRuleParser:
         findings = auditor._execute_rule(rule, doc)
         str003 = [f for f in findings if f.rule_id == "STR-003"]
         assert len(str003) == 0, f"PPTX 缩进级别不应报 STR-003, got: {str003}"
+
+    def test_str003_fires_through_dispatch_for_non_pptx(self):
+        """回归 2026-09-06: 非 PPTX 文档必须能经 dispatch 触发 STR-003。
+
+        _skip_checks 屏蔽 audit() 直调路径后, dispatch 是 STR-003 唯一执行通道;
+        曾因 pptx_only=True 被整体跳过, 而方法自身又在 PPTX 早退 → 规则静默失效。
+        """
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="STR-003",
+            category="structure",
+            severity="warning",
+            description="标题层级不跳级",
+            check_type="heading_level_sequential",
+            params={},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(text="一级标题", runs=[], level=0),
+                        Paragraph(text="三级标题", runs=[], level=2),
+                    ],
+                )
+            ],
+        )
+        doc = Document(
+            format="docx", source_path="x.docx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = auditor._execute_rule(rule, doc)
+        str003 = [f for f in findings if f.rule_id == "STR-003"]
+        assert len(str003) == 1, f"非 PPTX 跳级 (H0→H2) 应报 STR-003, got: {str003}"
 
     def test_con004_dispatch_skipped_for_non_pptx(self):
         """CON-004 dispatch: 非 PPTX 文档不执行每页结论检查 (pptx_only 修复)"""
