@@ -1,7 +1,7 @@
 # Falsy 陷阱检查清单
 
 > **SSOT 声明**：本文件是 falsy 值误判检查的**唯一权威信源**。
-> [python-SKILL.md](../skills/python-SKILL.md) 中的 falsy 内容只链接引用本文件，不重复维护。
+> [python-SKILL.md](../../skills/python-SKILL.md) 中的 falsy 内容只链接引用本文件，不重复维护。
 >
 > 提炼自跨项目审计（含 VibeCodingTemplate 模板经验）。**Python 中 0 是有效值**：页码=0、计数=0、字号=0、数值=0，不能用 `if x:` 检查。
 
@@ -69,4 +69,4 @@ if font_size is not None:
 ## 相关 Skill
 
 - 完整 Python 陷阱 → `skills/python-SKILL.md`
-- 工具/脚本坑位 → `rules/tooling-pitfalls.md`
+- 工具/脚本坑位 → `tooling-pitfalls.md`

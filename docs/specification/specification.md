@@ -1,8 +1,8 @@
 # DocAudit — 项目规格文档
 
 > 版本：0.1.0 | 最后更新：2026-08-18 | 状态：Alpha 迭代中
-> 事实唯一入口：**规则以 [rules.md](../rules.md) 为唯一入口**，测试清单/数字以 [AGENTS.md](../AGENTS.md) 为准。
-> 接口签名 → [api-reference.md](api-reference.md) · 用户操作 → [user-manual.md](user-manual.md)
+> 事实唯一入口：**规则以 [rules.md](../../rules.md) 为唯一入口**，测试清单/数字以 [AGENTS.md](../../AGENTS.md) 为准。
+> 接口签名 → [api-reference.md](api-reference.md) · 用户操作 → [user-manual.md](../user-manual/user-manual.md)
 
 ## 1. 项目概述
 
@@ -129,7 +129,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 ### 4.1 测试体系（以 AGENTS.md 为准）
 
 > 精确测试用例数与测试文件清单以 **AGENTS.md** 为准（数字由主代理统一同步）；
-> 本表为 2026-08-18 快照，并行工作包持续新增测试文件，最新清单见 AGENTS.md 测试表。
+> 本表为 2026-09-06 快照，最新清单见 AGENTS.md 测试表。
 
 | 文件 | 内容 |
 |------|------|
@@ -144,11 +144,6 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | test_language_auditor.py | 语言审计器细节 |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
-| test_check_doc_numbers.py | 文档数字一致性检查器门禁 |
-| test_check_bare_handlers.py | 裸异常检查器门禁 |
-| test_check_api_sync.py | API 同步检查器门禁 |
-| test_check_html_escape.py | HTML 转义检查器门禁 |
-| test_check_skill_sync.py | Skill 双份维护检查器门禁 |
 | test_cli_exit_codes.py | CLI 退出码契约（处理失败 → exit 1） |
 | test_golden_paths.py | 黄金测试真实三路径（CLI/WebUI/Python API） |
 | test_rule_coverage.py | 规则断言覆盖测试（STR/CON/FMT 定向补盲） |

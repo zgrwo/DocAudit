@@ -187,7 +187,7 @@ bash scripts/setup_offline.sh install
 2. **&#128196; 单文件** 模式：拖拽文件 &#8594; 点击审查 &#8594; 查看结果 &#8594; 过滤豁免 &#8594; 下载报告
 3. **&#128194; 批量** 模式：输入文件夹路径 / 拖拽多个文件 &#8594; 批量审查 &#8594; 按文件汇总
 
-> 详细操作 &#8594; [用户手册](rules/user-manual.md)
+> 详细操作 &#8594; [用户手册](docs/user-manual/user-manual.md)
 
 ### CLI
 
@@ -208,7 +208,7 @@ python src/cli.py report.pptx --fix
 python src/cli.py report.pptx --fix --fix-type font
 ```
 
-> 完整参数 &#8594; [用户手册](rules/user-manual.md)
+> 完整参数 &#8594; [用户手册](docs/user-manual/user-manual.md)
 >
 > **退出码**（markdownlint 风格，便于 CI 集成）：发现 ERROR 级问题 → `1`；仅有 warning/info → `0`；任一文件处理失败（解析/转换异常，优先于严重度判断）→ `1`；路径不存在或目录中无支持文件 → `1`。
 
@@ -273,11 +273,9 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **419 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / gates
+- **349 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
-- **裸异常处理器检查**：CI 强制无 `except Exception: pass` 静默吞异常（`tools/check_bare_handlers.py`）
-- **技能双份同步检查**：skills/ 与 .qoder/skills/ 注册副本正文一致性门禁（`tools/check_skill_sync.py`）
 
 ---
 
@@ -288,7 +286,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
 - **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
 - **PDF 首次转换需 docling 模型缓存**：docling 布局模型不随 pip 包分发（2026-08 实证），首次转换时从 HuggingFace Hub 下载；离线机器需在有网机器上预下载后随项目拷贝（见下方「方案 C」离线章节）
-- **PDF 转换要求纯英文 (ASCII) 安装路径**（Windows）：docling-parse 的 C++ 层无法处理含中文等非 ASCII 字符的项目/虚拟环境路径，路径含中文时 PDF 转换必然失败（报 `filename does not exists`）。请将项目与 venv 放在纯英文目录；程序会在该情况下提前抛出可操作提示（详见 `rules/tooling-pitfalls.md` #18）
+- **PDF 转换要求纯英文 (ASCII) 安装路径**（Windows）：docling-parse 的 C++ 层无法处理含中文等非 ASCII 字符的项目/虚拟环境路径，路径含中文时 PDF 转换必然失败（报 `filename does not exists`）。请将项目与 venv 放在纯英文目录；程序会在该情况下提前抛出可操作提示（详见 `docs/governance/tooling-pitfalls.md` #18）
 - **LanguageTool 服务地址**：`languagetool_url` 可由 `rules.md` 配置（M3，仅允许 localhost/127.0.0.1/::1），指向外部地址会报错（防文档文本外发）
 - **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
@@ -325,10 +323,10 @@ python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 
 | 文档 | 角色 | 内容 |
 |------|------|------|
-| [API 参考](rules/api-reference.md) | 数字唯一信源 | 函数签名、参数说明 |
-| [用户手册](rules/user-manual.md) | 学习教程 | 每个功能详细示例 + 结果解读 |
-| [context.md](rules/context.md) | 术语表 | 所有领域术语唯一定义 |
-| [project-structure.md](rules/project-structure.md) | 结构地图 | 文件职责与层级关系 |
+| [API 参考](docs/specification/api-reference.md) | 数字唯一信源 | 函数签名、参数说明 |
+| [用户手册](docs/user-manual/user-manual.md) | 学习教程 | 每个功能详细示例 + 结果解读 |
+| [context.md](docs/governance/context.md) | 术语表 | 所有领域术语唯一定义 |
+| [project-structure.md](docs/governance/project-structure.md) | 结构地图 | 文件职责与层级关系 |
 | [AGENTS.md](AGENTS.md) | 项目宪法 | 架构分层、红线规则、开发流程 |
 | [rules.md](rules.md) | 人+AI | 审查规则声明 |
 
@@ -342,7 +340,7 @@ python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 |------|------|------|
 | `AGENTS.md` | AI 编程助手 | 项目宪法——架构、红线、编码准则、防幻觉铁律 |
 | `README.md` | 人类用户 | 功能指南——安装、模块速览、使用模式（本文件） |
-| `rules/` | AI + 人类 | 规范文档——API 参考、用户手册、术语表、审查模板 |
+| `docs/` | AI + 人类 | 治理与规范文档——governance / specification / user-manual |
 | `skills/` | AI 编码 | 技能定义——语言陷阱、编码模式、重构守则 |
 
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。

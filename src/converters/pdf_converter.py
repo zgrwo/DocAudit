@@ -57,7 +57,7 @@ def _ensure_ascii_install_path() -> None:
             "PDF 转换依赖的 docling 引擎无法处理含非 ASCII 字符的安装路径 (Windows 限制)：\n"
             f"  当前 Python 安装路径: {prefix}\n"
             "请将项目与虚拟环境移动到纯英文 (ASCII) 目录后重试。\n"
-            "参见 rules/tooling-pitfalls.md #18。"
+            "参见 docs/governance/tooling-pitfalls.md #18。"
         )
 
 

@@ -51,14 +51,15 @@
 ## 提交前自查
 
 ```bash
-python tools/check_bare_handlers.py      # 裸异常检查
-python tools/check_html_escape.py        # HTML 转义合规
-python tools/check_api_sync.py           # api-reference 同步
 pytest tests/ -v                         # 全量测试
+ruff check src/ tests/ scripts/ app.py   # lint
 ```
+
+> 原 `tools/` 三个门禁（裸异常 / HTML 转义 / api-reference 同步 / skill 同步 / 文档数字）已于
+> 2026-09-06 随 5S 移除，对应纪律转入人工自查与深度审查流程（见 [ai-review-prompt.md](ai-review-prompt.md)）。
 
 ## 维护规则
 
 - 新踩坑并验证修复后，**立即追加到本表**（附真实案例与正确做法）
-- 语言级陷阱（Python falsy 等）维护在 `rules/falsy-pitfalls.md` 与 `skills/python-SKILL.md`，本表不重复
+- 语言级陷阱（Python falsy 等）维护在 `falsy-pitfalls.md`（同目录）与 `skills/python-SKILL.md`，本表不重复
 - 项目专属坑位（非通用）写入 AGENTS.md「历史经验」章节，不放本文件

@@ -125,7 +125,7 @@ pytest tests/ -v
 
 | 变更类型 | 需同步的文档 |
 |---------|------------|
-| 新增 Public 接口 | `rules/api-reference.md` |
-| 新增/删除/移动文件 | `rules/project-structure.md` |
+| 新增 Public 接口 | `docs/specification/api-reference.md` |
+| 新增/删除/移动文件 | `docs/governance/project-structure.md` |
 | 修改 rules.md 格式 | `src/engines/rule_parser.py` |
-| 用户可见功能变更 | `rules/user-manual.md` |
+| 用户可见功能变更 | `docs/user-manual/user-manual.md` |

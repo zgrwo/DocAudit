@@ -1,7 +1,7 @@
 # DocAudit 项目结构
 
 > 完整文件树 + 架构图 + 文件职责速查。代码位置导航的唯一信源。
-> 设计理念 → [context.md](context.md) &nbsp;|&nbsp; 编码规范 → [skills/python-SKILL.md](../skills/python-SKILL.md)
+> 设计理念 → [context.md](context.md) &nbsp;|&nbsp; 编码规范 → [skills/python-SKILL.md](../../skills/python-SKILL.md)
 
 ---
 
@@ -97,16 +97,22 @@ DocAudit/
 ├── CONTRIBUTING.md                  # 贡献指南 (含三步注册法)
 ├── .gitignore                       # Git 忽略规则
 │
-├── rules/                           # 📚 规范文档中心 (SSOT)
-│   ├── specification.md             #   项目规格文档
-│   ├── context.md                   #   领域背景 + 设计哲学 + 技术选型
-│   ├── project-structure.md         #   项目结构 (本文件)
-│   ├── api-reference.md             #   函数签名速查 — 唯一信源
-│   ├── user-manual.md               #   用户手册 — 场景驱动配方
-│   ├── refactoring-plan.md          #   重构计划
-│   ├── documentation.md             #   文档职责规范
-│   ├── tooling-pitfalls.md          #   工具/脚本坑位清单 (cmd/bat/pip/git)
-│   └── falsy-pitfalls.md            #   Python falsy 值误判检查清单
+├── docs/                            # 📚 治理与规范文档中心 (SSOT)
+│   ├── README.md                    #   文档索引
+│   ├── governance/                  #   治理文档
+│   │   ├── ai-review-prompt.md      #     AI 深度审查 Prompt 模板（报告归档 logs/reports/，不入库）
+│   │   ├── context.md               #     领域背景 + 设计哲学 + 技术选型
+│   │   ├── project-structure.md     #     项目结构 (本文件)
+│   │   ├── documentation.md         #     文档职责规范
+│   │   ├── tooling-pitfalls.md      #     工具/脚本坑位清单 (cmd/bat/pip/git)
+│   │   ├── falsy-pitfalls.md        #     Python falsy 值误判检查清单
+│   │   ├── refactoring-plan.md      #     重构计划（历史）
+│   │   └── remediation-plan-2026-08.md  # 2026-08 整改计划（历史）
+│   ├── specification/               #   规格文档
+│   │   ├── specification.md         #     项目规格文档
+│   │   └── api-reference.md         #     函数签名速查 — 唯一信源
+│   └── user-manual/                 #   用户手册
+│       └── user-manual.md           #     用户手册 — 场景驱动配方
 │
 ├── skills/                          # 🛠️ AI 编码规范
 │   ├── python-SKILL.md              #   Python 开发规范
@@ -114,22 +120,10 @@ DocAudit/
 │   ├── architecture-reviewer.md     #   架构审查专家
 │   └── project-plan-review.md       #   规划评审专家
 │
-├── .qoder/                          # 🤖 Qoder 平台目录 (skills/ 入库, 其余不入库)
-│   ├── skills/                      #   平台注册 Skill (入库, 与 skills/ 源同步)
-│   ├── prompts/                     #   Prompt 源文件 (不入库: code-review/deep-code-review)
-│   └── better-harness/              #   审查报告生成物 (不入库)
-│
-├── tools/                           # 🔧 CI 门禁工具
-│   ├── check_bare_handlers.py       #   裸异常处理器检查 (AST 感知)
-│   ├── check_doc_numbers.py         #   文档数字一致性检查 (防数字漂移)
-│   ├── check_html_escape.py         #   html.escape 合规性检查 (报告器 + app.py)
-│   ├── check_api_sync.py            #   api-reference.md 同步检查 (含签名一致性)
-│   └── check_skill_sync.py          #   技能双份同步检查 (skills/ ↔ .qoder/skills/)
-│
 ├── .github/
 │   ├── dependabot.yml               # 依赖自动更新 (每周)
 │   ├── workflows/
-│   │   └── ci.yml                   # CI: pytest 矩阵 + DISPATCH + ruff + 三门禁检查
+│   │   └── ci.yml                   # CI: pytest 矩阵 + DISPATCH + ruff + 锁文件解析
 │   ├── ISSUE_TEMPLATE/              # bug / feature / docs / refactor 四类模板
 │   └── PULL_REQUEST_TEMPLATE.md     # PR 模板
 │
@@ -196,7 +190,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (419 用例)
+└── tests/                           # 🧪 测试 (349 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -220,12 +214,7 @@ DocAudit/
     ├── test_edge_cases.py           #     边界输入
     ├── test_language_auditor.py     #     语言审计器细节
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
-    ├── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
-    ├── test_check_doc_numbers.py    #     文档数字一致性检查器门禁
-    ├── test_check_bare_handlers.py  #     裸异常检查器门禁
-    ├── test_check_api_sync.py       #     API 同步检查器门禁
-    ├── test_check_html_escape.py    #     HTML 转义检查器门禁
-    └── test_check_skill_sync.py     #     技能双份同步检查器门禁
+    └── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
 ```
 
 ---
@@ -285,4 +274,4 @@ DocAudit/
 
 ---
 
-<!-- last_updated: 2026-08-19 -->
+<!-- last_updated: 2026-09-06 -->

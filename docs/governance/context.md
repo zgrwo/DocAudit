@@ -1,7 +1,7 @@
 # DocAudit 项目上下文
 
 > 领域知识、设计理念、技术选型。回答"为什么"而非"怎么做"。
-> 怎么做 → [用户手册](user-manual.md) · [API 参考](api-reference.md) · [项目结构](project-structure.md)
+> 怎么做 → [用户手册](../user-manual/user-manual.md) · [API 参考](../specification/api-reference.md) · [项目结构](project-structure.md)
 
 ---
 

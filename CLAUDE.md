@@ -9,7 +9,7 @@
 - **项目名**：DocAudit
 - **GitHub**：https://github.com/zgrwo/DocAudit
 - **语言**：Python（文档中文）
-- **数字唯一基准**：`rules/api-reference.md` — 函数签名以此为准
+- **数字唯一基准**：`docs/specification/api-reference.md` — 函数签名以此为准
 - **SSOT**：每个事实只在一处定义，其余仅链接引用
 
 ## 四条核心准则
@@ -43,14 +43,13 @@
 
 ## 技能加载
 
-> 以下 Skill 已注册为平台资产（`.qoder/skills/`），代理可通过平台机制自动发现和加载。
-> Prompt 源文件保留在 `.qoder/prompts/`（平台本地资产，不入库），修改后需同步到 `.qoder/skills/` 注册副本。
+> 以下 Skill 位于 `skills/`，代理按需加载。
 
 | 范围 | Skill | 内容 |
 | :--- | :--- | :--- |
 | 编写/审查 Python 代码 | `python` | 编码规范、陷阱 |
 | 新增/修改审查规则 | `rules.md` | 规则声明格式 |
-| 深度审查 | `deep-code-review` | 审查 Prompt 模板（源: `.qoder/prompts/deep-code-review.prompt.md`） |
+| 深度审查 | `deep-code-review` | 审查 Prompt 模板（源: `docs/governance/ai-review-prompt.md`） |
 
 ### 专家 Skill（重构生命周期）
 
@@ -75,10 +74,10 @@
 
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
-- [ ] `.qoder/prompts/`、`.qoder/better-harness/` 是平台本地资产（不入库）；prompt 修改后需同步 `.qoder/skills/` 注册副本
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（419 用例）
+- [ ] `docs/` 分区：`governance/`（治理与陷阱清单）、`specification/`（规格与签名 SSOT）、`user-manual/`（用户手册）；`.venv`、`build/`、`docaudit.egg-info/`、`__pycache__/` 为生成物，扫描/审查时排除
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（349 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
-- [ ] 修改模块边界前必读 `rules/api-reference.md`（签名唯一信源）
+- [ ] 修改模块边界前必读 `docs/specification/api-reference.md`（签名唯一信源）
 
 ## 架构分层
 
@@ -94,16 +93,15 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 
 ## 仓库目录树
 
-> 路由地图：所有文件路径均以此为基准。详细结构见 [project-structure.md](rules/project-structure.md)。
+> 路由地图：所有文件路径均以此为基准。详细结构见 [project-structure.md](docs/governance/project-structure.md)。
 
 ```
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 419 个用例（22 个文件，含黄金测试）
-├── rules/                            # 规范文档
+├── tests/                            # 349 个用例（17 个文件，含黄金测试）
+├── docs/                             # 治理与规范文档（governance / specification / user-manual）
 ├── skills/                           # Skill 定义
-├── tools/                            # CI 门禁工具（check_bare_handlers / check_doc_numbers / check_html_escape / check_api_sync / check_skill_sync）
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
 ├── requirements-{core,pdf,full}.txt  # 离线依赖锁定文件（生成物）
 ├── AGENTS.md                         # 本文件（Claude Code 用 CLAUDE.md 副本）
@@ -141,13 +139,13 @@ DocAudit/
 
 - 🔴 禁止裸 `except:` 与 `except BaseException`
 - 🔴 `except Exception` 不得静默吞异常（体为空/仅 `pass`），除非附 `# bare-handler-ok — 理由`
-- 由 `tools/check_bare_handlers.py` 强制（AST 感知，CI 门禁），提交前本地跑一遍
+- 提交前人工自查（原 `tools/check_bare_handlers.py` AST 门禁已于 2026-09-06 5S 移除，纪律不变、把关转为审查流程）
 
 ### 6. 文档同步
 
-- 新增 Public 接口 → 同步 `rules/api-reference.md`
+- 新增 Public 接口 → 同步 `docs/specification/api-reference.md`
 - 修改 rules.md 格式 → 同步 `rule_parser.py`
-- 文件/目录变更 → 同步 `rules/project-structure.md` 目录树
+- 文件/目录变更 → 同步 `docs/governance/project-structure.md` 目录树
 
 ### 7. git push 前必须获得用户明确同意
 
@@ -160,7 +158,7 @@ DocAudit/
 
 ## 测试
 
-419 个用例，22 个文件：
+349 个用例，17 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -181,11 +179,6 @@ DocAudit/
 | test_language_auditor.py | 语言审计器细节 |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
-| test_check_doc_numbers.py | 文档数字一致性检查器门禁 |
-| test_check_bare_handlers.py | 裸异常检查器门禁 |
-| test_check_api_sync.py | API 同步检查器门禁 |
-| test_check_html_escape.py | HTML 转义检查器门禁 |
-| test_check_skill_sync.py | 技能双份同步检查器门禁 |
 
 ### 黄金测试
 
@@ -200,7 +193,6 @@ DocAudit/
 | 启动 Web UI | `streamlit run app.py` |
 | CLI 审查 | `python src/cli.py report.pptx --rules rules.md` |
 | DISPATCH 验证 | `python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(CustomRulesAuditor.validate_dispatch())"` |
-| 裸异常检查 | `python tools/check_bare_handlers.py` |
 | 离线下载/安装 | `bash scripts/setup_offline.sh download|install [core\|pdf\|full]` |
 | 重新生成锁文件 | `python scripts/gen_requirements_lock.py` |
 
@@ -216,7 +208,7 @@ DocAudit/
 | rules.md 格式变更未同步 parser | 2 | 新属性键无法解析 |
 | PPTX EMU vs pt 单位混淆 | 2 | python-pptx 用 EMU，Document 用 pt |
 | Group 子元素未递归展开 | 2 | 直接遍历 page.elements 漏检嵌套 |
-| 文档数字漂移 | 3+ | CHANGELOG「53 用例」实际 200、agents.md 测试表 5 文件实际 13、README 引用 `tests/data/` 不存在路径；2026-08 已修，由 check_doc_numbers 门禁持续守护 |
+| 文档数字漂移 | 3+ | CHANGELOG「53 用例」实际 200、agents.md 测试表 5 文件实际 13、README 引用 `tests/data/` 不存在路径；2026-08 起由 check_doc_numbers 门禁守护（该门禁 2026-09-06 随 5S 移除，改为人工同步纪律） |
 | pip download 不产构建依赖 | 1 | `pip download <本地项目>` 只保存运行时 wheel，setuptools/wheel 需显式下载（2026-08 实证），否则离线安装 PEP 517 构建失败 |
 | 中文字体盲点 | 1 | python-docx font.name 只读 w:ascii/w:hAnsi、python-pptx 只读 a:latin，中文显示字体在 w:eastAsia/a:ea；2026-08 转换器+autofix 补全链路并加 Run.font_name_east_asia |
 | 幻影规格 | 1 | specification.md 规则清单语义与 rules.md 错位（数字对、语义全错，数字门禁检测不到）；2026-08 以 rules.md 重写 |
@@ -252,13 +244,10 @@ DocAudit/
 ### 提交前必检
 
 - [ ] `pytest tests/ -v` 全绿
-- [ ] `python tools/check_bare_handlers.py` 通过
-- [ ] `python tools/check_html_escape.py` 通过
-- [ ] `python tools/check_api_sync.py` 通过
-- [ ] `python tools/check_skill_sync.py` 通过（改 skills/ 后）
+- [ ] 无新增裸 `except:` / 静默吞异常（人工对照红线 #5）
+- [ ] 所有用户文本已 `html.escape()`（人工对照红线 #2）
 - [ ] `ruff check` + `ruff format --check` 通过
 - [ ] 新增 check_type 已完成 3 步注册（Auditor方法 + _DISPATCH + _skip_checks）
-- [ ] 所有用户文本已 `html.escape()`
 - [ ] 新增 Public 接口已同步 api-reference.md
 - [ ] 目录变更已同步 project-structure.md
 
@@ -296,13 +285,12 @@ DocAudit/
 | 文档 | 角色 |
 | :--- | :--- |
 | [README.md](README.md) | 用户入口、模块速览、使用模式 |
-| [api-reference.md](rules/api-reference.md) | 签名唯一信源 |
-| [user-manual.md](rules/user-manual.md) | 用户手册 |
-| [context.md](rules/context.md) | 术语表 |
-| [project-structure.md](rules/project-structure.md) | 结构地图 |
-| [documentation.md](rules/documentation.md) | 文档职责 |
-| [code-review-prompt.md](.qoder/prompts/code-review-prompt.md) | 审查模板（平台本地资产，不入库） |
-| [deep-code-review.prompt.md](.qoder/prompts/deep-code-review.prompt.md) | 深度审查 Prompt（平台本地资产，不入库） |
-| [refactoring-plan.md](rules/refactoring-plan.md) | 重构计划 |
-| [tooling-pitfalls.md](rules/tooling-pitfalls.md) | 工具/脚本坑位清单 |
-| [falsy-pitfalls.md](rules/falsy-pitfalls.md) | Python falsy 值误判清单 |
+| [api-reference.md](docs/specification/api-reference.md) | 签名唯一信源 |
+| [user-manual.md](docs/user-manual/user-manual.md) | 用户手册 |
+| [context.md](docs/governance/context.md) | 术语表 |
+| [project-structure.md](docs/governance/project-structure.md) | 结构地图 |
+| [documentation.md](docs/governance/documentation.md) | 文档职责 |
+| [ai-review-prompt.md](docs/governance/ai-review-prompt.md) | AI 深度审查 Prompt 模板 |
+| [refactoring-plan.md](docs/governance/refactoring-plan.md) | 重构计划 |
+| [tooling-pitfalls.md](docs/governance/tooling-pitfalls.md) | 工具/脚本坑位清单 |
+| [falsy-pitfalls.md](docs/governance/falsy-pitfalls.md) | Python falsy 值误判清单 |

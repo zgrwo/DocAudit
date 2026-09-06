@@ -1,8 +1,8 @@
 # DocAudit API 参考
 
 > 函数签名速查。**签名唯一信源** — 所有公开接口在此定义。
-> 完整用法 → [用户手册](user-manual.md) &nbsp;|&nbsp; 编码规范 → [skills/python/SKILL.md](../skills/python/SKILL.md)
-> 结构导航 → [project-structure.md](project-structure.md)
+> 完整用法 → [用户手册](../user-manual/user-manual.md) &nbsp;|&nbsp; 编码规范 → [skills/python/SKILL.md](../../skills/python-SKILL.md)
+> 结构导航 → [project-structure.md](../governance/project-structure.md)
 
 **总模块**: 15 | **总公开函数**: 30+ | **规则**: 26 条
 
@@ -61,11 +61,11 @@
 | `__init__` | `(config: dict \| None)` | — | `required_sections`, `required_sections_severity`, `conclusion_keywords`, `exempt_layouts`, `max_english_words`, `max_chinese_chars_title`, `min_title_font_size`, `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_title_slide` | `(doc: Document)` | STR-001 | 首张幻灯片必须为标题版式 |
-| `_check_heading_levels` | `(doc: Document)` | STR-003 | 标题层级不跳级 (H1→H2→H3) |
+| `_check_heading_levels` | `(doc: Document)` | STR-003 | 标题层级不跳级 (H1→H2→H3；仅非 PPTX，PPTX para.level 为缩进级别由方法内守卫跳过) |
 | `_check_figure_numbering` | `(doc: Document)` | STR-002 | 图表编号连续性 + 重复 + 倒退检测 |
 | `_check_required_sections` | `(doc: Document)` | CON-002 | 必须包含指定章节 |
 | `_check_slide_structure_consistency` | `(doc: Document)` | STR-008 | 幻灯片版式多样性检查 |
-| `_check_every_slide_has_conclusion` | `(doc: Document)` | CON-004 | 每页须有关键要点 |
+| `_check_every_slide_has_conclusion` | `(doc: Document)` | CON-004 | 每页须有关键要点 (仅 PPTX 适用) |
 | `_check_title_length` | `(doc: Document)` | STR-004 | 标题长度限制 (英文词数/中文字数) |
 | `_check_title_trailing_punctuation` | `(page: Page, doc: Document)` | STR-006 | 标题末尾标点检测 |
 | `_check_duplicate_title` | `(doc: Document)` | STR-005 | 跨幻灯片重复标题 |
@@ -136,7 +136,7 @@
 | `abbreviation_defined_never_used` | fca | `_check_abbreviation_defined_never_used` | ✗ | ✗ |
 | `abbreviation_multiply_defined` | fca | `_check_abbreviation_multiply_defined` | ✗ | ✗ |
 | `abbreviation_used_before_defined` | fca | `_check_abbreviation_used_before_defined` | ✗ | ✗ |
-| `every_slide_has_conclusion` | sa | `_check_every_slide_has_conclusion` | ✗ | ✗ |
+| `every_slide_has_conclusion` | sa | `_check_every_slide_has_conclusion` | ✗ | ✓ |
 | `duplicate_title` | sa | `_check_duplicate_title` | ✗ | ✗ |
 | `title_trailing_punctuation` | sa | `_check_title_trailing_punctuation` | ✓ | ✗ |
 | `figure_caption_format` | sa | `_check_figure_caption_format` | ✗ | ✗ |

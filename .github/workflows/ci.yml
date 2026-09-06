@@ -52,32 +52,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        # .[dev] 保证测试收集环境与 test job 一致 (check_doc_numbers 的
-        # --collect-only 需要 python-pptx/python-docx 等基础依赖才能完整收集)
         run: pip install ".[dev]"
 
       - name: Run ruff check
-        run: ruff check src/ tests/ tools/ scripts/ app.py
+        run: ruff check src/ tests/ scripts/ app.py
 
       - name: Run ruff format check
-        run: ruff format --check src/ tests/ tools/ scripts/ app.py
-
-      - name: Check bare exception handlers
-        run: python tools/check_bare_handlers.py
-
-      - name: Check html.escape compliance
-        run: python tools/check_html_escape.py
-
-      - name: Check api-reference.md sync
-        run: python tools/check_api_sync.py
-
-      - name: Check skill sync
-        # skills/ 与 .qoder/skills/ 注册副本正文一致性 (prompt 修改后需同步)
-        run: python tools/check_skill_sync.py
-
-      - name: Check doc number consistency
-        # 防数字漂移复发 (历史 3+ 次: 测试数/规则数/检查数在多处硬编码后漂移)
-        run: python tools/check_doc_numbers.py
+        run: ruff format --check src/ tests/ scripts/ app.py
 
   lockfile:
     # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束

@@ -1,6 +1,6 @@
 # DocAudit 用户手册
 
-> 场景驱动的操作指南。API 签名 → [api-reference.md](api-reference.md) &nbsp;|&nbsp; 规则编写 → [rules.md](../rules.md)
+> 场景驱动的操作指南。API 签名 → [api-reference.md](../specification/api-reference.md) &nbsp;|&nbsp; 规则编写 → [rules.md](../../rules.md)
 
 ---
 

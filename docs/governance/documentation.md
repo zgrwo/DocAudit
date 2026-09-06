@@ -7,11 +7,11 @@
 | 文档 | 受众 | 核心问题 | 维护触发 |
 |------|------|----------|----------|
 | `AGENTS.md` | AI 助手 | "项目怎么组织？红线在哪？" | 架构/红线/流程变更 |
-| `rules/context.md` | AI + 新人 | "术语什么意思？" | 新概念引入 |
-| `rules/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
-| `rules/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
-| `rules/project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
-| `.qoder/prompts/code-review-prompt.md` | AI 审查 | "如何系统性审查？" | 审查维度演进 (平台本地资产, 不入库) |
+| `docs/governance/context.md` | AI + 新人 | "术语什么意思？" | 新概念引入 |
+| `docs/specification/api-reference.md` | 开发者/AI | "函数签名是什么？"（**签名唯一信源**） | 任何 Public 接口变更 |
+| `docs/user-manual/user-manual.md` | 最终用户 | "我要做 X，怎么操作？" | 用户可见功能变更 |
+| `docs/governance/project-structure.md` | 开发者/AI | "代码在哪？"（**结构唯一信源**） | 文件新增/删除/移动 |
+| `docs/governance/ai-review-prompt.md` | AI 审查 | "如何系统性深度审查？" | 审查维度演进 |
 | `skills/*.md` | AI 编码 | "Python 有什么陷阱？" | 发现新陷阱 |
 
 ## 禁止事项
@@ -32,8 +32,8 @@
   缺一不可！
 
 新增 Public 接口
-  → rules/api-reference.md
-  → rules/user-manual.md（如为用户可见功能）
+  → docs/specification/api-reference.md
+  → docs/user-manual/user-manual.md（如为用户可见功能）
 
 修改 rules.md 格式
   → 同步 rule_parser.py

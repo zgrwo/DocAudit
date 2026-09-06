@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **5S 整改批次**（2026-09-06）：
+  - 目录重组：`rules/` 文档并入 `docs/` 三分区（governance / specification / user-manual，
+    参照 Harmonization 治理体系），新增 `docs/README.md` 索引；审查报告统一归档
+    `logs/reports/`（logs/ 已 gitignore，不入库）
+  - 移除 `.claude/`（本机配置）、`.qoder/`（含 .qoder/skills 注册副本——skills/ 成为技能
+    唯一定义处；.qoder/prompts 历史审查模板语义已并入 docs/governance/ai-review-prompt.md）、
+    `tools/` 五门禁（裸异常 / HTML 转义 / api 同步 / skill 同步 / 文档数字）及其 5 个
+    test_check_* 测试文件；对应纪律转入人工自查与深度审查流程（AGENTS.md 提交前必检、
+    docs/governance/ai-review-prompt.md 已同步改写）
+  - CI lint job 收敛为 ruff check + format（移除 5 个门禁步骤）；test job 的 pytest 矩阵 /
+    DISPATCH 验证 / rules 解析断言不变
+  - 移除本地生成物 `docaudit.egg-info/`（setuptools 构建元数据，gitignore 排除，下次构建自动重建）
+
 ### Fixed
 
+- **STR-003 标题层级检查在流水线中静默失效**（2026-08 引入，2026-09-06 复活）：
+  `_skip_checks` 屏蔽 audit() 直调路径后，`_DISPATCH` 是 STR-003 唯一执行通道，而
+  `heading_level_sequential` 的 `pptx_only=True` 标志与方法内 PPTX 守卫（para.level 是
+  缩进级别非标题层级，早退）叠加，导致非 PPTX 文档的标题跳级检查彻底不再触发。
+  修复：dispatch 标志改为 False（方法内守卫保留，PPTX 行为不变），补 dispatch 级
+  回归测试（`test_str003_fires_through_dispatch_for_non_pptx`）；api-reference DISPATCH 表
+  同步（CON-004 行 PPTX only ✓，两方法说明标注适用格式）
 - **二轮发行前深度审查整改批次**（2026-08-24，发行前复审）：
   - PDF 中文路径防护：`pdf_converter` 非 ASCII 安装路径检测（限 Windows，docling C++ ANSI fopen 限制），提前抛可操作错误替代晦涩报错；真实 docling 集成测试在非 ASCII 路径自动 skip
   - 门禁健壮性：`check_doc_numbers` 收集含 error（如缺 streamlit）时跳过测试数检查，不再误报数字漂移；`check_bare_handlers` 豁免窗口扩展含 except 上一行（常见「# 降级」注释习惯）
