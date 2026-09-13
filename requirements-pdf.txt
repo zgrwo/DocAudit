@@ -1,4 +1,4 @@
-﻿# DocAudit 离线依赖锁定文件（profile=pdf）
+# DocAudit 离线依赖锁定文件（profile=pdf）
 # 由 scripts/gen_requirements_lock.py 生成，请勿手改。
 # 重新生成: python scripts/gen_requirements_lock.py
 accelerate==1.14.0
@@ -108,7 +108,7 @@ toml==0.10.2
 torch==2.13.0
 torchvision==0.28.0
 tqdm==4.70.0
-transformers==5.15.0
+transformers==5.17.0
 tree-sitter-c==0.24.2
 tree-sitter-javascript==0.25.0
 tree-sitter-python==0.25.0
