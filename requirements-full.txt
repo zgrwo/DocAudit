@@ -1,7 +1,7 @@
-﻿# DocAudit 离线依赖锁定文件（profile=full）
+# DocAudit 离线依赖锁定文件（profile=full）
 # 由 scripts/gen_requirements_lock.py 生成，请勿手改。
 # 重新生成: python scripts/gen_requirements_lock.py
-accelerate==1.14.0
+accelerate==1.15.0
 altair==6.2.2
 annotated-doc==0.0.5
 annotated-types==0.8.0
