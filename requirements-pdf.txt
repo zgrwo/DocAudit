@@ -1,4 +1,4 @@
-﻿# DocAudit 离线依赖锁定文件（profile=pdf）
+# DocAudit 离线依赖锁定文件（profile=pdf）
 # 由 scripts/gen_requirements_lock.py 生成，请勿手改。
 # 重新生成: python scripts/gen_requirements_lock.py
 accelerate==1.14.0
@@ -103,7 +103,7 @@ streamlit==1.62.0
 sympy==1.14.0
 tabulate==0.10.0
 tenacity==9.1.4
-tokenizers==0.22.2
+tokenizers==0.23.2
 toml==0.10.2
 torch==2.13.0
 torchvision==0.28.0
