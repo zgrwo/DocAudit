@@ -17,8 +17,8 @@
                         ▼
 ┌──────────────────────────────────────────────────────────┐
 │                    Reporter 层                            │
-│  src/reporters/html_reporter.py   json_reporter.py       │
-│  输出层 — Findings → HTML/JSON 报告                       │
+│  src/reporters/  html / json / csv / sarif (+ ordering)  │
+│  输出层 — Findings → HTML/JSON/CSV/SARIF 报告              │
 └───────────────────────┬──────────────────────────────────┘
                         ▲ 消费 list[AuditFinding]
 ┌──────────────────────────────────────────────────────────┐
@@ -31,8 +31,9 @@
    ▼         ▼        ▼        ▼          ▼
 ┌──────────────────────────────────────────────────────────┐
 │                    Engine 层                              │
-│  rule_parser.py  terminology.py  vocabulary.py           │
-│  languagetool.py autofix.py      pipeline.py (编排器)     │
+│  check_registry.py  rule_parser.py  validation.py        │
+│  terminology.py vocabulary.py languagetool.py autofix.py │
+│  exemptions.py      pipeline.py (编排器)                  │
 │  引擎层 — 可复用后端服务                                   │
 └───────────────────────┬──────────────────────────────────┘
                         │ 消费统一的 Document 模型
