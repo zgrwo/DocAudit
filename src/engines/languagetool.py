@@ -213,16 +213,17 @@ class LanguageToolClient:
             logger.info("Java not found, skipping LanguageTool subprocess")
             return False
 
-        jar_path = self._find_jar()
-        if not jar_path:
-            return False
-
         try:
+            jar_path = self._find_jar()
+            if not jar_path:
+                return False
             port = self.DEFAULT_PORT
             self._java_process = subprocess.Popen(
                 ["java", "-Xmx1g", "-jar", str(jar_path), "--port", str(port)],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                # 成功路径从不读 stderr：PIPE 会在日志写满 64KB 后阻塞 JVM
+                # （探活成功但 /check 全部超时）。诊断由日志/try_connect 提供。
+                stderr=subprocess.DEVNULL,
             )
             # Wait for server to start (up to 30s)
             java_url = f"http://localhost:{port}/v2"
@@ -267,10 +268,13 @@ class LanguageToolClient:
 
     def _find_jar(self) -> Path | None:
         """查找本地 LanguageTool standalone jar（不执行下载）"""
-        import sys
 
-        cache_dir = Path(sys.prefix) / "share" / "languagetool"
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        # 不写 sys.prefix（系统级 Python 只读会让整个语言维度变 SYS-ERROR）
+        cache_dir = Path.home() / ".docaudit" / "languagetool"
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None  # 目录不可写 → 视为无本地 jar，降级下一探测路径
 
         jar_path = cache_dir / f"LanguageTool-{LT_VERSION}" / "languagetool-server.jar"
         if jar_path.exists():

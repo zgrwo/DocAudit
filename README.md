@@ -39,7 +39,7 @@
 - **配置可校验** &#8212; `docaudit rules validate` 静态检查 rules/术语表/词汇表，CI 可直接用
 - **自定义规则引擎** &#8212; 支持正则匹配 + 检查委托两种模式（注册表自动派生调度）
 - **LanguageTool 三层降级** &#8212; Docker &#8594; Java 子进程 &#8594; Python 内置，零依赖也能跑
-- **智能术语检查** &#8212; 3 本半导体术语表 (45+ 术语)，含自动跳过去重
+- **智能术语检查** &#8212; 3 本术语表，共 40 条术语（先进封装 19 / 通用技术写作 4 / 半导体制造 17），含自动跳过去重
 - **批量审查** &#8212; 支持文件夹 + 多文件拖拽，按文件汇总、报告按文件分组
 - **灵活豁免** &#8212; 规则/页面/类型/单条，四个层级豁免，可持久化到 `.docauditignore`
 - **多格式报告** &#8212; HTML（页面 SVG 线框 + 按文件分组）/ JSON / CSV / SARIF v2.1.0
@@ -284,7 +284,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 - **LanguageTool 不可用**：自动跳过语法检查，不阻塞整体审查
 - **文件格式不支持**：返回明确的格式错误，列出支持的格式
-- **大文件超时**：可配置的处理超时，保护内存
+- **无处理超时开关**：超大文件不会自动中断（请配合 CI 任务超时或分批审查）
 
 ---
 
@@ -300,7 +300,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **599 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
+- **627 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）

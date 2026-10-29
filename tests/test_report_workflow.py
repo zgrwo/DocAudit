@@ -352,3 +352,83 @@ class TestExemptionKeyExport:
             "results"
         ][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         assert uri.startswith("file://")
+
+    def test_batch_findings_file_scoped_exemption_keys(self, tmp_path):
+        """批量 finding 的 location 带文件名前缀 → 豁免键按文件区分（跨文件不误豁免）。"""
+        import subprocess
+        import sys
+
+        for name in ("a.md", "b.md"):
+            (tmp_path / name).write_text("# 概述\n\n正文内容。\n", encoding="utf-8")
+        out = tmp_path / "r.json"
+        subprocess.run(
+            [
+                sys.executable,
+                str(PROJECT_ROOT / "src" / "cli.py"),
+                str(tmp_path),
+                "--rules",
+                str(PROJECT_ROOT / "rules.md"),
+                "-o",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(PROJECT_ROOT),
+            encoding="utf-8",
+            errors="replace",
+        )
+        reports = sorted(tmp_path.glob("r_*.json"))
+        assert len(reports) == 2
+        keys = set()
+        sources = set()
+        for report in reports:
+            data = json.loads(report.read_text(encoding="utf-8"))
+            for finding in data["findings"]:
+                keys.add(finding["exemption_key"])
+                sources.add(finding["metadata"]["source_file"])
+        assert len(keys) >= 2, f"两文件的同文 finding 应有不同豁免键，实际 {keys}"
+        assert {Path(s).name for s in sources} == {"a.md", "b.md"}
+
+
+class TestReviewReportRegressions:
+    """2026-10-29 深度审查回归：CSV 落盘 / SARIF 指纹。"""
+
+    def test_csv_file_has_no_double_cr(self, tmp_path):
+        out = tmp_path / "r.csv"
+        generate_csv_report([_finding()], out)
+        raw = out.read_bytes()
+        assert b"\r\r\n" not in raw, "文本模式写盘会把 \r\n 再翻成 \r\r\n"
+        with out.open(encoding="utf-8-sig", newline="") as fh:
+            rows = list(csv.reader(fh))
+        assert len(rows) == 2  # 表头 + 1 条，且无空行记录
+
+    def test_sarif_fingerprint_differs_per_source_file(self):
+        from dataclasses import replace
+
+        a = replace(_finding(), metadata={"source_file": "a.pptx"})
+        b = replace(_finding(), metadata={"source_file": "b.pptx"})
+        fa = json.loads(generate_sarif_report(_doc(), [a]))["runs"][0]["results"][0][
+            "partialFingerprints"
+        ]
+        fb = json.loads(generate_sarif_report(_doc(), [b]))["runs"][0]["results"][0][
+            "partialFingerprints"
+        ]
+        assert fa != fb, "不同文件同一发现的 SARIF 指纹不得相同（否则 Code Scanning 合并告警）"
+
+
+class TestSarifUriEncoding:
+    """2026-10-29 深度审查 P2 回归：相对 URI 必须百分号编码。"""
+
+    def test_relative_uri_percent_encoded(self, tmp_path):
+        weird = tmp_path / "报告 v2 #1%.pptx"
+        weird.write_bytes(b"x")
+        doc = _doc()
+        doc.source_path = str(weird)
+        uri = json.loads(generate_sarif_report(doc, [_finding()], uri_base=tmp_path))["runs"][0][
+            "results"
+        ][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert "#" not in uri, f"未编码的 # 会被当片段标识: {uri}"
+        assert "%23" in uri
+        assert " " not in uri
+        assert uri == "%E6%8A%A5%E5%91%8A%20v2%20%231%25.pptx"

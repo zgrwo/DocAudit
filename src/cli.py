@@ -479,19 +479,20 @@ def main():
                 vocab_dir=args.vocab,
                 verbose=args.verbose,
             )
+            # 批量时先做来源标注，再应用豁免（2026-10-29 审查）：
+            # 1) 聚合 SARIF 的 artifact 归属依赖 metadata["source_file"]；
+            # 2) exemption_key 已把来源文件纳入哈希，批量下不同文件不再共用键。
+            if len(files) > 1:
+                for _f in findings:
+                    if _f.metadata is None:
+                        _f.metadata = {}
+                    _f.metadata["source_file"] = str(file_path)
             # 豁免文件命中项不计入报告/退出码 (--exempt-file)
             if exempt_keys:
                 findings, exempted = apply_exemptions(findings, exempt_keys)
                 exempted_total += exempted
                 if exempted:
                     print(f"[EXEMPT] {exempted} finding(s) exempted by {args.exempt_file}")
-            # 批量时给 finding 标注来源文件 (2026-10-29)：
-            # 聚合 SARIF 的 artifact 归属依赖它；否则全部指向最后一个文件。
-            if len(files) > 1:
-                for _f in findings:
-                    if _f.metadata is None:
-                        _f.metadata = {}
-                    _f.metadata["source_file"] = str(file_path)
             total_findings.extend(findings)
             print_summary(findings)
 

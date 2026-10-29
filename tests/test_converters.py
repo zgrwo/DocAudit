@@ -1912,3 +1912,83 @@ class TestDocxNumbering:
         auditor = LanguageAuditor(config={"glossary_dir": None, "vocab_dir": None})
         rule_ids = {f.rule_id for f in auditor.audit(result)}
         assert "TXT-BULLET-PUNCT" in rule_ids
+
+
+class TestDocxContentControls:
+    """2026-10-29 深度审查回归：SDT（内容控件）文本曾被静默丢弃。"""
+
+    def test_sdt_paragraph_extracted(self, tmp_path):
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+
+        doc = DocxDocument()
+        doc.add_paragraph("正文段落。")
+        sdt = parse_xml(
+            f"<w:sdt {nsdecls('w')}><w:sdtContent>"
+            "<w:p><w:r><w:t>受控文本内容</w:t></w:r></w:p>"
+            "</w:sdtContent></w:sdt>"
+        )
+        doc.element.body.append(sdt)
+        path = tmp_path / "sdt.docx"
+        doc.save(str(path))
+
+        from src.converters.docx_converter import DocxConverter
+
+        document = DocxConverter().convert(path)
+        assert "受控文本内容" in document.all_text
+
+    def test_nested_sdt_paragraph_extracted(self, tmp_path):
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+
+        doc = DocxDocument()
+        sdt = parse_xml(
+            f"<w:sdt {nsdecls('w')}><w:sdtContent><w:sdt {nsdecls('w')}><w:sdtContent>"
+            "<w:p><w:r><w:t>嵌套受控文本</w:t></w:r></w:p>"
+            "</w:sdtContent></w:sdt></w:sdtContent></w:sdt>"
+        )
+        doc.element.body.append(sdt)
+        path = tmp_path / "nested_sdt.docx"
+        doc.save(str(path))
+
+        from src.converters.docx_converter import DocxConverter
+
+        document = DocxConverter().convert(path)
+        assert "嵌套受控文本" in document.all_text
+
+
+class TestHfEnvInjectionOrdering:
+    """2026-10-29 深度审查 P0 回归：HF_* 是 huggingface_hub 导入期常量。"""
+
+    def test_hf_cache_env_applied_before_huggingface_import(self):
+        try:
+            import huggingface_hub  # noqa: F401
+        except ImportError:
+            import pytest
+
+            pytest.skip("huggingface_hub 未安装")
+        import subprocess
+        import sys
+
+        code = (
+            "import src.converters.pdf_converter\n"
+            "import huggingface_hub.constants as c\n"
+            "from pathlib import Path\n"
+            "expected = str(Path('packages/hf_cache').resolve())\n"
+            "assert str(c.HF_HUB_CACHE) == expected, (str(c.HF_HUB_CACHE), expected)\n"
+            "print('ok')\n"
+        )
+        import os
+
+        env = os.environ.copy()
+        env.pop("HF_HUB_CACHE", None)
+        env.pop("HF_HUB_OFFLINE", None)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).resolve().parent.parent),
+            env=env,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr

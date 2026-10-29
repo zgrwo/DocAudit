@@ -31,9 +31,11 @@ _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _csv_safe(value) -> str:
-    """防 CSV 公式注入：危险前缀加单引号，其余原样。"""
+    """防 CSV 公式注入：危险前缀（含前导空白后）加单引号，其余原样。"""
     text = "" if value is None else str(value)
-    if text.startswith(_FORMULA_PREFIXES):
+    # Excel 会忽略前导空白/制表符后把 = + - @ 当公式，故对 lstrip 结果判定
+    probe = text.lstrip(" \t\r\n")
+    if probe.startswith(_FORMULA_PREFIXES) or text.startswith(_FORMULA_PREFIXES):
         return "'" + text
     return text
 
@@ -71,8 +73,9 @@ def generate_csv_report(
     if output_path:
         output_path = Path(output_path)
         try:
-            # utf-8-sig: 带 BOM，Excel 直接打开不乱码
-            output_path.write_text(text, encoding="utf-8-sig")
+            # utf-8-sig: 带 BOM，Excel 直接打开不乱码；
+            # 必须 write_bytes：文本模式会把已有 \r\n 再翻译成 \r\r\n（2026-10-29 审查）
+            output_path.write_bytes(text.encode("utf-8-sig"))
         except OSError as e:
             logger.warning("CSV 报告写入失败: %s — %s", output_path, e)
     return text

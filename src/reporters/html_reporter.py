@@ -266,8 +266,10 @@ def _render_thumbnails(doc: Document) -> str:
             if w <= 0 or h <= 0:
                 continue
             label = escape(str(elem.shape_name or elem.type))
+            # class 值同样转义：type 来自转换器，纵深防御防未来新类型注入
+            kind = escape(str(elem.type or ""))
             rects.append(
-                f'<rect class="el-{elem.type}" x="{x:.1f}" y="{y:.1f}" '
+                f'<rect class="el-{kind}" x="{x:.1f}" y="{y:.1f}" '
                 f'width="{w:.1f}" height="{h:.1f}"><title>{label}</title></rect>'
             )
         if not rects:

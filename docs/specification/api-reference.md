@@ -81,7 +81,7 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,44), `body_size_range`(12,32), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `enabled_rule_ids`(rules.md 声明驱动, 2026-10-28), `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,44), `body_size_range`(12,32), `max_font_types`, `max_explicit_newlines`, `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `enabled_rule_ids`(rules.md 声明驱动, 2026-10-28), `_skip_checks`（`alignment_tolerance` 为类常量 5.0 pt，暂不可配置） |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (西文 latin 与中文 eastAsia 分别判定，按页+字体+作用域聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |
@@ -266,13 +266,13 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 ### Exemptions `src/engines/exemptions.py`
 
-豁免持久化（`.docauditignore`，JSON v1）。读取只信任 `key` 字段（稳定 `exemption_key`），
+豁免持久化（`.docauditignore`，JSON v1）。读取只信任 `key` 字段（稳定 `exemption_key`）。编码回退 utf-8-sig → gbk → replace，GBK/BOM 文件均可读；
 其余为人工评审元数据；文件缺失/损坏返回空集合（fail-open 到"多报"）。
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `load_exemptions` | `(path: str \| Path = DEFAULT_EXEMPTION_FILE)` | `set[str]` | 读取豁免键；兼容裸列表与 `{"exemptions": [...]}` 两种形态 |
-| `save_exemptions` | `(path: str \| Path, keys: Iterable[str], findings: list[AuditFinding] \| None = None)` | `None` | 写入版本化 JSON；findings 用于补齐 rule_id/page/message 元数据 |
+| `save_exemptions` | `(path: str \| Path, keys: Iterable[str], findings: list[AuditFinding] \| None = None)` | `bool` | 写入版本化 JSON（原子写）；findings 用于补齐 rule_id/page/message 元数据；返回 False 时调用方必须提示失败 |
 | `apply_exemptions` | `(findings: list[AuditFinding], keys: set[str])` | `tuple[list[AuditFinding], int]` | 过滤已豁免项，返回 (保留列表, 豁免条数) |
 | `DEFAULT_EXEMPTION_FILE` | `str` | `".docauditignore"` | 默认文件名 |
 | `_extract_keys` | `(data)` | `set[str]` | 内部：解析两种文件形态 |
@@ -390,7 +390,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 | `metadata` | `dict` | 额外元数据 |
 | `id` | `str` | 自动生成 12 位 hex UUID |
 | `dedup_key` (属性) | `str` | 去重键: `"{type}\|{rule_id}\|{page}\|{context 前 120 字符的 md5 哈希}"` |
-| `exemption_key` (属性) | `str` | 稳定豁免键: dedup_key + message + location 的 md5；跨多次审查可复用 |
+| `exemption_key` (属性) | `str` | 稳定豁免键: md5(dedup_key + message + location + 来源文件 basename)；来源参与哈希使批量下不同文件的同类发现不共用键；跨多次审查可复用 |
 | `to_dict()` | `dict` | 序列化（含 `exemption_key`，便于从 JSON 报告构造 `.docauditignore`） |
 | `from_dict(data)` (classmethod) | `AuditFinding` | 反序列化 |
 | `deduplicate(findings)` (static) | `list[AuditFinding]` | 去重 (保留最高严重度) |

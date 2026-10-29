@@ -434,3 +434,26 @@ class TestPaginate:
         items = list(range(200))
         _, current, total = app._paginate(items, 2, 100)
         assert current == 2 and total == 2
+
+
+class TestMarkdownNeutralization:
+    """2026-10-29 深度审查 P2 回归：文档文本不得经 Markdown 触发外联。"""
+
+    def test_image_and_link_neutralized(self):
+        import app
+
+        out = app._md_safe("![x](http://attacker/p.png) 与 [点此](http://attacker)")
+        assert "![" not in out
+        assert "](" not in out
+        assert "http://attacker" in out  # 文本保留，但不再构成 Markdown 图片/链接
+
+    def test_html_tag_neutralized(self):
+        import app
+
+        escaped = app._md_safe("<img src=x onerror=alert(1)>")
+        assert "\\<img" in escaped and not escaped.startswith("<img")
+
+    def test_plain_text_unchanged(self):
+        import app
+
+        assert app._md_safe("普通文本 100% v0.2.1") == "普通文本 100% v0.2.1"

@@ -35,6 +35,19 @@ from src.reporters.sarif_reporter import generate_sarif_report
 EXEMPTION_FILE = DEFAULT_EXEMPTION_FILE
 
 
+_MD_META_RE = re.compile(r"([\\`*_{}\[\]()#+!|>~<])")
+
+
+def _md_safe(text) -> str:
+    """中和 Markdown 元字符（2026-10-29 深度审查 P2）。
+
+    Streamlit 的 expander 标签 / st.caption / st.info 都会按 Markdown 渲染；
+    仅 html.escape 不足以阻止文档文本里的 `![x](http://外部地址)` 让浏览器
+    主动外联（违反"完全离线、零上报"红线）。转义后按纯文本显示。
+    """
+    return _MD_META_RE.sub(r"\\\1", str(text or ""))
+
+
 def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFinding]:
     """根据会话状态中的过滤器设置，返回过滤后的 findings 列表。
 
@@ -84,10 +97,13 @@ def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFindin
         and (f.rule_id not in excluded_rules)
         and not (
             f.page_index is not None
-            and any(
-                page_no == f.page_index + 1
-                and (source is None or source == (f.metadata or {}).get("source_file"))
-                for source, page_no in excluded_page_keys
+            and (
+                (None, f.page_index + 1) in excluded_page_keys
+                or (
+                    (f.metadata or {}).get("source_file"),
+                    f.page_index + 1,
+                )
+                in excluded_page_keys
             )
         )
         and (f.exemption_key not in exempted_ids)
@@ -217,9 +233,19 @@ def _exempt_ids(ids) -> None:
     ) | set(ids)
 
 
+def _config_mtime() -> float:
+    """rules.md + glossary/*.yaml + vocab/*.txt 的最大 mtime（审计器缓存键）。"""
+    base = Path(__file__).parent
+    paths = [base / "rules.md"]
+    paths += list((base / "glossary").glob("*.yaml"))
+    paths += list((base / "vocab").glob("*.txt"))
+    mtimes = [p.stat().st_mtime for p in paths if p.exists()]
+    return max(mtimes) if mtimes else 0.0
+
+
 def _rules_mtime() -> float:
-    """rules.md 最后修改时间 — 审计器缓存热更新依据 (M7)。"""
-    return (Path(__file__).parent / "rules.md").stat().st_mtime
+    """向后兼容别名（旧测试/调用）；实际用 _config_mtime。"""
+    return _config_mtime()
 
 
 @st.cache_resource(show_spinner=False)
@@ -262,7 +288,7 @@ def _run_batch_audit(files: list) -> None:
     """批量审查：转换 + 审查所有文件。支持 StreamlitUploadedFile 和 Path。"""
     from src.engines.pipeline import run_auditors
 
-    auditors = _get_auditors(_rules_mtime())
+    auditors = _get_auditors(_config_mtime())
 
     progress_bar = st.empty().progress(0, "批量审查中...")
     docs = []
@@ -318,10 +344,11 @@ def _run_batch_audit(files: list) -> None:
     combined = []
     for fkey, findings in all_findings_dict.items():
         for fd in findings:
-            new_location = f"[{fkey}] {fd.location}" if fd.location else f"[{fkey}]"
+            # 来源只写 metadata：exemption_key 已含来源，location 保持原始文本
+            # （否则 UI/CLI 因 location 改写方式不同而键不一致，2026-10-29 审查）
             new_metadata = dict(fd.metadata or {})
             new_metadata["source_file"] = fkey
-            combined.append(_dc_replace(fd, location=new_location, metadata=new_metadata))
+            combined.append(_dc_replace(fd, metadata=new_metadata))
     st.session_state.findings = combined
     st.session_state.findings_page = 1  # 批量审查结果从第 1 页开始
     st.session_state.doc = docs[0] if docs else None
@@ -334,7 +361,7 @@ def _run_batch_audit(files: list) -> None:
 
 def run_audit(doc: Document) -> list[AuditFinding]:
     """执行全部审查器，返回发现列表"""
-    auditors = _get_auditors(_rules_mtime())
+    auditors = _get_auditors(_config_mtime())
     progress_bar = st.empty().progress(0, "开始审查...")
 
     def on_progress(name, i, total):
@@ -605,12 +632,15 @@ with st.sidebar:
             use_container_width=True,
             help="把当前豁免写入工作目录的 .docauditignore，下次启动/CLI --exempt-file 自动生效",
         ):
-            save_exemptions(
+            _saved = save_exemptions(
                 EXEMPTION_FILE,
                 _exempt_keys,
                 st.session_state.get("findings") or [],
             )
-            st.success(f"已保存 {len(_exempt_keys)} 条豁免到 {EXEMPTION_FILE}")
+            if _saved:
+                st.success(f"已保存 {len(_exempt_keys)} 条豁免到 {EXEMPTION_FILE}")
+            else:
+                st.error(f"保存失败：无法写入 {EXEMPTION_FILE}（检查目录权限/磁盘空间）")
 
         # ── 清除豁免 ─────────────────────────────────────
         if st.button(
@@ -899,22 +929,25 @@ if st.session_state.doc and st.session_state.get("audit_completed"):
             }.get(finding.type.value, finding.type.value)
 
             # 用户文本渲染前必须转义 (红线 #2) — Streamlit 默认转义 HTML，此处防御性转义
-            _msg = _html.escape(finding.message or "")
+            _msg = _md_safe(_html.escape(finding.message or ""))
             with st.expander(
                 f"{sev_icon} [{type_label}] {_msg[:80]}{'...' if len(_msg) > 80 else ''}",
                 expanded=(finding.severity == FindingSeverity.ERROR),
             ):
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
-                    if finding.location:
-                        st.caption(f"📍 {finding.location}")
+                    _source = (finding.metadata or {}).get("source_file")
+                    _loc = finding.location or ""
+                    _display_loc = f"[{Path(_source).name}] {_loc}".strip() if _source else _loc
+                    if _display_loc:
+                        st.caption(f"📍 {_md_safe(_display_loc)}")
                     if finding.context:
                         st.code(finding.context, language=None)
                     if finding.suggestion:
-                        st.info(f"💡 {finding.suggestion}")
+                        st.info(f"💡 {_md_safe(finding.suggestion)}")
                 with col_b:
                     if finding.rule_id:
-                        st.caption(f"规则: {finding.rule_id}")
+                        st.caption(f"规则: {_md_safe(finding.rule_id)}")
                     st.caption(f"类型: {type_label}")
                     st.caption(f"严重度: {finding.severity.value}")
                     # 单条豁免按钮

@@ -6,7 +6,7 @@ services:
     image: erikvl87/languagetool:6.4  # 固定版本，避免 :latest 导致不可重现
     container_name: doc-audit-languagetool
     ports:
-      - "8010:8010"
+      - "127.0.0.1:8010:8010"  # 仅回环：不向局域网暴露语言服务
     environment:
       - langtool_languageModel=/ngrams
       - Java_Xmx=2g

@@ -11,6 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -24,6 +25,44 @@ _RULE_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-\d{3}(?:-[A-Z])?$")
 _BOOL_KEYS = ("仅中文页面", "大小写敏感", "排除括号内", "排除白名单", "仅首次出现")
 _BOOL_VALUES = {"true", "false", "1", "0", "yes", "no"}
 _TERM_KEYS = {"pattern", "preferred", "context", "severity"}
+# rules.md 可接受的参数键（2026-10-29 审查：未知键此前被静默塞进 params 后忽略，
+# 例如「最大字树」笔误导致声明值永不生效且零告警）
+_KNOWN_RULE_KEYS = frozenset(
+    {
+        # parser 直接识别的键
+        "suggestion",
+        "pattern",
+        "required_sections",
+        "title_range",
+        "body_range",
+        "max_chars",
+        "关键词",
+        "exempt_layouts",
+        "allowed_fonts",
+        # extract_auditor_config 的参数键（中文/英文别名）
+        "中文上限",
+        "max_chinese",
+        "英文上限",
+        "max_english",
+        "最大显式换行",
+        "max_newlines",
+        "最小对比度",
+        "大字最小对比度",
+        "大字字号阈值",
+        "最小标题字号",
+        "最大英文词数",
+        "最大中文字数",
+        # 布尔键（TERM-003 / TXT-REDUNDANT）
+        "仅中文页面",
+        "大小写敏感",
+        "排除括号内",
+        "排除白名单",
+        "仅首次出现",
+        # 语言服务地址
+        "languagetool_url",
+    }
+)
+_LOCAL_LT_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 # 无 check_type、无 pattern 但由 Auditor 内置参数驱动的规则（合法形态）
 _NATIVE_RULE_IDS = {"FMT-001", "FMT-002", "FMT-004", "CON-002"}
 
@@ -95,6 +134,13 @@ def validate_rules(rules_path: str | Path = "rules.md") -> ValidationResult:
             )
 
         if check_type == "regex":
+            # 运行时分支要求 category == "terminology"（custom_rules.audit），
+            # 否则每条 regex 规则都会退化成 SYS-ERROR（2026-10-29 审查）
+            if rule.category != "terminology":
+                result.errors.append(
+                    f"{rid}: check_type=regex 只能声明在「术语规则」章节"
+                    f"（当前章节: {rule.category}），运行时将不执行"
+                )
             pattern = rule.params.get("pattern")
             if not pattern:
                 result.errors.append(f"{rid}: regex 规则缺少 '模式:' (pattern)")
@@ -118,10 +164,50 @@ def validate_rules(rules_path: str | Path = "rules.md") -> ValidationResult:
     return result
 
 
+def _int_param(
+    rule, keys: tuple[str, ...], label: str, result: ValidationResult, minimum: int = 1
+) -> None:
+    """数值参数校验：必须可转整数且 >= minimum（2026-10-29 审查）。"""
+    for key in keys:
+        if key not in rule.params:
+            continue
+        try:
+            value = int(str(rule.params[key]).strip())
+        except (TypeError, ValueError):
+            result.errors.append(f"{rule.rule_id}: {label}（{key}）不是整数: {rule.params[key]!r}")
+            continue
+        if value < minimum:
+            result.errors.append(f"{rule.rule_id}: {label}（{key}）必须 >= {minimum}，实际 {value}")
+        return
+
+
 def _validate_params(rule, result: ValidationResult) -> None:
     """针对性数值/列表参数校验（不追求穷举，覆盖已知易错项）。"""
     rid = rule.rule_id
     params = rule.params
+
+    unknown = set(params) - _KNOWN_RULE_KEYS
+    if unknown:
+        result.warnings.append(
+            f"{rid}: 未知参数 {sorted(unknown)}（拼写错误或该检查不支持，运行时忽略）"
+        )
+
+    if "languagetool_url" in params:
+        url = str(params["languagetool_url"])
+        host = urlsplit(url).hostname
+        if host not in _LOCAL_LT_HOSTS:
+            result.errors.append(
+                f"{rid}: languagetool_url 仅允许本地服务（localhost/127.0.0.1/::1），"
+                f"收到 {url!r}（防止文档文本外发）"
+            )
+
+    _int_param(rule, ("max_chars",), "最大字数", result)
+    _int_param(rule, ("中文上限", "max_chinese"), "中文上限", result)
+    _int_param(rule, ("英文上限", "max_english"), "英文上限", result)
+    _int_param(rule, ("最大显式换行", "max_newlines"), "最大显式换行", result, minimum=0)
+    _int_param(rule, ("最小标题字号",), "最小标题字号", result)
+    _int_param(rule, ("最大英文词数",), "最大英文词数", result)
+    _int_param(rule, ("最大中文字数",), "最大中文字数", result)
 
     for key, label in (("title_range", "标题字号"), ("body_range", "正文字号")):
         if key in params and params[key] is None:
@@ -171,8 +257,13 @@ def _validate_params(rule, result: ValidationResult) -> None:
         if not sections:
             result.errors.append(f"{rid}: 必含章节列表为空（CON-002 将永远通过）")
 
-    if rid.startswith("CON-004") and "关键词" in params and not params["关键词"]:
-        result.errors.append(f"{rid}: 结论关键词列表为空（CON-004 将永不触发）")
+    if rid.startswith("CON-004"):
+        if "关键词" in params and not params["关键词"]:
+            result.errors.append(f"{rid}: 结论关键词列表为空（CON-004 将永不触发）")
+        if "exempt_layouts" in params and not params["exempt_layouts"]:
+            result.warnings.append(
+                f"{rid}: 豁免版式为空列表，运行时会回退内置默认（无法用 [] 清空豁免）"
+            )
 
 
 def _validate_bool_params(rule, result: ValidationResult) -> None:

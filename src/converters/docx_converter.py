@@ -9,6 +9,8 @@ from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Length
+from docx.table import Table as DocxTable
+from docx.text.paragraph import Paragraph as DocxParagraph
 
 from src.converters.base import BaseConverter
 from src.models.document import (
@@ -204,7 +206,15 @@ class _DocxNumberingResolver:
         if num_pr is not None:
             return num_pr
         try:
-            style_pPr = para.style._element.pPr
+            style = para.style
+            style_name = style.name or ""
+            style_pPr = style._element.pPr
+            # 标题样式的 numPr 是章节编号（1. / 2.1 等），不是项目符号；
+            # 旧实现无条件回退 → FMT-007 把标题当 bullet 逐页误报（2026-10-29 审查）
+            if HEADING_STYLE_RE.match(style_name):
+                return None
+            if style_pPr is not None and getattr(style_pPr, "outlineLvl", None) is not None:
+                return None
             if style_pPr is not None:
                 return style_pPr.numPr
         except Exception:
@@ -287,28 +297,18 @@ class DocxConverter(BaseConverter):
                         elements.append(elem)
 
             elif tag == "sdt":
-                # SDT 结构: sdtPr → sdtContent → sdtEndPr
-                # 只进入 sdtContent (sdtPr 仅含属性，不含内容段落)
-                # 注意: 嵌套 SDT (SDT 内含 SDT) 当前仅处理一层，罕见场景见 agents.md 已知陷阱 #6
-                for inner in child:
-                    inner_tag = _tag_name(inner)
-                    if inner_tag == "sdtContent":
-                        for item in inner:
-                            item_tag = _tag_name(item)
-                            if item_tag == "p":
-                                para = para_map.get(item)
-                                if para is not None:
-                                    elem = self._convert_paragraph(
-                                        para, style_resolver, numbering_resolver
-                                    )
-                                    if elem is not None:
-                                        elements.append(elem)
-                            elif item_tag == "tbl":
-                                tbl = table_map.get(item)
-                                if tbl is not None:
-                                    elem = self._convert_table(tbl)
-                                    if elem is not None:
-                                        elements.append(elem)
+                # SDT（内容控件）: 递归进入 sdtContent，段落/表格用 python-docx 包装器
+                # 重新绑定父节点。旧实现用 para_map.get(item) 查表，而 Document.paragraphs
+                # 不包含 SDT 内部段落 → 控件文本被静默丢弃（2026-10-29 审查 P1）。
+                for block_tag, item in _iter_sdt_content(child):
+                    if block_tag == "p":
+                        elem = self._convert_paragraph(
+                            DocxParagraph(item, doc), style_resolver, numbering_resolver
+                        )
+                    else:
+                        elem = self._convert_table(DocxTable(item, doc))
+                    if elem is not None:
+                        elements.append(elem)
 
         # 未解析嵌套内容提示 (仅日志，不改变解析行为)
         self._warn_unparsed_nested_content(doc)
@@ -733,6 +733,27 @@ class DocxConverter(BaseConverter):
             )
 
         return pages
+
+
+def _iter_sdt_content(container) -> list[tuple[str, object]]:
+    """递归取出 SDT 内容里的段落/表格元素（含嵌套 SDT，2026-10-29 审查）。
+
+    Returns:
+        [(tag, element)]，tag 为 "p" 或 "tbl"；element 为 lxml 节点，
+        调用方负责用 python-docx 的 Paragraph/Table 包装（需要父 Document）。
+    """
+    blocks: list[tuple[str, object]] = []
+    for child in container:
+        child_tag = _tag_name(child)
+        if child_tag in ("p", "tbl"):
+            blocks.append((child_tag, child))
+        elif child_tag == "sdtContent":
+            blocks.extend(_iter_sdt_content(child))
+        elif child_tag == "sdt":
+            for inner in child:
+                if _tag_name(inner) == "sdtContent":
+                    blocks.extend(_iter_sdt_content(inner))
+    return blocks
 
 
 def _tag_name(element) -> str:

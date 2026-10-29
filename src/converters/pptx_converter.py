@@ -503,11 +503,24 @@ class PptxConverter(BaseConverter):
                 except Exception:
                     fill_color = None  # bare-handler-ok — 异常填充结构，降级
 
+                # 合并单元格：被覆盖的格子不重复产出（否则同一文本多次审查），
+                # 原点记录 span 供 FMT-TABLE-FIT 按合并后几何估算（2026-10-29 审查）
+                if getattr(cell, "is_spanned", False):
+                    continue
+                colspan = rowspan = 1
+                try:
+                    if cell.is_merge_origin:
+                        colspan = max(1, int(cell.span_width))
+                        rowspan = max(1, int(cell.span_height))
+                except Exception:
+                    colspan = rowspan = 1  # bare-handler-ok — 旧版 python-pptx 无该属性
                 cells.append(
                     TableCell(
                         text=cell_text,
                         row=row_idx,
                         col=col_idx,
+                        colspan=colspan,
+                        rowspan=rowspan,
                         font_name=font_name,
                         font_size=font_size,
                         fill_color=fill_color,

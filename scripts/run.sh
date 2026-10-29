@@ -76,4 +76,9 @@ echo "  ║  按 Ctrl+C 停止服务                          ║"
 echo "  ╚══════════════════════════════════════════════╝"
 echo ""
 
+# 离线 PDF 红线 (2026-10-29): 在启动子进程前注入 HF 变量
+export HF_HUB_CACHE="${HF_HUB_CACHE:-$PROJECT_DIR/packages/hf_cache}"
+if [ -d "$PROJECT_DIR/packages/hf_cache" ]; then
+  export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+fi
 exec "$VENV_DIR/bin/python" -m streamlit run "$PROJECT_DIR/app.py"

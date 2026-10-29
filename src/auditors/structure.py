@@ -405,6 +405,9 @@ class StructureAuditor(BaseAuditor):
                     message=f"缺少必须的章节: {section}",
                     rule_id="CON-002",
                     location="全文",
+                    # context 参与 dedup_key：否则多个缺失章节同键，
+                    # 会被 AuditFinding.deduplicate() 折叠成一条（2026-10-29 审查）
+                    context=f"缺少章节: {section}",
                     suggestion=f"建议添加「{section}」章节",
                 )
             )

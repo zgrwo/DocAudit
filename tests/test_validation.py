@@ -19,8 +19,8 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def _rules_md(*rule_blocks: str) -> str:
-    return "# 结构规则\n\n" + "\n\n".join(rule_blocks) + "\n"
+def _rules_md(*rule_blocks: str, section: str = "# 结构规则") -> str:
+    return f"{section}\n\n" + "\n\n".join(rule_blocks) + "\n"
 
 
 def _rule(rule_id: str, *, severity="warning", check=None, extra: str = "") -> str:
@@ -73,14 +73,18 @@ class TestValidateRules:
         assert any("未知 check_type" in e for e in result.errors)
 
     def test_regex_rule_requires_pattern(self, tmp_path):
-        path = _write(tmp_path / "rules.md", _rules_md(_rule("TERM-001", check="regex")))
+        path = _write(
+            tmp_path / "rules.md", _rules_md(_rule("TERM-001", check="regex"), section="# 术语规则")
+        )
         result = validate_rules(path)
         assert any("缺少" in e and "模式" in e for e in result.errors)
 
     def test_invalid_regex(self, tmp_path):
         path = _write(
             tmp_path / "rules.md",
-            _rules_md(_rule("TERM-001", check="regex", extra="- 模式: '[unclosed'")),
+            _rules_md(
+                _rule("TERM-001", check="regex", extra="- 模式: '[unclosed'"), section="# 术语规则"
+            ),
         )
         result = validate_rules(path)
         assert any("正则无法编译" in e for e in result.errors)
@@ -129,7 +133,8 @@ class TestValidateRules:
                     "TERM-003",
                     check="regex",
                     extra="- 模式: '[A-Z]{2,}'\n- 仅首次出现: maybe",
-                )
+                ),
+                section="# 术语规则",
             ),
         )
         result = validate_rules(path)
@@ -244,3 +249,69 @@ class TestRulesValidateCli:
         result = self._run_cli("rules", "list", "--rules", str(tmp_path / "nope.md"))
         assert result.returncode == 1
         assert "未解析到规则" in result.stdout
+
+
+class TestParamValidationRegressions:
+    """2026-10-29 深度审查回归：此前 5 类参数错误全部 exit 0。"""
+
+    def test_fmt003_non_integer_flagged(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("FMT-003", check="per_page_char_limit", extra="- 最大字数: 二百")),
+        )
+        result = validate_rules(path)
+        assert any("不是整数" in e for e in result.errors), result.errors
+
+    def test_unknown_param_key_warns(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("FMT-003", check="per_page_char_limit", extra="- 最大字树: 111")),
+        )
+        result = validate_rules(path)
+        assert any("未知参数" in w for w in result.warnings), result.warnings
+
+    def test_str001_non_integer_flagged(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("STR-001", check="duplicate_title", extra="- 最小标题字号: 超大")),
+        )
+        result = validate_rules(path)
+        assert any("最小标题字号" in e for e in result.errors), result.errors
+
+    def test_negative_max_words_flagged(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("STR-004", check="title_length", extra="- 最大英文词数: -5")),
+        )
+        result = validate_rules(path)
+        assert any("最大英文词数" in e for e in result.errors), result.errors
+
+    def test_exempt_layouts_empty_warns(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("CON-004", check="conclusion_section", extra="- 豁免版式: []")),
+        )
+        result = validate_rules(path)
+        assert any("豁免版式" in w for w in result.warnings), result.warnings
+
+    def test_external_languagetool_url_flagged(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(
+                _rule(
+                    "CON-001",
+                    check="numeric_cross_reference",
+                    extra="- languagetool_url: http://192.168.1.9:8010/v2",
+                )
+            ),
+        )
+        result = validate_rules(path)
+        assert any("仅允许本地" in e for e in result.errors), result.errors
+
+    def test_regex_outside_terminology_flagged(self, tmp_path):
+        path = _write(
+            tmp_path / "rules.md",
+            _rules_md(_rule("CON-009", check="regex", extra="- 模式: foo"), section="# 内容规则"),
+        )
+        result = validate_rules(path)
+        assert any("术语规则" in e for e in result.errors), result.errors

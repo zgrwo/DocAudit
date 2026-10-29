@@ -61,8 +61,8 @@ git tag -a vX.Y.Z -m "DocAudit vX.Y.Z"
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `0.2.0`（2026-10-29） |
-| 测试 | 597 passed, 2 skipped（599 collected，~63s） |
+| 版本 | `0.2.1`（2026-10-29，深度审查修复版） |
+| 测试 | 617 passed, 2 skipped（627 collected，~63s） |
 | 覆盖率 | 87%（门槛 82%） |
 | ruff / 门禁 / 配置校验 | 全绿 |
 | wheel 构建 | 已验证可离线构建（docaudit-0.2.0-py3-none-any.whl，41 文件，含 src/） |

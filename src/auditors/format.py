@@ -80,6 +80,9 @@ def _estimate_text_height(
     text: str, font_size: float, inner_w: float, line_spacing: float | None = None
 ) -> float:
     """估算一段文本在给定内宽下的高度 (pt)。"""
+    # 显式 0 字号（异常输入）会让 inner_w / (font_size*0.5) 除零，
+    # 进而使整份格式审查被替换为一条 SYS-ERROR（2026-10-29 审查）
+    font_size = font_size if font_size and font_size > 0 else 10.5
     units = 0.0
     explicit_lines = 1
     for ch in text:
@@ -1147,12 +1150,14 @@ class FormatAuditor(BaseAuditor):
             estimated_total = 0.0
 
             for row_idx, row in enumerate(elem.tables):
-                avail_h = row_heights[row_idx] if row_idx < len(row_heights) else 0.0
                 needed_h = 0.0
                 for cell in row:
                     if cell.col >= len(col_widths):
                         continue
-                    col_w = col_widths[cell.col]
+                    # 合并单元格：可用宽度按 colspan 累加（2026-10-29 审查；
+                    # 旧实现按单列宽估算 → 合并表头必然误报列宽不足）
+                    colspan = max(1, int(getattr(cell, "colspan", 1) or 1))
+                    col_w = sum(col_widths[cell.col : cell.col + colspan])
                     if col_w <= 0:
                         continue
                     margin_l = cell.margin_left if cell.margin_left is not None else default_margin
@@ -1174,6 +1179,12 @@ class FormatAuditor(BaseAuditor):
                         if prev is None or token_w > prev[0]:
                             narrow_cols[cell.col] = (token_w, inner_w)
 
+                # 行高按 rowspan 累加（合并单元格跨多行）
+                avail_h = 0.0
+                if row_heights:
+                    first_cell = row[0] if row else None
+                    rowspan = max(1, int(getattr(first_cell, "rowspan", 1) or 1))
+                    avail_h = sum(row_heights[row_idx : row_idx + rowspan])
                 if avail_h > 0:
                     estimated_total += max(avail_h, needed_h)
                     if needed_h > avail_h * 1.15 and needed_h - avail_h >= 6.0:

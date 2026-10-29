@@ -2,7 +2,7 @@
 
 > 本文档是**一份可直接投喂给任意 AI 审查代理的 Prompt 模板**，用于对本项目的任何变更（PR / 提交 / 发版前全量）做一次"先想后写、实证优先、杜绝假阳性"的深度审查。
 > 配套治理规则见 [documentation.md](documentation.md)；项目宪法见 [AGENTS.md](../../AGENTS.md)；审查产出报告一律归档 `logs/reports/`（`logs/` 已 gitignore，**不入库**）。
-> **事实基准**：文中数字（26 条规则 / 19 个注册检查 / 529 用例 / 21 测试文件 / CI 3 job）已于 2026-10-29 逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
+> **事实基准**：文中数字（26 条规则 / 19 个注册检查 / 30 项内置检查 / 627 用例 / 23 测试文件 / CI 3 job）已于 2026-10-29 逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
 
 ---
 
@@ -49,7 +49,7 @@
 
 ### 3.1 一句话定位
 
-本地离线文档审查系统：PPTX/DOCX/PDF/MD → 四格式转换到统一 Document 模型 → 26 条配置驱动规则 + 23 项内置检查 → HTML/JSON/CSV/SARIF 报告。半导体场景（术语密度高、中英混排、数值/图表编号严格）。**完全离线是发行红线**：文档不上传任何服务器、无遥测、LanguageTool 只连本地服务（Docker 8010 / Java 8011 / 纯 Python 内置三层降级）。规则数与函数签名以 [api-reference.md](../specification/api-reference.md) 为**唯一数字基准**。
+本地离线文档审查系统：PPTX/DOCX/PDF/MD → 四格式转换到统一 Document 模型 → 26 条配置驱动规则 + 30 项内置检查 → HTML/JSON/CSV/SARIF 报告。半导体场景（术语密度高、中英混排、数值/图表编号严格）。**完全离线是发行红线**：文档不上传任何服务器、无遥测、LanguageTool 只连本地服务（Docker 8010 / Java 8011 / 纯 Python 内置三层降级）。规则数与函数签名以 [api-reference.md](../specification/api-reference.md) 为**唯一数字基准**。
 
 ### 3.2 架构分层（红线）
 
@@ -74,7 +74,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 ### 3.3 规则体系与两步注册（决定 Auditor 层审查重点）
 
 - **rules.md 是规则配置唯一入口**：26 条 `##` 规则（STR-001~008 结构 / FMT-001~008 格式 / TERM-001~003 术语 / CON-001~004 及 003-A/B/C 内容）。**禁止在代码中硬编码规则参数**（字体列表、字号范围、关键词、阈值）——一切阈值从 `extract_auditor_config()` 获取。
-- **23 项内置检查**不经 rules.md 声明与 `CHECK_REGISTRY` 调度（FMT-MIXED-001~003 / PUNCT-001~010 / TXT-* / FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/TABLE-FIT/FOOTER/IMAGE/CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR / SYS-ERROR），不参与 26 条计数，清单见 rules.md 末尾表格。
+- **30 项内置检查**不经 rules.md 声明与 `CHECK_REGISTRY` 调度（FMT-MIXED-001~003 / PUNCT-001~010 / TXT-* / FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/TABLE-FIT/FOOTER/IMAGE/CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR / SYS-ERROR），不参与 26 条计数，清单见 rules.md 末尾表格。
 - **新增 check_type 两步注册**（2026-10-29 起；由 `CustomRulesAuditor.validate_dispatch()` + `tests/test_rules.py::TestCheckRegistry` 双重守护）：
   1. Auditor 方法实现（`_check_*`）
   2. `CHECK_REGISTRY` 增加一行 `CheckSpec`（`check_type → (auditor_key, method, per_page, pptx_only, skip_key)`，当前 19 条目）
@@ -86,7 +86,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 ### 3.4 验证体系（黄金测试 + 门禁）
 
 ```
-① 全量测试      pytest tests/ -v（529 用例 / 21 文件，2026-10-29 快照，当轮重测）
+① 全量测试      pytest tests/ -v（627 用例 / 23 文件，2026-10-29 快照，当轮重测）
 ② 黄金测试      tests/test_golden_paths.py — Python API = 真实 CLI subprocess = AppTest WebUI
                 三路径对同一输入必须产生完全相同的发现
 ③ DISPATCH 验证 python -c "from src.auditors.custom_rules import CustomRulesAuditor; \
@@ -100,7 +100,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
                 （契约以 tests/test_cli_exit_codes.py 实测为准）
 ```
 
-- CI（`.github/workflows/ci.yml`，仅此一个工作流）：`test`（矩阵 Python 3.10–3.14 + 覆盖率 `--cov-fail-under=70`，src 基线 84% / 2026-08-19 实测 + ② + ③ + rules 解析 ≥20 断言）、`lint`（ruff check + format）、`lockfile`（**windows-latest 专属**：三份 requirements-*.txt `pip install --dry-run` 解析自洽）。
+- CI（`.github/workflows/ci.yml`，仅此一个工作流）：`test`（矩阵 Python 3.10–3.14 + 覆盖率 `--cov-fail-under=82`，src 基线 87% / 2026-10-29 实测 + ② + ③ + rules 解析 ==26 断言）、`lint`（ruff check + format）、`lockfile`（**windows-latest 专属**：三份 requirements-*.txt `pip install --dry-run` 解析自洽）。
 - **黄金测试口径警示**：三路径共享同一 pipeline——黄金测试只能拦截"封装路径分歧"（app.py 私自实现、CLI 绕过 pipeline），**不能证明引擎/审计器语义正确**。语义锚点是 test_auditors / test_rule_coverage / test_edge_cases / test_contrast 等定向测试。
 
 ### 3.5 治理红线速查
@@ -182,7 +182,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 
 | Job | 内容 | 审查要点 |
 | :--- | :--- | :--- |
-| `test` | 矩阵 3.10–3.14；`pytest --cov=src --cov-fail-under=70`；DISPATCH 验证；rules 解析 ≥20 | 失败是否真由变更引起；`>=20` 的宽松断言拦不住规则数缓慢下降（26→24 仍 >20）；覆盖率 70 门槛远低于 84% 基线，新代码无测试也能绿 |
+| `test` | 矩阵 3.10–3.14；`pytest --cov=src --cov-fail-under=82`；DISPATCH 验证；rules 解析 ==26 | 失败是否真由变更引起；`==26` 精确断言（2026-10-29 由 `>=20` 收紧）；覆盖率 82 门槛低于 87% 基线，新代码无测试也能绿 |
 | `lint` | ruff check + format（钉 0.16.3） | lint 只拦风格，拦不住语义——语义面全靠测试 + 本模板维度 D/F/H 人工覆盖 |
 | `lockfile` | windows-latest；core/pdf/full 三 profile dry-run 解析 | 本地改依赖必须跑 gen_requirements_lock.py 重生成而非手改锁文件；非 Windows 平台解析失败属已知平台绑定（tooling-pitfalls #6d） |
 
@@ -277,7 +277,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 | 黄金测试当语义背书 | 三路径共享 pipeline，只能证明封装一致；宣称"黄金测试通过 = 功能正确"的报告表述是错的 | 双边同错全绿 |
 | 双重执行被 dedup 掩盖 | `audit()` 直调 ∩ `_DISPATCH` 交集排查（C4） | 同一检查跑两次，性能与语义两损 |
 | SYS-ERROR 静默化 | 规则执行异常被吞而非转 SYS-ERROR finding | 审查结果"看起来干净"实则部分检查没跑 |
-| 宽松断言假绿 | CI 断言 `len(rules) >= 20`（实际 26）；覆盖率 70 门槛（实际基线 84%）——这些下限只拦崩塌，拦不住缓慢腐化 | 腐化无告警 |
+| 宽松断言假绿 | CI 断言 `len(rules) == 26`；覆盖率 82 门槛（基线 87%）——这些下限只拦崩塌，拦不住缓慢腐化 | 腐化无告警 |
 | 收集不完整当通过 | pytest 收集带 error（如缺 streamlit）时部分用例根本没跑——报告引用用例数前先确认 `pytest --collect-only` 无 error | 门禁宣称失真 |
 
 **主动反例**：把某条规则实现故意改错（如 STR-002 编号连续性阈值 +1），`pytest tests/` 必须有测试 **FAIL**；若全绿，说明该规则无语义测试锚定，按 P1 报"测试缺口"。
@@ -307,7 +307,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 | 陷阱 | 防控 |
 | :--- | :--- |
 | 把历史已修复项当未修复复报 | CHANGELOG「Unreleased → Fixed」登记了大量已修复项（DOCX 样式级回退、CON-004 格式守卫、SYS-ERROR 不折叠、缓存串档等）。引用旧问题前先对当前 HEAD 重验源码 |
-| 引用过期数字 | 本文档 3.4 节数字是 2026-10-29 快照（529 用例 / 21 文件 / 19 注册检查 / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
+| 引用过期数字 | 本文档 3.4 节数字是 2026-10-29 快照（627 用例 / 23 文件 / 19 注册检查 / 覆盖率 88%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
 | 文档表格当代码事实 | api-reference 的 DISPATCH 标志列、documentation.md 的同步链均为人工维护文档——**逐项与源码对照**，表格曾漂移 |
 | 把门禁全绿当语义正确背书 | 本项目多轮 P0 均在门禁全绿状态下合入；全绿只是下限 |
 | 生成物冒充源码 | `build/lib/` 内有 src 副本、`.venv` 有整套第三方库——grep 命中两者 = 扫描范围错误，重跑限定路径的扫描 |

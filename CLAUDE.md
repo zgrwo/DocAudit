@@ -75,7 +75,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `docs/` 分区：`governance/`（治理与陷阱清单）、`specification/`（规格与签名 SSOT）、`user-manual/`（用户手册）；`.venv`、`build/`、`docaudit.egg-info/`、`__pycache__/` 为生成物，扫描/审查时排除
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（599 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（627 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 配置门禁与豁免：改 rules.md/glossary/vocab 后跑 `python src/cli.py rules validate`；`.docauditignore` 是团队豁免基线（可入库），Web UI 保存、CLI `--exempt-file` 读取
 - [ ] 修改模块边界前必读 `docs/specification/api-reference.md`（签名唯一信源）
@@ -100,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 599 个用例（23 个文件，含黄金测试）
+├── tests/                            # 627 个用例（23 个文件，含黄金测试）
 ├── docs/                             # 治理与规范文档（governance / specification / user-manual）
 ├── skills/                           # Skill 定义
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
@@ -163,7 +163,7 @@ DocAudit/
 
 ## 测试
 
-599 个用例，23 个文件：
+627 个用例，23 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -200,7 +200,7 @@ DocAudit/
 | 场景 | 命令 |
 | :--- | :--- |
 | 安装 | `pip install .[all]` |
-| 运行测试 | `pytest tests/ -v`（599 用例；`-m "not slow"` 为 ~40s 快测子集） |
+| 运行测试 | `pytest tests/ -v`（627 用例；`-m "not slow"` 为 ~40s 快测子集） |
 | 启动 Web UI | `streamlit run app.py` |
 | CLI 审查 | `python src/cli.py report.pptx --rules rules.md` |
 | CI 门禁阈值 | `--fail-on {error,warning,info,none}`（默认 error） |
@@ -236,6 +236,9 @@ DocAudit/
 | Windows pytest 清理 symlink 报错 | 1 | %TEMP% 下 pytest-current 清理 PermissionError 致退出码 1（环境性）；CI ubuntu 不受影响 |
 | DOCX 标题层级盲区 | 1 | python-docx add_heading 只写样式定义（styles.xml outlineLvl），段落级 w:pPr 为空 → level=None → 标题类检查/语义分页对样式型标题静默失效；2026-08 补样式级回退 + 样式名正则 |
 | 脚本双轨制失配 | 1 | setup_offline.sh 独立重写未同步 .py 的项目根语义（路径指向 scripts/）且零测试 → macOS/Linux 离线流程失败；2026-08 补 PROJECT_DIR 派生 |
+| 豁免键缺来源 | 1 | exemption_key 只含 dedup/message/location，批量两文件同页同文共用键，一条豁免压制全部文件；2026-10-29 把 metadata.source_file 纳入哈希 |
+| 依赖导入期常量 | 1 | HF_HUB_OFFLINE/CACHE 在 huggingface_hub 导入时冻结，先 import docling 再 setenv 无效 → 离线 PDF 仍联网；2026-10-29 改为模块导入期注入 |
+| 文档级正则误用 \b | 1 | 汉字属 \w，`\b\d{4}-…` 在「自2026-10-29起」不成立；2026-10-29 改 (?<!\d) 边界 |
 | 运行时离线环境缺失 | 1 | HF_HUB_OFFLINE/CACHE 只在安装脚本设置，运行时入口（pdf_converter）未注入 → 离线 PDF 转换尝试联网；2026-08 在 convert() 注入 |
 
 ### 关键设计决策

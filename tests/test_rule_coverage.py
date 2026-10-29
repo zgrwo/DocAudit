@@ -404,3 +404,30 @@ class TestFmt007BulletConsistency:
         findings = fa._check_bullet_consistency(d.pages[0], d)
         assert len(findings) == 1
         assert findings[0].rule_id == "FMT-007"
+
+
+class TestRequiredSectionsNotCollapsed:
+    """2026-10-29 深度审查回归：多个缺失章节曾被 dedup_key 折叠成一条。"""
+
+    def test_missing_sections_each_kept(self):
+        from src.models.finding import AuditFinding
+
+        doc = _doc(
+            [
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame", paragraphs=[Paragraph(text="正文没有章节。")]
+                        )
+                    ],
+                )
+            ]
+        )
+        auditor = StructureAuditor(
+            config={"required_sections": ["概述", "工艺流程", "关键参数", "结论"]}
+        )
+        findings = auditor._check_required_sections(doc)
+        assert len(findings) == 4, [f.message for f in findings]
+        assert len({f.dedup_key for f in findings}) == 4, "各缺失章节的 dedup_key 必须不同"
+        assert len(AuditFinding.deduplicate(findings)) == 4

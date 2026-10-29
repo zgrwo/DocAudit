@@ -5,7 +5,9 @@
 
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from src import __version__
 from src.models.document import Document
@@ -24,6 +26,7 @@ _LEVEL_BY_SEVERITY = {
 }
 
 
+@lru_cache(maxsize=256)
 def _artifact_uri(path: str | None, base: str | Path | None = None) -> str:
     """将文件路径转为 SARIF artifactLocation.uri。
 
@@ -36,7 +39,9 @@ def _artifact_uri(path: str | None, base: str | Path | None = None) -> str:
     p = Path(path)
     if base is not None:
         try:
-            return p.resolve().relative_to(Path(base).resolve()).as_posix()
+            rel = p.resolve().relative_to(Path(base).resolve()).as_posix()
+            # 相对 URI 同样必须编码：空格/中文/`#`/`%` 否则非法或错指文件
+            return quote(rel, safe="/")
         except (OSError, ValueError):
             pass  # 不在基准目录下或路径无效 → 回退 file URI
     try:

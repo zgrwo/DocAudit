@@ -334,7 +334,7 @@ class TestAuxiliaryReview:
         doc = _make_doc("正文")
         doc.auxiliary_elements.append(self._aux("header", "使用FinFET工艺。"))
         findings = auditor.audit(doc)
-        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "FMT-MIXED-002"]
+        hits = [f for f in findings if f.page_index is None and f.rule_id == "FMT-MIXED-002"]
         assert hits
         assert hits[0].location == "页眉"
 
@@ -342,7 +342,7 @@ class TestAuxiliaryReview:
         doc = _make_doc("正文")
         doc.auxiliary_elements.append(self._aux("footer", "kind of 说明"))
         findings = auditor.audit(doc)
-        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "VOCAB-REJECT"]
+        hits = [f for f in findings if f.page_index is None and f.rule_id == "VOCAB-REJECT"]
         assert hits
         assert hits[0].location == "页脚"
 
@@ -350,10 +350,65 @@ class TestAuxiliaryReview:
         doc = _make_doc("正文")
         doc.auxiliary_elements.append(self._aux("footnote", "注意：这是脚注内容！！"))
         findings = auditor.audit(doc)
-        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "PUNCT-001"]
+        hits = [f for f in findings if f.page_index is None and f.rule_id == "PUNCT-001"]
         assert hits
         assert hits[0].location == "脚注"
 
     def test_no_auxiliary_no_neg_page_findings(self, auditor):
         findings = auditor.audit(_make_doc("正文内容。"))
-        assert all(f.page_index != -1 for f in findings)
+        assert all(f.page_index is not None for f in findings)
+
+
+class TestCjkBoundaryRegressions:
+    """2026-10-29 深度审查回归：汉字紧邻数字时 \\b 失效。"""
+
+    def test_date_format_flagged_when_cjk_adjacent(self, auditor):
+        doc = _make_doc("自2026-10-29起生效，发布日期 2026年10月29日。")
+        findings = auditor.audit(doc)
+        assert any(f.rule_id == "PUNCT-008" for f in findings), findings
+
+    def test_iso_date_adjacent_cjk_not_a_range(self, auditor):
+        """日期连字符不得被 PUNCT-009 当范围连接符。"""
+        doc = _make_doc("自2026-10-29起，量程3~5mm。")
+        findings = auditor.audit(doc)
+        assert not any(f.rule_id == "PUNCT-009" for f in findings), findings
+
+    def test_unit_spacing_flagged_when_cjk_adjacent(self, auditor):
+        doc = _make_doc("厚度为10mm的薄膜，另一处厚度 10 mm。")
+        findings = auditor.audit(doc)
+        assert any(f.rule_id == "PUNCT-010" for f in findings), findings
+
+    def test_footer_not_counted_as_duplicate_sentence(self, auditor):
+        doc = _make_doc("第一页正文内容。", "第二页正文内容。")
+        footer = PageElement(
+            type="text_frame",
+            placeholder_type="footer",
+            paragraphs=[Paragraph(text="本文件为内部资料，请勿外传。")],
+        )
+        for page in doc.pages:
+            page.elements.append(footer)
+        findings = auditor.audit(doc)
+        assert not any(f.rule_id == "TXT-DUP-SENTENCE" for f in findings), findings
+
+
+class TestLanguageToolBatching:
+    """2026-10-29 深度审查 P1 回归：逐段 HTTP → 同语言合批 + 段级缓存。"""
+
+    def test_one_request_per_language_and_cache(self, auditor):
+        calls = []
+
+        class FakeClient:
+            is_available = True
+
+            def check(self, text, language=None):
+                calls.append((language, text))
+                return []
+
+        auditor.lt_client = FakeClient()
+        text = "这是中文句子，含FinFET与TSV工艺参数。"
+        auditor._check_text(text, 0, "第 1 页")
+        first = len(calls)
+        assert first <= 2, f"同页同语言应合并为至多 1 次请求，实际 {first}"
+        # 同样的段再次出现（下一页/模板句）→ 命中缓存，零新增请求
+        auditor._check_text(text, 1, "第 2 页")
+        assert len(calls) == first

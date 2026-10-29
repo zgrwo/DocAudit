@@ -43,9 +43,12 @@ def venv_python() -> Path:
     return venv_dir() / "bin" / "python"
 
 
-def run(cmd, cwd=None) -> int:
-    """运行子进程并继承标准输入输出（日志与 Ctrl+C 自然生效）。"""
-    return subprocess.run([str(a) for a in cmd], cwd=str(cwd) if cwd else None).returncode
+def run(cmd, cwd=None, env=None) -> int:
+    """运行子进程并继承标准输入输出（日志与 Ctrl+C 自然生效）。
+
+    env: 可选环境变量字典（用于向 streamlit 子进程注入 HF_* 离线变量）。
+    """
+    return subprocess.run([str(a) for a in cmd], cwd=str(cwd) if cwd else None, env=env).returncode
 
 
 def run_quiet(cmd, cwd=None) -> bool:

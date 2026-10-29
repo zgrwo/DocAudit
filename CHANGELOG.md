@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-29
+
+深度审查修复版（P0 ×1 / P1 ×8，含发行红线与静默失效）。**627 个测试用例（23 个文件）**，
+覆盖率 **88%**；新增回归用例覆盖全部修复点。
+
+### Fixed
+
+- **P0 离线红线：PDF 首次转换仍会联网** —— `HF_HUB_OFFLINE`/`HF_HUB_CACHE` 是 huggingface_hub
+  的**导入期常量**，旧实现先 import docling 再注入环境变量，两个常量已被冻结为用户默认值；
+  `packages/hf_cache` 预下载模型因此不生效。现在在 `pdf_converter` 模块导入时即注入，
+  `scripts/run.py`/`run.sh` 也在拉起 Streamlit 前下发变量；子进程实测 `HF_HUB_CACHE` 已指向项目缓存。
+- **P1 豁免键跨文件碰撞** —— `exemption_key` 现纳入来源文件（basename），批量下两文件的同类发现
+  不再共用键；Web UI 不再改写 location（改由显示层拼来源），UI/CLI 计算同一函数、语义一致。
+- **P1 豁免文件编码** —— `.docauditignore` 读取增加 utf-8-sig → gbk → replace 回退，
+  GBK/带 BOM 文件不再抛未捕获 `UnicodeDecodeError`（CLI 零报告崩溃）或被当损坏后静默失效；
+  `save_exemptions` 返回 bool，Web UI 保存失败会显示错误而非「已保存」。
+- **P1 CSV 落盘换行** —— Windows 文本模式把 `\r\n` 再翻译为 `\r\r\n`，落盘 CSV 出现空记录；
+  改为二进制写入（`write_bytes`），回读行数 = 发现数 + 1。
+- **P1 文档级标点检查在中文紧邻数字时失效** —— PUNCT-008/009/010 的 `\b`/`\w` 边界在汉字旁不成立：
+  `自2026-10-29起` 漏报日期格式混用、日期连字符被误报范围混用、`厚度为10mm` 漏报单位空格混用。
+  改为 `(?<!\d)`/`(?<![0-9A-Za-z_.])` 边界并扩大日期掩码。
+- **P1 CON-002 多章节缺失被去重折叠** —— 多个缺失章节的 finding 现带 `context`（章节名），
+  4 条缺失 → 4 条报告，不再只留第一条。
+- **P1 DOCX 内容控件（SDT）文本被静默丢弃** —— 旧实现用 `para_map` 查 SDT 内段落（`Document.paragraphs`
+  不含），改为 `Paragraph/Table(item, doc)` 包装并递归处理嵌套 SDT。
+- **P1 配置校验放行 5 类参数错误** —— parser 不再把非法「最大字数」静默改写为 200；
+  validation 新增整数/正数校验（FMT-003/004、STR-001/004）、未知参数键告警、
+  `languagetool_url` 本地白名单、regex 规则章节归属校验、`豁免版式: []` 提示。
+- **P1 LanguageTool 逐段 HTTP** —— 同页同语言合并为 1 次请求 + 文档级段缓存；
+  技术页 17 次/页的请求量降到 ≤2 次/页。
+- **P2 批量修复** —— 辅助文本 `page_index=-1` 哨兵改为 `None`（不再显示「第 0 页」）；
+  0 字号不再触发除零导致整份格式审查变 SYS-ERROR；FMT-TABLE-FIT 按 colspan/rowspan 累加几何；
+  DOCX 标题样式编号不再被当项目符号；重复句/近似页比较排除页眉页脚；SARIF 相对 URI 百分号编码
+  与路径规范化缓存；LanguageTool stderr 改 DEVNULL、jar 缓存目录改用户目录并容错；
+  Streamlit 报告文本增加 Markdown 中和（防图片/链接外联）；页面豁免改集合命中；
+  审计器缓存键纳入 glossary/vocab mtime；`save_exemptions` 失败可见。
+- **文档** —— 内置检查数 23→30；术语表 45+/20 条 → 40 条（19/4/17）；删除不存在的
+  「可配置处理超时」声明；api-reference 修正 FormatAuditor 配置键清单与豁免签名；
+  审查 Prompt 的 CI 事实（覆盖率门槛/规则断言/基线）同步；handoff 基线数字自相矛盾修正。
+
 ## [0.2.0] - 2026-10-29
 
 首个功能完整发行版（0.1.0 → 0.2.0）。汇总 2026-10-28~29 四个批次：质量复核整改（R-01~R-24）、
@@ -12,8 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 增强迭代（DOCX 列表/报告统计/exemption_key/--fail-on/分页）、Code Scanning 与工程化
 （`--sarif-base`/pre-commit/性能基线/覆盖率补强）。
 
-**发行基线**：**599 个测试用例（23 个文件）** · 覆盖率 **87%** · ruff 全绿 ·
-26 条配置规则 + 23 项内置检查 · 报告 HTML/JSON/CSV/SARIF · 完全离线。
+**发行基线**：**627 个测试用例（23 个文件）** · 覆盖率 **88%** · ruff 全绿 ·
+26 条配置规则 + 30 项内置检查 · 报告 HTML/JSON/CSV/SARIF · 完全离线。
 
 ### Added
 

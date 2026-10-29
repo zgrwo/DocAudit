@@ -1,6 +1,6 @@
 # DocAudit — 项目规格文档
 
-> 版本：0.2.0 | 最后更新：2026-10-29 | 状态：Alpha 迭代中
+> 版本：0.2.1 | 最后更新：2026-10-29 | 状态：Alpha 迭代中
 > 事实唯一入口：**规则以 [rules.md](../../rules.md) 为唯一入口**，测试清单/数字以 [AGENTS.md](../../AGENTS.md) 为准。
 > 接口签名 → [api-reference.md](api-reference.md) · 用户操作 → [user-manual.md](../user-manual/user-manual.md)
 

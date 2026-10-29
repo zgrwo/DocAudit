@@ -38,14 +38,29 @@ DEFAULT_EXEMPTION_FILE = ".docauditignore"
 _FORMAT_VERSION = 1
 
 
+def _read_text_with_fallback(path: Path) -> str:
+    """utf-8-sig → gbk → replace（与 rules/glossary/vocab 加载器一致）。
+
+    2026-10-29 深度审查修复：豁免文件原只按 utf-8 读取，中文 Windows 记事本/
+    PowerShell 保存的 GBK 文件会抛未捕获 UnicodeDecodeError（CLI 零报告退出、
+    Web UI 启动失败）；带 BOM 则 json 解析失败被当损坏、豁免全部静默失效。
+    """
+    for encoding in ("utf-8-sig", "gbk"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 def load_exemptions(path: str | Path = DEFAULT_EXEMPTION_FILE) -> set[str]:
     """读取豁免键集合。缺失/损坏文件返回空集合（fail-open 到"多报"）。"""
     p = Path(path)
     if not p.exists():
         return set()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
+        data = json.loads(_read_text_with_fallback(p))
+    except (OSError, ValueError) as e:  # UnicodeDecodeError 是 ValueError 子类
         logger.warning("豁免文件读取失败，忽略其内容: %s — %s", p, e)
         return set()
     return _extract_keys(data)
@@ -55,13 +70,16 @@ def save_exemptions(
     path: str | Path,
     keys: Iterable[str],
     findings: list[AuditFinding] | None = None,
-) -> None:
+) -> bool:
     """把豁免键写入文件 (附带 finding 元数据便于人工评审)。
 
     Args:
         path: 输出路径
         keys: 要保留的 exemption_key 集合
         findings: 可选，用于补齐 rule_id/location/message 元数据
+
+    Returns:
+        True = 写入成功；False = 写入失败（调用方必须提示用户，不能显示「已保存」）
     """
     key_set = {str(k) for k in keys}
     by_key = {f.exemption_key: f for f in (findings or [])}
@@ -92,12 +110,14 @@ def save_exemptions(
             encoding="utf-8",
         )
         os.replace(tmp, p)
+        return True
     except OSError as e:
         logger.warning("豁免文件写入失败: %s — %s", p, e)
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
             pass  # bare-handler-ok — 清理临时文件失败不影响主流程
+        return False
 
 
 def apply_exemptions(

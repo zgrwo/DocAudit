@@ -5,6 +5,7 @@
   run.bat --check     - 只做健康检查，不启动 Web
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,7 +85,14 @@ def main(argv):
             "按 Ctrl+C 或关闭此窗口停止服务",
         ]
     )
-    common.run([venv_py, "-m", "streamlit", "run", str(root / "app.py")], cwd=root)
+    # 离线 PDF 红线 (2026-10-29): HF_* 是 huggingface_hub 导入期常量，
+    # 必须在 streamlit 子进程启动前注入，而不是等到 pdf_converter 里注入。
+    hf_cache = root / "packages" / "hf_cache"
+    env = os.environ.copy()
+    env.setdefault("HF_HUB_CACHE", str(hf_cache))
+    if hf_cache.is_dir():
+        env.setdefault("HF_HUB_OFFLINE", "1")
+    common.run([venv_py, "-m", "streamlit", "run", str(root / "app.py")], cwd=root, env=env)
     print()
     print("  DocAudit 已停止。")
     common.pause()

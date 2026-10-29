@@ -145,3 +145,49 @@ class TestCliExemptFile:
         assert path.exists()
         assert not (tmp_path / ".docauditignore.tmp").exists()
         assert load_exemptions(path) == {"abc"}
+
+
+class TestReviewRegressions:
+    """2026-10-29 深度审查回归：编码/来源键/保存失败可见。"""
+
+    def test_load_gbk_file(self, tmp_path):
+        findings = [_finding()]
+        path = tmp_path / ".docauditignore"
+        save_exemptions(path, {f.exemption_key for f in findings}, findings)
+        gbk = tmp_path / "gbk.json"
+        gbk.write_bytes(path.read_text(encoding="utf-8").encode("gbk"))
+        # GBK 文件不得抛 UnicodeDecodeError（旧实现会让 CLI 零报告退出）
+        assert load_exemptions(gbk) == {f.exemption_key for f in findings}
+
+    def test_load_utf8_bom_file(self, tmp_path):
+        findings = [_finding()]
+        path = tmp_path / ".docauditignore"
+        save_exemptions(path, {f.exemption_key for f in findings}, findings)
+        bom = tmp_path / "bom.json"
+        bom.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+        # 带 BOM 不得被当损坏（旧实现 json 解析失败 → 豁免全部静默失效）
+        assert load_exemptions(bom) == {f.exemption_key for f in findings}
+
+    def test_exemption_key_includes_source_file(self):
+        from dataclasses import replace
+
+        a = replace(_finding(), metadata={"source_file": "docs/a.pptx"})
+        b = replace(_finding(), metadata={"source_file": "docs/b.pptx"})
+        same = replace(_finding(), metadata={"source_file": "docs/a.pptx"})
+        assert a.exemption_key != b.exemption_key, "不同来源文件的同类发现不得共用豁免键"
+        assert a.exemption_key == same.exemption_key, "同一来源的键必须稳定"
+        # basename 归一：绝对路径与相对路径的同名文件视为同一来源
+        abs_a = replace(_finding(), metadata={"source_file": str(Path("docs/a.pptx").resolve())})
+        assert abs_a.exemption_key == a.exemption_key
+
+    def test_save_returns_false_on_oserror(self, tmp_path, monkeypatch):
+        import src.engines.exemptions as exemptions_mod
+
+        def boom(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(exemptions_mod.os, "replace", boom)
+        assert save_exemptions(tmp_path / ".docauditignore", {"k"}) is False
+
+    def test_save_returns_true_on_success(self, tmp_path):
+        assert save_exemptions(tmp_path / ".docauditignore", {"k"}) is True

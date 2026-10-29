@@ -167,7 +167,9 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
                     try:
                         rule.params["max_chars"] = int(value)
                     except (ValueError, TypeError):
-                        rule.params["max_chars"] = 200
+                        # 保留原始值（2026-10-29 审查）：旧实现静默改成 200，
+                        # 导致 extract 无法告警、validation 复查时已看不到非法原值。
+                        rule.params["max_chars"] = value
                 elif key == "关键词" or key == "keywords":
                     vals = _parse_list(value)
                     rule.params["关键词"] = vals

@@ -4,6 +4,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -79,10 +80,14 @@ class AuditFinding:
         """稳定豁免键 (可跨多次审查复用)。
 
         旧 UI 用随机 ``id`` 作为豁免键，重新审查后 id 变化，豁免立即失效。
-        这里用 dedup_key + location 的哈希；location 在批量模式下含文件名，
-        可区分不同文件中的同页同文本问题。
+        这里用 dedup_key + message + location + 来源文件（metadata.source_file，
+        取 basename）的哈希。来源参与哈希是 2026-10-29 深度审查的修复：此前
+        location 在批量模式被 UI 改写为 `[文件名] …` 才得以区分文件，CLI 不改写
+        → 两文件同页同文共用一键，一条豁免会静默压制其它文件（且 UI/CLI 键永不相等）。
         """
-        raw = f"{self.dedup_key}|{self.message or ''}|{self.location or ''}"
+        source = (self.metadata or {}).get("source_file") or ""
+        source_key = Path(str(source)).name if source else ""
+        raw = f"{self.dedup_key}|{self.message or ''}|{self.location or ''}|{source_key}"
         return hashlib.md5(raw.encode()).hexdigest()[:16]
 
     @staticmethod

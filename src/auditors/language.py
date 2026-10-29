@@ -107,10 +107,11 @@ _REDUNDANT_PATTERNS = [
 # 常见日期格式 (顺序即示例优先级)
 _DATE_FORMAT_PATTERNS = (
     ("中文", re.compile(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日")),
-    ("ISO", re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b")),
-    ("斜杠", re.compile(r"\b\d{4}/\d{1,2}/\d{1,2}\b")),
+    # 用 (?<!\d)/(?!\d) 而非 \b：汉字属于 \w，\b 在「自2026-10-29起」处不成立
+    ("ISO", re.compile(r"(?<!\d)\d{4}-\d{1,2}-\d{1,2}(?!\d)")),
+    ("斜杠", re.compile(r"(?<!\d)\d{4}/\d{1,2}/\d{1,2}(?!\d)")),
 )
-_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b")
+_ISO_DATE_RE = re.compile(r"(?<!\d)\d{4}-\d{1,2}-\d{1,2}(?!\d)")
 # 数值范围连接符: 半角连字符 / 长短破折号 / 波浪号 / 中文"至/到"
 _RANGE_SEPARATOR_RE = re.compile(r"(?<=\d)\s*([-–—~～]|至|到)\s*(?=\d)")
 _RANGE_CLASS = {
@@ -124,13 +125,38 @@ _RANGE_CLASS = {
 }
 # 数值+单位 (长的单位排前面，避免 "kg" 被 "g" 抢先匹配)
 _UNIT_RE = re.compile(
-    r"(?<![\w.])(\d+(?:\.\d+)?)\s?"
+    # 左边界排除数字/ASCII 字母/点，但允许汉字（厚度为10mm 必须能匹配）
+    r"(?<![0-9A-Za-z_.])(\d+(?:\.\d+)?)\s?"
     r"(GHz|MHz|kHz|Hz|kg|mg|g|km|cm|mm|μm|um|nm|ms|min|mL|ml|L|dB|kV|V|mA|A|kW|W|GB|MB|TB|KB|pt|℃|°C|%)"
     r"(?![A-Za-z])"
 )
 _TERMINAL_PUNCT = ("。", "；", "，", "、", "！", "？", ".", ";", ",", "!", "?")
 _BULLET_MARKER_RE = re.compile(r"^\s*(?:[•◦▪▸◆\-*]|\d+[\.\)]|\(\d+\)|[a-zA-Z][\.\)])\s+")
 _SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]+|\.\s+")
+
+
+# 跨页固定出现的版式文本，不参与「重复句/近似重复页」比较
+_AUXILIARY_PLACEHOLDERS = frozenset({"header", "footer", "slide_number", "date"})
+
+
+def _body_text(page) -> str:
+    """正文文本：排除页眉/页脚/页码/日期占位符（2026-10-29 审查）。
+
+    页面 all_text 含页脚等版式文本；固定页脚逐页重复，旧实现会把
+    「页脚一句免责声明」报成 TXT-DUP-SENTENCE，也会抬高 TXT-NEAR-DUP 相似度。
+    """
+    chunks: list[str] = []
+    for elem in page.flattened_elements:
+        if (elem.placeholder_type or "") in _AUXILIARY_PLACEHOLDERS:
+            continue
+        for para in elem.paragraphs:
+            if para.text and para.text.strip():
+                chunks.append(para.text)
+        for row in elem.tables:
+            for cell in row:
+                if cell.text and cell.text.strip():
+                    chunks.append(cell.text)
+    return "\n".join(chunks)
 
 
 def _mask_dates(text: str) -> str:
@@ -267,7 +293,8 @@ class LanguageAuditor(BaseAuditor):
         """审查正文之外的辅助文本：页眉 / 页脚 / 脚注 (2026-10-29)。
 
         这些内容没有独立页面几何，只做与位置无关的语言/术语类检查。
-        page_index=-1 表示「非正文页」。
+        page_index=None 表示「非正文页」（2026-10-29 审查：原用 -1 哨兵，
+        导出到 CSV/SARIF/HTML 会显示成 page 0 / 第 0 页）。
         """
         findings: list[AuditFinding] = []
         labels = {"header": "页眉", "footer": "页脚", "footnote": "脚注"}
@@ -276,12 +303,12 @@ class LanguageAuditor(BaseAuditor):
             if not text.strip():
                 continue
             label = labels.get(elem.placeholder_type or "", "正文外内容")
-            findings.extend(self._check_mixed_formatting(text, -1, label))
-            findings.extend(self._check_builtin_chinese_patterns(text, -1, label))
-            findings.extend(self._check_punctuation(text, -1, label))
-            findings.extend(self._check_redundancy(text, -1, label))
-            findings.extend(self._check_rejected_vocab(text, -1, label))
-            findings.extend(self.terminology.check(text, -1, label))
+            findings.extend(self._check_mixed_formatting(text, None, label))
+            findings.extend(self._check_builtin_chinese_patterns(text, None, label))
+            findings.extend(self._check_punctuation(text, None, label))
+            findings.extend(self._check_redundancy(text, None, label))
+            findings.extend(self._check_rejected_vocab(text, None, label))
+            findings.extend(self.terminology.check(text, None, label))
         return findings
 
     def _check_text(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
@@ -301,61 +328,83 @@ class LanguageAuditor(BaseAuditor):
         # 中英文分段
         segments = self._segment_by_language(text)
 
+        # 段级去重 + 同语言合批（2026-10-29 深度审查 P1）：
+        # 旧实现逐段同步 HTTP（技术页实测 17 段 → 17 次请求/页，100 页 ≈1700 次），
+        # 开 LanguageTool 后审查从亚秒级劣化到秒级。合并后每页每种语言最多 1 次
+        # 请求；重复段（MES/DOE/模板句）跨页复用，不再重复提交。
+        cache = getattr(self, "_lt_segment_cache", None)
+        if cache is None:
+            cache = self._lt_segment_cache = set()
+        grouped: dict[str, list[str]] = {}
         for seg_text, seg_lang in segments:
             # 英文段降低阈值以捕获短词拼写错误 (如 "teh", "recieve")
             min_len = 2 if seg_lang == "en" else 5
-            if len(seg_text.strip()) < min_len:
+            stripped = seg_text.strip()
+            if len(stripped) < min_len:
+                continue
+            key = (seg_lang, stripped)
+            if key in cache:
+                continue
+            cache.add(key)
+            grouped.setdefault(seg_lang, []).append(stripped)
+
+        for seg_lang, texts in grouped.items():
+            lang_code = "zh-CN" if seg_lang == "zh" else "en-US"
+            matches = self.lt_client.check("\n\n".join(texts), language=lang_code)
+            findings.extend(self._matches_to_findings(matches, seg_lang, page_index, page_label))
+
+        return findings
+
+    def _matches_to_findings(
+        self, matches, seg_lang: str, page_index: int, page_label: str
+    ) -> list[AuditFinding]:
+        """LanguageTool matches → findings（含噪音规则与白名单过滤）。"""
+        findings: list[AuditFinding] = []
+        for match in matches:
+            rule = match.get("rule", {})
+            msg = match.get("message", "语法问题")
+            ctx = match.get("context")
+            context_text = ctx.get("text", "") if isinstance(ctx, dict) else ""
+            replacements = match.get("replacements", [])
+            suggestion = None
+            if replacements:
+                suggestion = "建议改为: " + " / ".join(r.get("value", "") for r in replacements[:3])
+
+            # 过滤掉一些噪音规则
+            if rule.get("category", {}).get("id") in ("TYPOGRAPHY",):
+                continue
+            # 中文基础模式已由 _check_builtin_chinese_patterns 始终执行；
+            # Python 降级后端也会返回同一批 PY-ZH-GRAMMAR，跳过避免重复。
+            if rule.get("id") == "PY-ZH-GRAMMAR":
                 continue
 
-            lang_code = "zh-CN" if seg_lang == "zh" else "en-US"
-            matches = self.lt_client.check(seg_text, language=lang_code)
+            # 过滤 accept.txt 白名单术语 (如 FinFET, TSV 等半导体专业术语)
+            if isinstance(ctx, dict):
+                ctx_text = ctx.get("text", "")
+                ctx_offset = ctx.get("offset", 0)
+                ctx_length = ctx.get("length", 0)
+                if ctx_length > 0 and 0 <= ctx_offset < len(ctx_text):
+                    matched_word = ctx_text[ctx_offset : ctx_offset + ctx_length]
+                    if matched_word and self.vocabulary.is_accepted(matched_word):
+                        continue
 
-            for match in matches:
-                rule = match.get("rule", {})
-                msg = match.get("message", "语法问题")
-                ctx = match.get("context")
-                context_text = ctx.get("text", "") if isinstance(ctx, dict) else ""
-                replacements = match.get("replacements", [])
-                suggestion = None
-                if replacements:
-                    suggestion = "建议改为: " + " / ".join(
-                        r.get("value", "") for r in replacements[:3]
-                    )
-
-                # 过滤掉一些噪音规则
-                if rule.get("category", {}).get("id") in ("TYPOGRAPHY",):
-                    continue
-                # 中文基础模式已由 _check_builtin_chinese_patterns 始终执行；
-                # Python 降级后端也会返回同一批 PY-ZH-GRAMMAR，跳过避免重复。
-                if rule.get("id") == "PY-ZH-GRAMMAR":
-                    continue
-
-                # 过滤 accept.txt 白名单术语 (如 FinFET, TSV 等半导体专业术语)
-                if isinstance(ctx, dict):
-                    ctx_text = ctx.get("text", "")
-                    ctx_offset = ctx.get("offset", 0)
-                    ctx_length = ctx.get("length", 0)
-                    if ctx_length > 0 and 0 <= ctx_offset < len(ctx_text):
-                        matched_word = ctx_text[ctx_offset : ctx_offset + ctx_length]
-                        if matched_word and self.vocabulary.is_accepted(matched_word):
-                            continue
-
-                findings.append(
-                    AuditFinding(
-                        type=FindingType.LANGUAGE,
-                        severity=self._map_severity(rule.get("issueType", "")),
-                        message=msg,
-                        rule_id=rule.get("id", ""),
-                        page_index=page_index,
-                        location=page_label,
-                        context=context_text[:120] if context_text else None,
-                        suggestion=suggestion,
-                        metadata={
-                            "language": seg_lang,
-                            "category": rule.get("category", {}).get("id", ""),
-                        },
-                    )
+            findings.append(
+                AuditFinding(
+                    type=FindingType.LANGUAGE,
+                    severity=self._map_severity(rule.get("issueType", "")),
+                    message=msg,
+                    rule_id=rule.get("id", ""),
+                    page_index=page_index,
+                    location=page_label,
+                    context=context_text[:120] if context_text else None,
+                    suggestion=suggestion,
+                    metadata={
+                        "language": seg_lang,
+                        "category": rule.get("category", {}).get("id", ""),
+                    },
                 )
+            )
+        return findings
 
         return findings
 
@@ -425,7 +474,7 @@ class LanguageAuditor(BaseAuditor):
         return merged
 
     def _check_mixed_formatting(
-        self, text: str, page_index: int, page_label: str
+        self, text: str, page_index: int | None, page_label: str
     ) -> list[AuditFinding]:
         """检查中英文混排格式。
 
@@ -684,7 +733,7 @@ class LanguageAuditor(BaseAuditor):
         first_seen: dict[str, tuple[int, str]] = {}
         findings: list[AuditFinding] = []
         for page in doc.pages:
-            for raw in _SENTENCE_SPLIT_RE.split(page.all_text):
+            for raw in _SENTENCE_SPLIT_RE.split(_body_text(page)):
                 sentence = raw.strip()
                 if len(sentence) < 12:
                     continue
@@ -716,7 +765,7 @@ class LanguageAuditor(BaseAuditor):
         """近似重复页检测（字符二元组 Jaccard ≥ 0.90，至少 40 字）。"""
         entries: list[tuple[int, set[str]]] = []
         for page in doc.pages:
-            norm = re.sub(r"\s+", "", page.all_text)
+            norm = re.sub(r"\s+", "", _body_text(page))
             if len(norm) < 40:
                 continue
             entries.append((page.index, _bigrams(norm)))
@@ -750,7 +799,9 @@ class LanguageAuditor(BaseAuditor):
             )
         return findings
 
-    def _check_punctuation(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
+    def _check_punctuation(
+        self, text: str, page_index: int | None, page_label: str
+    ) -> list[AuditFinding]:
         """标点冗余/冲突/全半角/配对检查 (2026-10-28)。
 
         - 重复 ; : ! ?（，，/。。/、、 已由 PY-ZH-GRAMMAR 覆盖）
@@ -859,7 +910,9 @@ class LanguageAuditor(BaseAuditor):
 
         return findings
 
-    def _check_redundancy(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
+    def _check_redundancy(
+        self, text: str, page_index: int | None, page_label: str
+    ) -> list[AuditFinding]:
         """高精度中文冗余表达检查 (2026-10-28)。"""
         findings: list[AuditFinding] = []
         masked = _mask_prose_noise(text)

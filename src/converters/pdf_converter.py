@@ -59,6 +59,13 @@ def _inject_hf_cache_env() -> None:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
+# M5 修复（2026-10-29 深度审查 P0）：huggingface_hub 的 HF_HUB_OFFLINE / HF_HUB_CACHE
+# 是**导入期**常量；旧实现先 `from docling...`（间接导入 huggingface_hub）再注入，
+# 常量已被冻结为用户默认值 → packages/hf_cache 不生效、离线仍访问 huggingface.co。
+# 因此在模块导入时（早于任何 docling 导入）先注入，convert() 内再兜底一次。
+_inject_hf_cache_env()
+
+
 def _ensure_ascii_install_path() -> None:
     """P0-1: Windows 下检测 Python 安装前缀路径是否含非 ASCII 字符。
 
@@ -223,6 +230,9 @@ class PdfConverter(BaseConverter):
 
     def _convert_with_docling(self, source_path: Path) -> Document:
         """Docling 后端（默认）：版面分析 + 表格结构。"""
+
+        # 保险：即使本模块被特殊方式重载，也在导入 docling 前确保环境变量就位
+        _inject_hf_cache_env()
 
         # 检查 Docling 是否可用
         try:
