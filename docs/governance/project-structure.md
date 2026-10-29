@@ -106,6 +106,7 @@ DocAudit/
 │   │   ├── context.md               #     领域背景 + 设计哲学 + 技术选型
 │   │   ├── project-structure.md     #     项目结构 (本文件)
 │   │   ├── documentation.md         #     文档职责规范
+│   │   ├── release-checklist.md     #     发行标准与检查清单（发行 SSOT）
 │   │   ├── tooling-pitfalls.md      #     工具/脚本坑位清单 (cmd/bat/pip/git)
 │   │   ├── falsy-pitfalls.md        #     Python falsy 值误判检查清单
 │   │   ├── refactoring-plan.md      #     重构计划（历史，2026-10-29 收口）
@@ -137,6 +138,7 @@ DocAudit/
 │   ├── setup_offline.bat / .sh / .py           # 离线安装 (下载三步: 锁文件+构建依赖+自检)
 │   ├── gen_requirements_lock.py     #   从 packages/ 离线解析生成 requirements-*.txt
 │   ├── benchmark.py                 #   性能基线：合成 10/50/100 页文档分段计时
+│   ├── check_release.py             #   发行自检：版本/CHANGELOG/必备文件/CLI 版本
 │   └── packages/                    #   离线依赖缓存 (生成物，gitignore 排除)
 │
 ├── glossary/                        # 📖 半导体术语表 (YAML)
@@ -200,7 +202,7 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (585 用例)
+└── tests/                           # 🧪 测试 (599 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -223,6 +225,7 @@ DocAudit/
     ├── test_cli_exit_codes.py       #     CLI 退出码契约
     ├── test_cli_direct.py           #     CLI 直接单测 (audit_file/--fix 链路)
     ├── test_cli_inprocess.py        #     CLI main() 进程内分支 (覆盖率)
+    ├── test_check_release.py        #     发行自检脚本 (版本/CHANGELOG/文件/CLI)
     ├── test_autofix.py              #     AutoFixer 修复链路
     ├── test_converters.py           #     四格式转换器 (含 PDF 双后端/表格几何/辅助文本)
     ├── test_edge_cases.py           #     边界输入

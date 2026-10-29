@@ -505,9 +505,13 @@ def _strip_quoted_context(text: str) -> str:
     return re.sub(r"「[^」]*」", "", text)
 
 
-def _unreleased_section(text: str) -> str:
-    """只保留 CHANGELOG Unreleased 区 (历史版本条目是当时事实, 不检查)。"""
-    m = re.search(r"^## \[Unreleased\].*?(?=^## \[)", text, re.MULTILINE | re.DOTALL)
+def _current_release_section(text: str) -> str:
+    """只保留 CHANGELOG 最上方发行段（[Unreleased] 或最新版本）。
+
+    历史版本条目是当时事实，不参与"当前数字"检查（2026-10-29 发行后门禁
+    从只认 [Unreleased] 改为认最上方 `## [` 段）。
+    """
+    m = re.search(r"^## \[[^\]]+\].*?(?=^## \[)", text, re.MULTILINE | re.DOTALL)
     return m.group(0) if m else text
 
 
@@ -564,7 +568,7 @@ def test_doc_numbers_gate():
         assert path.exists(), f"白名单文档不存在: {rel}"
         content = path.read_text(encoding="utf-8")
         if rel.endswith("CHANGELOG.md"):
-            content = _unreleased_section(content)
+            content = _current_release_section(content)
         content = _strip_quoted_context(content)
 
         if actual["test_count"] != -1:
@@ -616,3 +620,57 @@ def test_doc_numbers_gate_catches_drift():
     drift_errors = [v for v in declared if v != actual["test_count"]]
     assert actual["test_count"] - 1 in declared, "漂移数字应进入声明集"
     assert drift_errors, f"漂移应被比对逻辑检出, got: {declared}"
+
+
+# ── 门禁 5：发行标准（2026-10-29） ─────────────────────────────
+# 发行四要素：版本双源一致 / CHANGELOG 有当前版本段 / 语料 Python 3.10 语法兼容 /
+# CLI --version 与 src.__version__ 一致（后者在 test_cli_direct 覆盖）。
+
+_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+_PROJECT_PY_FILES = ("app.py",)
+
+
+def _pyproject_version() -> str:
+    content = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    m = _VERSION_RE.search(content)
+    assert m, "pyproject.toml 缺少 version 字段"
+    return m.group(1)
+
+
+def test_release_version_sync():
+    """pyproject 与 src.__version__ 必须一致（发行标准）"""
+    from src import __version__
+
+    declared = _pyproject_version()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", declared), f"版本号非语义化: {declared}"
+    assert declared == __version__, (
+        f"版本双源不一致: pyproject={declared} vs src.__version__={__version__}"
+    )
+
+
+def test_release_changelog_has_version_section():
+    """CHANGELOG 最上方段必须是当前版本（发行后不得残留 [Unreleased]）"""
+    from src import __version__
+
+    changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    first = re.search(r"^## \[([^\]]+)\]", changelog, re.MULTILINE)
+    assert first, "CHANGELOG 缺少 `## [版本]` 段"
+    assert first.group(1) == __version__, (
+        f"CHANGELOG 最上方段是 [{first.group(1)}]，应为当前版本 [{__version__}]"
+    )
+
+
+def test_python310_syntax_compatible():
+    """src/scripts/tests 与 app.py 必须能被 Python 3.10 解析（CI 矩阵最低版本）"""
+    import ast
+
+    targets = [PROJECT_ROOT / name for name in _PROJECT_PY_FILES]
+    for sub in ("src", "scripts", "tests"):
+        targets.extend(sorted((PROJECT_ROOT / sub).rglob("*.py")))
+    errors: list[str] = []
+    for path in targets:
+        try:
+            ast.parse(path.read_text(encoding="utf-8"), filename=str(path), feature_version=(3, 10))
+        except SyntaxError as e:
+            errors.append(f"{path.relative_to(PROJECT_ROOT)}:{e.lineno}: {e.msg}")
+    assert not errors, "以下文件使用了 Python 3.10 不支持的语法:\n" + "\n".join(errors)

@@ -143,3 +143,28 @@ class TestMainFixChain:
                 )
             if run.font.size:
                 assert run.font.size >= 12 * 12700, f"字号应修正到 >=12pt, got {run.font.size}"
+
+
+class TestVersionFlag:
+    """发行标准：`docaudit --version` 输出与 src.__version__ 一致（2026-10-29）。"""
+
+    def test_version_flag(self, monkeypatch, capsys):
+        from src import __version__
+
+        monkeypatch.setattr(sys, "argv", ["docaudit", "--version"])
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        assert f"DocAudit {__version__}" in capsys.readouterr().out
+
+    def test_doctor_prints_version(self, monkeypatch, capsys):
+        import requests
+
+        from src import __version__
+
+        monkeypatch.setattr(requests, "get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError))
+        monkeypatch.setattr(sys, "argv", ["docaudit", "doctor"])
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        assert f"Version: {__version__}" in capsys.readouterr().out

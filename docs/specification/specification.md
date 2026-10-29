@@ -1,6 +1,6 @@
 # DocAudit — 项目规格文档
 
-> 版本：0.1.0（0.2.0 待发布） | 最后更新：2026-10-29 | 状态：Alpha 迭代中
+> 版本：0.2.0 | 最后更新：2026-10-29 | 状态：Alpha 迭代中
 > 事实唯一入口：**规则以 [rules.md](../../rules.md) 为唯一入口**，测试清单/数字以 [AGENTS.md](../../AGENTS.md) 为准。
 > 接口签名 → [api-reference.md](api-reference.md) · 用户操作 → [user-manual.md](../user-manual/user-manual.md)
 
@@ -156,6 +156,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | test_report_workflow.py | 报告工作流（HTML 分组/缩略图、CSV、SARIF、CLI 导出） |
 | test_exemptions.py | 豁免持久化 `.docauditignore` |
 | test_validation.py | 配置校验与 `rules validate` 子命令 |
+| test_check_release.py | 发行自检脚本（版本/CHANGELOG/必备文件/CLI 版本） |
 | test_app_ui.py | Web UI 纯函数/冒烟测试 |
 | test_gates.py | 治理门禁（裸异常/HTML 转义/api 同步/文档数字） |
 

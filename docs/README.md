@@ -11,6 +11,7 @@
 | [context.md](governance/context.md) | 领域背景、设计哲学、术语约定 |
 | [project-structure.md](governance/project-structure.md) | 项目结构唯一信源（完整目录树 + 文件职责） |
 | [documentation.md](governance/documentation.md) | 文档职责规范与同步链 |
+| [release-checklist.md](governance/release-checklist.md) | **发行标准与检查清单（发行唯一标准）** |
 | [tooling-pitfalls.md](governance/tooling-pitfalls.md) | 工具/脚本坑位清单（cmd/bat/pip/git） |
 | [falsy-pitfalls.md](governance/falsy-pitfalls.md) | Python falsy 值误判检查清单 |
 | [refactoring-plan.md](governance/refactoring-plan.md) | 重构计划（历史，2026-10-29 收口） |

@@ -5,9 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-29
+
+首个功能完整发行版（0.1.0 → 0.2.0）。汇总 2026-10-28~29 四个批次：质量复核整改（R-01~R-24）、
+第二批收尾（表格 fit/报告工作流/豁免持久化/规则注册表/配置校验/标点补全/DOCX 辅助文本/PDF 双后端）、
+增强迭代（DOCX 列表/报告统计/exemption_key/--fail-on/分页）、Code Scanning 与工程化
+（`--sarif-base`/pre-commit/性能基线/覆盖率补强）。
+
+**发行基线**：**599 个测试用例（23 个文件）** · 覆盖率 **87%** · ruff 全绿 ·
+26 条配置规则 + 23 项内置检查 · 报告 HTML/JSON/CSV/SARIF · 完全离线。
 
 ### Added
+
+- **发行工程（2026-10-29）**：`--version` / `doctor` 版本行；`scripts/check_release.py` 发行自检
+  （版本双源 / CHANGELOG 发行头 / 必备文件 / CLI 版本）；`MANIFEST.in` 保证源码包包含
+  app.py/rules.md/glossary/vocab/docs/skills/scripts/tests；测试门禁新增发行三检（版本/3.10 语法/发行头）
 
 - **Code Scanning / 工程化批次（2026-10-29 第四轮）**：
   - **SARIF 对接 Code Scanning**：`generate_sarif_report()` 新增 `uri_base`；CLI `--sarif-base`

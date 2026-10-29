@@ -16,6 +16,7 @@ if sys.platform == "win32":
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src import __version__
 from src.engines.exemptions import apply_exemptions, load_exemptions
 from src.engines.pipeline import build_auditors, find_converter, run_auditors
 from src.models.document import Document
@@ -158,6 +159,7 @@ def doctor_check() -> int:
 
     print("DocAudit Environment Doctor")
     print("=" * 40)
+    print(f"Version: {__version__}")
 
     # 1. Python version
     py_version = sys.version_info
@@ -290,7 +292,14 @@ def main():
   docaudit report.pptx --fail-on none     从不因问题失败（仅处理失败时 exit 1）
   docaudit doctor                         环境诊断
   docaudit rules validate                 校验 rules.md / glossary / vocab 配置
+  docaudit --version                      打印版本
         """,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"DocAudit {__version__}",
+        help="打印版本号并退出",
     )
     subparsers = parser.add_subparsers(dest="command")
 
