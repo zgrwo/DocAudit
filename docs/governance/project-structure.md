@@ -94,7 +94,7 @@ DocAudit/
 ├── .vale.ini                        # Vale 配置 (可选，未接入 CI)
 ├── LICENSE                          # MIT 许可证
 ├── CHANGELOG.md                     # 变更日志 (keepachangelog)
-├── CONTRIBUTING.md                  # 贡献指南 (含三步注册法)
+├── CONTRIBUTING.md                  # 贡献指南 (含两步注册法)
 ├── .gitignore                       # Git 忽略规则
 │
 ├── docs/                            # 📚 治理与规范文档中心 (SSOT)
@@ -106,9 +106,9 @@ DocAudit/
 │   │   ├── documentation.md         #     文档职责规范
 │   │   ├── tooling-pitfalls.md      #     工具/脚本坑位清单 (cmd/bat/pip/git)
 │   │   ├── falsy-pitfalls.md        #     Python falsy 值误判检查清单
-│   │   ├── refactoring-plan.md      #     重构计划（历史）
+│   │   ├── refactoring-plan.md      #     重构计划（历史，2026-10-29 收口）
 │   │   ├── remediation-plan-2026-08.md  # 2026-08 整改计划（历史）
-│   │   └── handoff-2026-10-29.md    # 2026-10-29 交接说明（验证/决策/剩余项）
+│   │   └── handoff-2026-10-29.md    # 2026-10-29 交接说明（含第二批收尾记录）
 │   ├── specification/               #   规格文档
 │   │   ├── specification.md         #     项目规格文档
 │   │   └── api-reference.md         #     函数签名速查 — 唯一信源
@@ -179,8 +179,11 @@ DocAudit/
 │   │
 │   ├── engines/                     #   引擎层 — 可复用后端服务
 │   │   ├── __init__.py
+│   │   ├── check_registry.py        #     dispatch 检查注册表 (CHECK_REGISTRY, SSOT)
 │   │   ├── pipeline.py              #     流水线编排: build_auditors() + run_auditors()
 │   │   ├── rule_parser.py           #     rules.md 解析器 + extract_auditor_config()
+│   │   ├── validation.py            #     配置静态校验 (rules/glossary/vocab schema)
+│   │   ├── exemptions.py            #     豁免持久化 (.docauditignore)
 │   │   ├── terminology.py           #     术语检查器 (YAML glossary 匹配)
 │   │   ├── vocabulary.py            #     词汇表管理器 (accept.txt + reject.txt)
 │   │   ├── languagetool.py          #     LanguageTool 客户端 (三层降级)
@@ -188,10 +191,13 @@ DocAudit/
 │   │
 │   └── reporters/                   #   输出层 — Findings → 报告
 │       ├── __init__.py
-│       ├── html_reporter.py         #     HTML 报告生成
-│       └── json_reporter.py         #     JSON 报告生成
+│       ├── ordering.py              #     报告共用排序/按文件分组 (SSOT)
+│       ├── html_reporter.py         #     HTML 报告生成 (SVG 线框 + 按文件分组)
+│       ├── json_reporter.py         #     JSON 报告生成
+│       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
+│       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (427 用例)
+└── tests/                           # 🧪 测试 (529 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -202,18 +208,21 @@ DocAudit/
     ├── test_models.py               #     Document + Finding 模型测试
     ├── test_auditors.py             #     Structure + Format + Factual 审计器测试
     ├── test_engines.py              #     Terminology + Vocabulary + 语言分段 + LT 客户端测试
-    ├── test_rules.py                #     规则解析 + DISPATCH 验证
+    ├── test_rules.py                #     规则解析 + DISPATCH/注册表验证
     ├── test_integration.py          #     全流水线集成测试 (流水线确定性回归)
     ├── test_golden_paths.py         #     真实三路径黄金测试 (API=CLI=AppTest) + run_auditors 行为
     ├── test_rule_coverage.py        #     零断言规则定向覆盖测试
     ├── test_html_report_security.py #     HTML 转义红线 (XSS 载荷)
+    ├── test_report_workflow.py      #     报告工作流 (HTML 分组/缩略图、CSV、SARIF、CLI 导出)
+    ├── test_exemptions.py           #     豁免持久化 .docauditignore
+    ├── test_validation.py           #     配置校验 (rules/glossary/vocab + CLI)
     ├── test_app_ui.py               #     app.py 过滤器/扫描器 + AppTest 冒烟
     ├── test_cli_exit_codes.py       #     CLI 退出码契约
     ├── test_cli_direct.py           #     CLI 直接单测 (audit_file/--fix 链路)
     ├── test_autofix.py              #     AutoFixer 修复链路
-    ├── test_converters.py           #     四格式转换器
+    ├── test_converters.py           #     四格式转换器 (含 PDF 双后端/表格几何/辅助文本)
     ├── test_edge_cases.py           #     边界输入
-    ├── test_language_auditor.py     #     语言审计器细节
+    ├── test_language_auditor.py     #     语言审计器细节 (标点/一致性/辅助文本)
     ├── test_scripts.py              #     scripts/ 工具 (common + setup_offline + 锁文件)
     ├── test_contrast.py             #     FMT-008 WCAG 对比度算法 + 表格检查
     └── test_gates.py                #     治理门禁 pytest 化（裸异常/HTML 转义/api 同步/文档数字）
@@ -235,8 +244,8 @@ DocAudit/
 | 文件 | 关键类 | 提取元数据 |
 |------|--------|-----------|
 | `pptx_converter.py` | `PptxConverter` | 字体/字号/颜色 (Run级)、位置 EMU→pt、版式名称、占位符类型、图片/图表数据、备注 |
-| `docx_converter.py` | `DocxConverter` | 段落样式名→shape_name、大纲级别→level、表格、SDT |
-| `pdf_converter.py` | `PdfConverter` | 文本+标题级别 (Docling)，无字体/位置 |
+| `docx_converter.py` | `DocxConverter` | 段落样式名→shape_name、大纲级别→level、表格 (含行列几何)、SDT、页眉/页脚/脚注→`auxiliary_elements` |
+| `pdf_converter.py` | `PdfConverter` | 双后端：Docling（文本+标题+表格）/ PyMuPDF（文本块+书签+bbox） |
 | `md_converter.py` | `MarkdownConverter` | 纯文本+标题级别，多编码回退 |
 
 ### 审查层 (`src/auditors/`)
@@ -244,17 +253,20 @@ DocAudit/
 | 文件 | 关键类 | 规则 ID | 检查数 |
 |------|--------|---------|--------|
 | `structure.py` | `StructureAuditor` | STR-001~008 | 10 |
-| `format.py` | `FormatAuditor` | FMT-001~008 + FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/FOOTER/IMAGE/CHART | 17 |
-| `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED | 语言+术语+词汇 |
+| `format.py` | `FormatAuditor` | FMT-001~008 + FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/TABLE-FIT/FOOTER/IMAGE/CHART | 18 |
+| `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED, PUNCT-001~010, TXT-* | 语言+术语+词汇+一致性 |
 | `factual.py` | `FactualAuditor` | CON-001~003-C | 5 |
-| `custom_rules.py` | `CustomRulesAuditor` | 路由所有 check_type | 中枢路由器 |
+| `custom_rules.py` | `CustomRulesAuditor` | 由 `src/engines/check_registry.py` 的 `CHECK_REGISTRY` 派生 `_DISPATCH` | 中枢路由器 |
 
 ### 引擎层 (`src/engines/`)
 
 | 文件 | 关键函数/类 | 职责 |
 |------|-----------|------|
-| `pipeline.py` | `build_auditors()`, `run_auditors()` | 统一流水线编排。CLI 和 Web UI 共用。 |
+| `pipeline.py` | `build_auditors()`, `run_auditors()` | 统一流水线编排。CLI 和 Web UI 共用。`_skip_checks` 由注册表派生 |
+| `check_registry.py` | `CHECK_REGISTRY`, `CheckSpec` | dispatch 检查唯一真相来源；`_DISPATCH`/`_skip_checks` 从它派生 |
 | `rule_parser.py` | `parse_rules_md()`, `extract_auditor_config()` | rules.md 解析 + 配置提取 |
+| `validation.py` | `validate_configuration()`, `validate_rules()`, `validate_glossary()`, `validate_vocab()` | 配置静态校验（`docaudit rules validate`） |
+| `exemptions.py` | `load_exemptions()`, `save_exemptions()`, `apply_exemptions()` | `.docauditignore` 豁免持久化 |
 | `terminology.py` | `TerminologyChecker` | YAML 术语表加载 + regex 匹配 + 跳过去重 |
 | `vocabulary.py` | `Vocabulary` | accept.txt 白名单 + reject.txt 黑名单 |
 | `languagetool.py` | `LanguageToolClient` | Docker → Java → Python 三层降级 |
@@ -264,16 +276,19 @@ DocAudit/
 
 | 文件 | 关键函数 | 职责 |
 |------|---------|------|
-| `html_reporter.py` | `generate_html_report()` | 独立 HTML 报告，所有用户文本 `html.escape()` |
+| `ordering.py` | `_sort_findings()`, `_group_by_source()` | 报告共用排序（严重度→页码→规则）与按文件分组 |
+| `html_reporter.py` | `generate_html_report()` | 独立 HTML 报告，所有用户文本 `html.escape()`；内联 SVG 线框缩略图 + 批量按文件分组 |
 | `json_reporter.py` | `generate_json_report()` | 结构化 JSON，含 meta + summary + findings |
+| `csv_reporter.py` | `generate_csv_report()` | CSV（UTF-8 BOM + 防公式注入），Excel 友好 |
+| `sarif_reporter.py` | `generate_sarif_report()` | SARIF v2.1.0（GitHub Code Scanning / VS Code SARIF Viewer） |
 
 ### UI / CLI
 
 | 文件 | 关键入口 | 职责 |
 |------|---------|------|
-| `app.py` | `main()` | Streamlit Web UI — 单文件/批量 + 过滤 + 豁免 + 下载 |
-| `src/cli.py` | `main()` | 命令行 — 单文件/批量 + `--fix` + `-o` 导出 |
+| `app.py` | `main()` | Streamlit Web UI — 单文件/批量 + 过滤 + 豁免（含保存 `.docauditignore`）+ HTML/JSON/CSV/SARIF 下载 |
+| `src/cli.py` | `main()` | 命令行 — `audit`（单文件/批量 + `--fix` + 多格式导出 + `--exempt-file`）/ `doctor` / `rules validate` |
 
 ---
 
-<!-- last_updated: 2026-09-06 -->
+<!-- last_updated: 2026-10-29 -->

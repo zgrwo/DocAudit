@@ -1,4 +1,4 @@
-"""PDF 转换器 — 使用 Docling 解析，保留标题层级和表格结构"""
+"""PDF 转换器 — Docling（默认，含表格/版面）或 PyMuPDF（可选，快速/中文路径安全）"""
 
 import logging
 import os
@@ -13,10 +13,33 @@ from src.models.document import (
     Page,
     PageElement,
     Paragraph,
+    Run,
     TableCell,
 )
 
 logger = logging.getLogger(__name__)
+
+# 后端选择 (2026-10-29): auto = 有 pymupdf 用 pymupdf，否则 docling。
+# 环境变量 DOCAUDIT_PDF_BACKEND=auto|pymupdf|docling 显式覆盖。
+PDF_BACKEND_ENV = "DOCAUDIT_PDF_BACKEND"
+
+
+def _import_pymupdf():
+    """导入 PyMuPDF (新包名 pymupdf，旧版为 fitz)；未安装返回 None。"""
+    for name in ("pymupdf", "fitz"):
+        try:
+            return __import__(name)
+        except ImportError:
+            continue
+    return None
+
+
+def _select_pdf_backend(explicit: str | None = None) -> str:
+    """决定 PDF 后端: 显式参数 > 环境变量 > auto 探测。"""
+    backend = (explicit or os.environ.get(PDF_BACKEND_ENV) or "auto").strip().lower()
+    if backend in ("pymupdf", "docling"):
+        return backend
+    return "pymupdf" if _import_pymupdf() is not None else "docling"
 
 
 def _hf_cache_dir() -> Path:
@@ -64,21 +87,142 @@ def _ensure_ascii_install_path() -> None:
 class PdfConverter(BaseConverter):
     """将 PDF 文件转换为统一 Document 模型。
 
-    使用 IBM Docling 进行版面分析，保留：
-    - 标题层级 (heading levels)
-    - 表格结构
-    - 阅读顺序
-    - 页面级别的文本内容
+    双后端 (2026-10-29):
+    - Docling (默认, 需安装 [pdf]): 版面分析 + 标题层级 + 表格结构
+    - PyMuPDF (可选, 需自行 `pip install pymupdf`): 文本块 + 书签层级 + bbox；
+      不恢复表格结构，但不依赖 docling 模型，且不受 Windows 非 ASCII 路径限制
 
-    注意：PDF 没有字体/字号等格式属性，仅保留结构信息。
+    选择顺序: 构造参数 > 环境变量 DOCAUDIT_PDF_BACKEND > 自动探测。
     """
 
     def can_handle(self, source_path: str | Path) -> bool:
         ext = Path(source_path).suffix.lower().lstrip(".")
         return ext == "pdf"
 
+    def __init__(self, backend: str | None = None):
+        """backend: None/"auto" 自动探测 | "pymupdf" | "docling"。"""
+        requested = (backend or os.environ.get(PDF_BACKEND_ENV) or "auto").strip().lower()
+        self.backend = requested if requested in ("pymupdf", "docling") else "auto"
+
     def convert(self, source_path: str | Path) -> Document:
         source_path = Path(source_path)
+        backend = self.backend if self.backend != "auto" else _select_pdf_backend()
+        if backend == "pymupdf":
+            try:
+                return self._convert_with_pymupdf(source_path)
+            except ImportError:
+                logger.warning("PyMuPDF 不可用，回退 Docling 后端")
+        return self._convert_with_docling(source_path)
+
+    def _convert_with_pymupdf(self, source_path: Path) -> Document:
+        """PyMuPDF 后端 (2026-10-29 可选): 提取文本块 + 书签标题层级 + 位置几何。
+
+        优点：不依赖 docling 模型/非 ASCII 路径限制，速度快；
+        限制：不做表格结构恢复（表格文字会作为普通文本块出现）。
+        """
+        pymupdf = _import_pymupdf()
+        if pymupdf is None:
+            raise ImportError("未安装 PyMuPDF，无法使用 pymupdf 后端。请运行: pip install pymupdf")
+        logger.info("使用 PyMuPDF 解析 PDF: %s", source_path.name)
+        try:
+            pdf = pymupdf.open(str(source_path))
+        except Exception as e:
+            raise ValueError(f"无法解析 PDF 文件: {source_path} — {e}") from e
+
+        try:
+            toc_entries: dict[int, list[tuple[int, str]]] = defaultdict(list)
+            try:
+                for entry in pdf.get_toc(simple=True) or []:
+                    level, title, page_no = int(entry[0]), str(entry[1]).strip(), int(entry[2])
+                    if title and page_no > 0:
+                        toc_entries[page_no].append((level, title))
+            except Exception as e:
+                logger.debug("PyMuPDF 书签读取失败，标题层级降级为空: %s", e)
+
+            pages: list[Page] = []
+            for page_idx, page in enumerate(pdf):
+                elements = self._pymupdf_page_elements(page, toc_entries.get(page_idx + 1, []))
+                pages.append(Page(index=page_idx, elements=elements, slide_number=page_idx + 1))
+
+            props: dict = {}
+            try:
+                rect = pdf[0].rect
+                if rect.width > 0 and rect.height > 0:
+                    props["slide_width"] = float(rect.width)
+                    props["slide_height"] = float(rect.height)
+            except Exception:
+                pass  # bare-handler-ok — 页面尺寸缺失时保持默认基准
+
+            metadata = DocumentMetadata(
+                title=source_path.stem,
+                page_count=len(pages),
+                custom_properties=props,
+            )
+            return Document(
+                source_path=str(source_path),
+                format="pdf",
+                metadata=metadata,
+                pages=pages,
+            )
+        finally:
+            try:
+                pdf.close()
+            except Exception:
+                pass  # bare-handler-ok — 关闭失败不影响已提取结果
+
+    @staticmethod
+    def _pymupdf_page_elements(page, toc_entries: list[tuple[int, str]]) -> list[PageElement]:
+        """PyMuPDF 文本块 → PageElement（每块一个段落，保留 bbox 与字号）。"""
+        try:
+            blocks = page.get_text("dict").get("blocks", [])
+        except Exception as e:
+            logger.warning("PyMuPDF 文本块提取失败，跳过该页: %s", e)
+            return []
+
+        elements: list[PageElement] = []
+        for block in blocks:
+            if block.get("type") != 0:  # 0 = 文本块，1 = 图片
+                continue
+            lines: list[str] = []
+            runs: list[Run] = []
+            level = None
+            for line in block.get("lines", []) or []:
+                spans = line.get("spans", []) or []
+                text = "".join(str(s.get("text", "")) for s in spans).strip()
+                if not text:
+                    continue
+                size = max((float(s.get("size") or 0) for s in spans), default=0.0) or None
+                font = next((s.get("font") for s in spans if s.get("font")), None)
+                lines.append(text)
+                runs.append(Run(text=text, font_name=font, font_size=size))
+                if level is None:
+                    for toc_level, title in toc_entries:
+                        if text.startswith(title):
+                            level = toc_level
+                            break
+            if not lines:
+                continue
+            bbox = block.get("bbox") or (0.0, 0.0, 0.0, 0.0)
+            try:
+                x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+            except (TypeError, ValueError):
+                x0 = y0 = 0.0
+                x1 = y1 = 0.0
+            elements.append(
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text="\n".join(lines), runs=runs, level=level)],
+                    left=x0,
+                    top=y0,
+                    width=max(0.0, x1 - x0),
+                    height=max(0.0, y1 - y0),
+                    is_title=(level == 1),
+                )
+            )
+        return elements
+
+    def _convert_with_docling(self, source_path: Path) -> Document:
+        """Docling 后端（默认）：版面分析 + 表格结构。"""
 
         # 检查 Docling 是否可用
         try:

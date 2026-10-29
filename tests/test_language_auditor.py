@@ -211,3 +211,147 @@ class TestVocabularyIntegration:
         assert auditor.vocabulary.is_accepted("FinFET")
         assert auditor.vocabulary.is_accepted("finfet")  # 大小写不敏感
         assert not auditor.vocabulary.is_accepted("unknown_word")
+
+
+class TestDocumentConsistency:
+    """2026-10-29: 日期/范围/单位写法、项目符号标点、重复句、近似重复页。"""
+
+    @staticmethod
+    def _doc(texts: list[str], fmt="md") -> Document:
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text=t)])],
+            )
+            for i, t in enumerate(texts)
+        ]
+        return Document(format=fmt, source_path="x", metadata=DocumentMetadata(), pages=pages)
+
+    @staticmethod
+    def _rule_ids(findings, *wanted) -> set[str]:
+        return {f.rule_id for f in findings if f.rule_id in wanted}
+
+    def test_date_format_mixed_flagged(self, auditor):
+        doc = self._doc(["会议日期 2026年10月29日", "交付日期 2026-10-29"])
+        ids = self._rule_ids(auditor.audit(doc), "PUNCT-008")
+        assert ids == {"PUNCT-008"}
+
+    def test_single_date_format_not_flagged(self, auditor):
+        doc = self._doc(["会议日期 2026年10月29日", "交付日期 2026年11月1日"])
+        assert "PUNCT-008" not in self._rule_ids(auditor.audit(doc), "PUNCT-008")
+
+    def test_range_separator_mixed_flagged(self, auditor):
+        doc = self._doc(["温度 10-20℃", "湿度 30~40%"])
+        assert "PUNCT-009" in self._rule_ids(auditor.audit(doc), "PUNCT-009")
+
+    def test_range_consistent_not_flagged(self, auditor):
+        doc = self._doc(["温度 10-20℃", "湿度 30-40%"])
+        assert "PUNCT-009" not in self._rule_ids(auditor.audit(doc), "PUNCT-009")
+
+    def test_iso_date_not_treated_as_range(self, auditor):
+        """2026-10-29 是日期，不应被范围连接符检查误判。"""
+        doc = self._doc(["发布 2026-10-29", "温度 10-20℃"])
+        assert "PUNCT-009" not in self._rule_ids(auditor.audit(doc), "PUNCT-009")
+
+    def test_unit_spacing_mixed_flagged(self, auditor):
+        doc = self._doc(["重量 10kg", "承重 20 kg"])
+        assert "PUNCT-010" in self._rule_ids(auditor.audit(doc), "PUNCT-010")
+
+    def test_unit_spacing_consistent_not_flagged(self, auditor):
+        doc = self._doc(["重量 10 kg", "承重 20 kg"])
+        assert "PUNCT-010" not in self._rule_ids(auditor.audit(doc), "PUNCT-010")
+
+    def test_bullet_trailing_punct_mixed_flagged(self, auditor):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(text="• 第一条没有句号"),
+                        Paragraph(text="• 第二条有句号。"),
+                        Paragraph(text="• 第三条也没有"),
+                    ],
+                )
+            ],
+        )
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        assert "TXT-BULLET-PUNCT" in self._rule_ids(auditor.audit(doc), "TXT-BULLET-PUNCT")
+
+    def test_bullet_trailing_punct_consistent_not_flagged(self, auditor):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(text="• 第一条有句号。"),
+                        Paragraph(text="• 第二条有句号。"),
+                        Paragraph(text="• 第三条有句号。"),
+                    ],
+                )
+            ],
+        )
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        assert "TXT-BULLET-PUNCT" not in self._rule_ids(auditor.audit(doc), "TXT-BULLET-PUNCT")
+
+    def test_duplicate_sentence_across_pages_flagged(self, auditor):
+        sentence = "这是第一页的完整句子内容，用于检测重复情况。"
+        doc = self._doc([sentence + "另一句唯一内容。", sentence])
+        assert "TXT-DUP-SENTENCE" in self._rule_ids(auditor.audit(doc), "TXT-DUP-SENTENCE")
+
+    def test_unique_sentences_not_flagged(self, auditor):
+        doc = self._doc(["第一页唯一句子内容，长度足够触发检测。", "第二页完全不同的句子内容。"])
+        assert "TXT-DUP-SENTENCE" not in self._rule_ids(auditor.audit(doc), "TXT-DUP-SENTENCE")
+
+    def test_near_duplicate_pages_flagged(self, auditor):
+        body = "本页内容是完全相同的正文段落，用于近似重复页检测。" * 3
+        doc = self._doc([body, body])
+        assert "TXT-NEAR-DUP" in self._rule_ids(auditor.audit(doc), "TXT-NEAR-DUP")
+
+    def test_near_duplicate_short_pages_ignored(self, auditor):
+        doc = self._doc(["短", "短"])
+        assert "TXT-NEAR-DUP" not in self._rule_ids(auditor.audit(doc), "TXT-NEAR-DUP")
+
+
+class TestAuxiliaryReview:
+    """2026-10-29: 页眉/页脚/脚注参与语言类审查。"""
+
+    @staticmethod
+    def _aux(kind: str, text: str) -> PageElement:
+        return PageElement(
+            type="text_frame",
+            placeholder_type=kind,
+            paragraphs=[Paragraph(text=text)],
+        )
+
+    def test_header_mixed_formatting_flagged(self, auditor):
+        doc = _make_doc("正文")
+        doc.auxiliary_elements.append(self._aux("header", "使用FinFET工艺。"))
+        findings = auditor.audit(doc)
+        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "FMT-MIXED-002"]
+        assert hits
+        assert hits[0].location == "页眉"
+
+    def test_footer_rejected_vocab_flagged(self, auditor):
+        doc = _make_doc("正文")
+        doc.auxiliary_elements.append(self._aux("footer", "kind of 说明"))
+        findings = auditor.audit(doc)
+        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "VOCAB-REJECT"]
+        assert hits
+        assert hits[0].location == "页脚"
+
+    def test_footnote_punctuation_flagged(self, auditor):
+        doc = _make_doc("正文")
+        doc.auxiliary_elements.append(self._aux("footnote", "注意：这是脚注内容！！"))
+        findings = auditor.audit(doc)
+        hits = [f for f in findings if f.page_index == -1 and f.rule_id == "PUNCT-001"]
+        assert hits
+        assert hits[0].location == "脚注"
+
+    def test_no_auxiliary_no_neg_page_findings(self, auditor):
+        findings = auditor.audit(_make_doc("正文内容。"))
+        assert all(f.page_index != -1 for f in findings)

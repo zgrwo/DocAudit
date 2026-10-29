@@ -1,6 +1,6 @@
 # DocAudit — 项目规格文档
 
-> 版本：0.1.0 | 最后更新：2026-08-18 | 状态：Alpha 迭代中
+> 版本：0.1.0（0.2.0 待发布） | 最后更新：2026-10-29 | 状态：Alpha 迭代中
 > 事实唯一入口：**规则以 [rules.md](../../rules.md) 为唯一入口**，测试清单/数字以 [AGENTS.md](../../AGENTS.md) 为准。
 > 接口签名 → [api-reference.md](api-reference.md) · 用户操作 → [user-manual.md](../user-manual/user-manual.md)
 
@@ -33,7 +33,7 @@
 | 事实审查 | FactualAuditor | 数值跨页一致性、缩写定义管理、重复定义检测 |
 | 语言审查 | LanguageAuditor | 语法拼写（LanguageTool）、中英混排、术语一致性、禁用词汇 |
 | 自定义规则 | CustomRulesAuditor | rules.md 配置的 26 条规则（委托模式路由，不包含检查逻辑） |
-| 内置检查 | LanguageAuditor / FormatAuditor / StructureAuditor 等 | FMT-MIXED / PUNCT-001~007 / TXT-REDUNDANT / FMT-ALIGN / FMT-OVERLAP / FMT-SAFE-MARGIN / FMT-TEXT-OVERFLOW / FMT-FOOTER / FMT-IMAGE / FMT-CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
+| 内置检查 | LanguageAuditor / FormatAuditor / StructureAuditor 等 | FMT-MIXED / PUNCT-001~010 / TXT-REDUNDANT / TXT-BULLET-PUNCT / TXT-DUP-SENTENCE / TXT-NEAR-DUP / FMT-ALIGN / FMT-OVERLAP / FMT-SAFE-MARGIN / FMT-TEXT-OVERFLOW / FMT-TABLE-FIT / FMT-FOOTER / FMT-IMAGE / FMT-CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
 
 ### 2.2 规则清单（26 条，以 rules.md 为唯一入口）
 
@@ -75,9 +75,12 @@
 ### 2.3 关键技术特性
 
 - **委托模式**：CustomRulesAuditor 是"路由器"，通过 `_DISPATCH` 表委托到对应 Auditor，不含检查逻辑
-- **三步注册法**：新增 check_type 需同步 Auditor 方法 + `_DISPATCH` 表 + `_skip_checks`
+- **规则注册表**：新增 check_type 只需 Auditor 方法 + `CHECK_REGISTRY` 一行，`_DISPATCH`/`_skip_checks` 自动派生
 - **配置流**：rules.md → rule_parser.py → extract_auditor_config() → Auditor
+- **配置校验**：`docaudit rules validate` 静态校验 rules/glossary/vocab（CI 可作配置门禁）
 - **降级策略**：LanguageTool 不可用时跳过语法检查，不阻断流程
+- **报告**：HTML（SVG 线框 + 批量按文件分组）/ JSON / CSV / SARIF v2.1.0
+- **豁免持久化**：`.docauditignore`（Web UI 保存、CLI `--exempt-file` 读取）
 
 ## 3. 架构规格
 
@@ -86,11 +89,11 @@
 ```
 UI/CLI 层 (app.py / cli.py)
     ↓
-Reporter 层 (HTML/JSON 报告)
+Reporter 层 (HTML/JSON/CSV/SARIF 报告)
     ↓
 Auditor 层 (5 个 Auditor)
     ↓
-Engine 层 (6 个引擎)
+Engine 层 (8 个引擎)
     ↓
 Converter 层 (PPTX/DOCX/PDF/MD → Document)
     ↓
@@ -115,13 +118,13 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 ### 3.3 数据流
 
 ```
-输入文件 → Converter → Document 模型
+输入文件 → Converter → Document 模型（含 DOCX 页眉/页脚/脚注 auxiliary_elements）
                           ↓
                     Auditor 层（5 个并行）
                           ↓
-                    List[AuditFinding]
+                    List[AuditFinding]（可经 .docauditignore 豁免过滤）
                           ↓
-                    Reporter → HTML/JSON 报告
+                    Reporter → HTML / JSON / CSV / SARIF 报告
 ```
 
 ## 4. 质量规格
@@ -129,26 +132,30 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 ### 4.1 测试体系（以 AGENTS.md 为准）
 
 > 精确测试用例数与测试文件清单以 **AGENTS.md** 为准（数字由主代理统一同步）；
-> 本表为 2026-09-06 快照，最新清单见 AGENTS.md 测试表。
+> 本表为 2026-10-29 快照，最新清单见 AGENTS.md 测试表。
 
 | 文件 | 内容 |
 |------|------|
 | test_models.py | Document + AuditFinding 模型 |
-| test_auditors.py | Structure + Format + Factual 审计器 |
+| test_auditors.py | Structure + Format + Factual 审计器（含表格 fit） |
 | test_engines.py | Terminology + Vocabulary + 语言分段 + LanguageTool 客户端 |
-| test_rules.py | 规则解析 + DISPATCH 验证 |
+| test_rules.py | 规则解析 + DISPATCH/注册表验证 |
 | test_integration.py | 全流水线 + 黄金测试 + CLI 参数解析回归 |
 | test_autofix.py | AutoFixer 修复链路 |
-| test_converters.py | 四格式转换器 |
+| test_converters.py | 四格式转换器（含 PDF 双后端/表格几何/DOCX 辅助文本） |
 | test_edge_cases.py | 边界输入 |
-| test_language_auditor.py | 语言审计器细节 |
+| test_language_auditor.py | 语言审计器细节（标点/一致性/重复检测/辅助文本） |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
 | test_cli_exit_codes.py | CLI 退出码契约（处理失败 → exit 1） |
 | test_golden_paths.py | 黄金测试真实三路径（CLI/WebUI/Python API） |
 | test_rule_coverage.py | 规则断言覆盖测试（STR/CON/FMT 定向补盲） |
 | test_html_report_security.py | HTML 转义红线安全测试 |
+| test_report_workflow.py | 报告工作流（HTML 分组/缩略图、CSV、SARIF、CLI 导出） |
+| test_exemptions.py | 豁免持久化 `.docauditignore` |
+| test_validation.py | 配置校验与 `rules validate` 子命令 |
 | test_app_ui.py | Web UI 纯函数/冒烟测试 |
+| test_gates.py | 治理门禁（裸异常/HTML 转义/api 同步/文档数字） |
 
 ### 4.2 黄金测试（真实三路径）
 
@@ -170,10 +177,14 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 - PPTX 位置单位：EMU (python-pptx) vs pt (Document 模型)，需 `/12700` 转换
 - Group 子元素：必须用 `page.flattened_elements` 递归展开，不直接遍历 `page.elements`
 - LanguageTool：需本地服务（Docker / Java 子进程），不可用时降级跳过语法检查，不阻塞整体审查
+- 版面估算非渲染级：FMT-TEXT-OVERFLOW / FMT-TABLE-FIT 为几何估算（CJK=2 半角、行高≈1.2em），只给 INFO/WARNING 提示，不作为渲染结论
+- PDF：docling 后端含表格/版面，但 Windows 非 ASCII 安装路径受限；PyMuPDF 后端规避该限制但只提取文本+书签（无表格结构）
+- DOCX 页眉/页脚/脚注：仅参与语言/术语/标点类检查（无独立页面几何，不做版面检查）
+- 豁免键基于「规则+页码+文本上下文」：文档内容改动后旧豁免可能失效（预期行为）
 
 ## 5. 历史演化摘要
 
-> 截至 2026-08-18，仓库共 **33 个 commits**（`git rev-list --count HEAD` 实测）。
+> 截至 2026-08-18，仓库共 **33 个 commits**（`git rev-list --count HEAD` 实测；后续批次未在此打点）。
 
 | 阶段 | 关键事件 |
 |------|----------|
@@ -182,6 +193,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | 深度审查修复批次（2026-08） | 多轮 max level 审查修复：STR-003 跳级误报、TERM-003 中英混排降噪、缩写扫描缓存绑定文档、Vocabulary 编码回退、setup_offline 完全离线加固等 |
 | 工程化与门禁（2026-08） | check_doc_numbers / check_bare_handlers / check_api_sync 门禁上线、锁文件可复现、CI 矩阵增强、5S 整理（Prompt/审查报告归位 .qoder） |
 | 本批次整改（2026-08-18） | 幻影规格重写、CLI 处理失败退出码修复、文档事实冲突修正（详见 CHANGELOG） |
+| 质量复核与版面批次（2026-10-28~29） | R-01~R-24 误报控制、继承格式、Group 坐标、真实 bullet、PUNCT-001~007、PPT 版面规则；第二批补齐表格 fit、报告工作流（HTML 分组/缩略图、CSV、SARIF）、豁免持久化、规则注册表、配置校验、标点/重复检测、DOCX 辅助文本、PDF 双后端 |
 
 ## 6. 关键设计决策
 
@@ -193,4 +205,4 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | 语言检查 | LanguageTool | 开源，支持中英文；三层降级保离线可用 |
 | 报告格式 | HTML + JSON | 可视化 + 程序化处理 |
 
-<!-- last_updated: 2026-10-28 -->
+<!-- last_updated: 2026-10-29 -->

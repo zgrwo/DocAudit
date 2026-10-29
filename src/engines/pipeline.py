@@ -14,6 +14,7 @@ from src.auditors import (
 )
 from src.auditors.base import BaseAuditor
 from src.converters import DocxConverter, MarkdownConverter, PdfConverter, PptxConverter
+from src.engines.check_registry import CHECK_REGISTRY
 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
@@ -25,18 +26,13 @@ CONVERTERS = [PptxConverter(), DocxConverter(), PdfConverter(), MarkdownConverte
 # 支持的文档扩展名 (app.py scan_folder 和 cli.py 批量扫描共用)
 SUPPORTED_EXTENSIONS = {".pptx", ".ppt", ".docx", ".doc", ".pdf", ".md", ".markdown", ".txt"}
 
-# _skip_checks 内部简写 → _DISPATCH check_type 映射 (单一真相来源，供 tests 守卫引用)
-# StructureAuditor: title_slide→first_slide_has_title_layout,
-#   heading_levels→heading_level_sequential, figure_numbering→figure_numbering_sequential,
-#   every_slide_conclusion→every_slide_has_conclusion
-# FactualAuditor: numeric_consistency→numeric_cross_reference
-# 其余键名与 _DISPATCH check_type 一致
+# _skip_checks 内部简写 → _DISPATCH check_type 映射。
+# 唯一真相来源: src/engines/check_registry.py 的 CHECK_REGISTRY（仅导出"简写与
+# check_type 不同名"的项，供 tests 守卫引用）。pipeline 不再手写跳过名单。
 SKIP_TO_CHECK_TYPE = {
-    "title_slide": "first_slide_has_title_layout",
-    "heading_levels": "heading_level_sequential",
-    "figure_numbering": "figure_numbering_sequential",
-    "every_slide_conclusion": "every_slide_has_conclusion",
-    "numeric_consistency": "numeric_cross_reference",
+    (spec.skip_key or check_type): check_type
+    for check_type, spec in CHECK_REGISTRY.items()
+    if (spec.skip_key or check_type) != check_type
 }
 
 
@@ -97,17 +93,8 @@ def build_auditors(
             "max_chinese_chars_title": config.get("max_chinese_chars_title", 40),
             "min_title_font_size": config.get("min_title_font_size", 28),
             # 跳过已由 CustomRulesAuditor dispatch 的检查，避免双重执行
-            "_skip_checks": [
-                "title_slide",
-                "heading_levels",
-                "figure_numbering",
-                "every_slide_conclusion",
-                "duplicate_title",
-                "title_trailing_punctuation",
-                "figure_caption_format",
-                "slide_structure_consistency",
-                "title_length",
-            ],
+            # (由 CHECK_REGISTRY 派生: 注册即跳过，漏注册不可能发生)
+            "_skip_checks": CustomRulesAuditor.skip_checks_for("sa"),
         }
     )
     format_auditor = FormatAuditor(
@@ -128,13 +115,7 @@ def build_auditors(
             # (2026-09-06 审查 C-1); dispatch 型规则仍由 custom_rules 覆盖, 不经此处
             "rule_severities": config.get("rule_severities", {}),
             "enabled_rule_ids": enabled_rule_ids,
-            "_skip_checks": [
-                "element_overflow",
-                "per_page_char_limit",
-                "empty_placeholder",
-                "bullet_consistency",
-                "table_contrast",
-            ],
+            "_skip_checks": CustomRulesAuditor.skip_checks_for("fa"),
         }
     )
     # languagetool_url 可选注入: rules.md 声明时传入, 未声明时由
@@ -150,13 +131,7 @@ def build_auditors(
     factual_auditor = FactualAuditor(
         config={
             "vocab_dir": vocab_dir,
-            "_skip_checks": [
-                "numeric_consistency",
-                "abbreviation_first_defined",
-                "abbreviation_defined_never_used",
-                "abbreviation_multiply_defined",
-                "abbreviation_used_before_defined",
-            ],
+            "_skip_checks": CustomRulesAuditor.skip_checks_for("fca"),
         }
     )
     custom_rules_auditor = CustomRulesAuditor(

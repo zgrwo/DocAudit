@@ -6,7 +6,6 @@
 FinFET
 GAA
 Nanosheet
-nanosheet
 Forksheet
 CFET
 
@@ -44,7 +43,6 @@ InFO
 SoIC
 EMIB
 Chiplet
-chiplet
 TSV
 TGV
 TMV

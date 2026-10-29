@@ -8,8 +8,13 @@ from pathlib import Path
 from src import __version__
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
+from src.reporters.ordering import _group_by_source, _sort_findings
 
 logger = logging.getLogger(__name__)
+
+# 缩略图最多渲染页数 (防止超大文档报告膨胀)
+_MAX_THUMBNAIL_PAGES = 80
+_THUMBNAIL_TYPES = ("text_frame", "table", "image", "chart")
 
 
 def generate_html_report(
@@ -19,6 +24,7 @@ def generate_html_report(
     output_path: str | Path | None = None,
     file_label: str | None = None,
     page_count: int | None = None,
+    show_thumbnails: bool = True,
 ) -> str:
     """生成独立 HTML 审查报告。
 
@@ -31,6 +37,8 @@ def generate_html_report(
                     避免头部只显示第一个文件的路径误导)
         page_count: 可选总页数覆盖 (批量模式传聚合页数 sum(len(d.pages))；
                     None 时保持现状取 len(doc.pages)，向后兼容)
+        show_thumbnails: 是否渲染页面 SVG 线框缩略图 (批量聚合报告应传 False，
+                    否则只反映首个文件的页面几何)
     """
 
     # 按严重度统计
@@ -44,10 +52,23 @@ def generate_html_report(
         type_name = f.type.value
         type_counts[type_name] = type_counts.get(type_name, 0) + 1
 
-    findings_html = _render_findings(findings, doc)
+    findings_html = _render_findings(findings)
+    thumbnails_html = _render_thumbnails(doc) if show_thumbnails else ""
 
     # P6: page_count 覆盖总页数 (批量模式传聚合页数)，None 时保持现状取 len(doc.pages)
     total_pages = len(doc.pages) if page_count is None else page_count
+
+    thumbnails_section = (
+        f"""
+    <h2 style="margin-bottom:8px">页面缩略图</h2>
+    <p style="color:#888;font-size:12px;margin-bottom:12px">
+        🔵 文本框 · 🟢 表格 · 🟠 图片 · 🟣 图表（线框示意，非渲染效果）
+    </p>
+    {thumbnails_html}
+"""
+        if thumbnails_html
+        else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -83,6 +104,17 @@ def generate_html_report(
     .finding-context {{ background: #f5f5f5; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 13px; margin-bottom: 4px; white-space: pre-wrap; }}
     .finding-suggestion {{ color: #2e7d32; font-size: 13px; }}
     .rule-id {{ font-size: 11px; color: #aaa; }}
+    .file-group {{ margin: 24px 0 12px; font-size: 16px; }}
+    .file-group .count {{ font-weight: normal; color: #888; font-size: 13px; }}
+    .thumbs {{ display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }}
+    .thumb {{ margin: 0; }}
+    .thumb svg {{ width: 170px; height: auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }}
+    .thumb figcaption {{ font-size: 11px; color: #888; text-align: center; margin-top: 4px; }}
+    .thumb .page {{ fill: #fff; stroke: #ddd; }}
+    .thumb .el-text_frame {{ fill: #cfe3ff; stroke: #1976d2; stroke-width: 1; }}
+    .thumb .el-table {{ fill: #d9f2d9; stroke: #2e7d32; stroke-width: 1; }}
+    .thumb .el-image {{ fill: #ffe0b2; stroke: #f57c00; stroke-width: 1; }}
+    .thumb .el-chart {{ fill: #e1bee7; stroke: #7b1fa2; stroke-width: 1; }}
     .footer {{ text-align: center; padding: 32px; color: #aaa; font-size: 12px; }}
 </style>
 </head>
@@ -112,7 +144,7 @@ def generate_html_report(
             <div class="label">📋 总计</div>
         </div>
     </div>
-
+{thumbnails_section}
     <h2 style="margin-bottom:16px">审查发现</h2>
     {findings_html if findings_html else '<p style="color:#888">🎉 未发现任何问题！</p>'}
 </div>
@@ -131,32 +163,42 @@ def generate_html_report(
     return html
 
 
-def _render_findings(findings: list[AuditFinding], doc: Document) -> str:
+def _render_findings(findings: list[AuditFinding]) -> str:
     """将 findings 渲染为 HTML 片段。
 
-    2026-10-29: 按严重度 → 页码 → 规则 ID 排序，避免报告按审计器执行顺序
-    混杂，用户打开报告先看到 error。
+    排序: severity → 页码 → rule_id → message (与 CSV/SARIF 共用 SSOT)。
+    批量模式 (finding 带 metadata["source_file"]) 按文件分组，组内保持同一排序。
     """
     if not findings:
         return ""
 
-    severity_order = {"error": 0, "warning": 1, "info": 2}
-    ordered = sorted(
-        findings,
-        key=lambda f: (
-            severity_order.get(f.severity.value, 3),
-            f.page_index if f.page_index is not None else -1,
-            f.rule_id or "",
-            f.message or "",
-        ),
-    )
+    ordered = _sort_findings(findings)
+    groups = _group_by_source(ordered)
+    named = [source for source in groups if source]
+    if len(named) <= 1:
+        return "\n".join(_render_finding(f) for f in ordered)
 
     parts: list[str] = []
-    for f in ordered:
-        sev_class = f.severity.value
-        sev_label = {"error": "严重", "warning": "警告", "info": "提示"}.get(sev_class, sev_class)
+    for source in sorted(groups):
+        items = groups[source]
+        errors = sum(1 for f in items if f.severity == FindingSeverity.ERROR)
+        warnings = sum(1 for f in items if f.severity == FindingSeverity.WARNING)
+        infos = sum(1 for f in items if f.severity == FindingSeverity.INFO)
+        label = source or "（未标注来源）"
+        parts.append(
+            f'<h3 class="file-group">📁 {escape(label)} '
+            f'<span class="count">({len(items)} 条 · 🔴{errors} 🟡{warnings} 🔵{infos})</span></h3>'
+        )
+        parts.extend(_render_finding(f) for f in items)
+    return "\n".join(parts)
 
-        parts.append(f"""
+
+def _render_finding(f: AuditFinding) -> str:
+    """单个 finding 的 HTML 片段 (所有用户文本均已 html.escape)。"""
+    sev_class = f.severity.value
+    sev_label = {"error": "严重", "warning": "警告", "info": "提示"}.get(sev_class, sev_class)
+
+    return f"""
 <div class="finding {sev_class}">
     <div class="finding-header">
         <span class="finding-severity {sev_class}">{sev_label}</span>
@@ -166,6 +208,54 @@ def _render_findings(findings: list[AuditFinding], doc: Document) -> str:
     {f'<div class="finding-location">📍 {escape(f.location)}</div>' if f.location else ""}
     {f'<div class="finding-context">{escape(f.context)}</div>' if f.context else ""}
     {f'<div class="finding-suggestion">💡 {escape(f.suggestion)}</div>' if f.suggestion else ""}
-</div>""")
+</div>"""
 
-    return "\n".join(parts)
+
+def _render_thumbnails(doc: Document) -> str:
+    """为有几何信息的页面渲染内联 SVG 线框缩略图。
+
+    仅示意元素位置与类型 (非渲染效果)，最多 _MAX_THUMBNAIL_PAGES 页。
+    """
+    props = (doc.metadata.custom_properties or {}) if doc.metadata else {}
+    try:
+        page_w = float(props.get("slide_width") or 960)
+        page_h = float(props.get("slide_height") or 540)
+    except (TypeError, ValueError):
+        page_w, page_h = 960.0, 540.0
+    if page_w <= 0 or page_h <= 0:
+        page_w, page_h = 960.0, 540.0
+
+    figures: list[str] = []
+    for page in doc.pages[:_MAX_THUMBNAIL_PAGES]:
+        rects: list[str] = []
+        for elem in page.flattened_elements:
+            if elem.type not in _THUMBNAIL_TYPES:
+                continue
+            if elem.left is None or elem.top is None or not elem.width or not elem.height:
+                continue
+            x = max(0.0, min(float(elem.left), page_w))
+            y = max(0.0, min(float(elem.top), page_h))
+            w = min(float(elem.width), page_w - x)
+            h = min(float(elem.height), page_h - y)
+            if w <= 0 or h <= 0:
+                continue
+            label = escape(str(elem.shape_name or elem.type))
+            rects.append(
+                f'<rect class="el-{elem.type}" x="{x:.1f}" y="{y:.1f}" '
+                f'width="{w:.1f}" height="{h:.1f}"><title>{label}</title></rect>'
+            )
+        if not rects:
+            continue
+        page_no = page.slide_number or page.index + 1
+        figures.append(
+            f'<figure class="thumb">'
+            f'<svg viewBox="0 0 {page_w:.0f} {page_h:.0f}" role="img" '
+            f'aria-label="第 {page_no} 页线框">'
+            f'<rect class="page" x="0" y="0" width="{page_w:.0f}" height="{page_h:.0f}"/>'
+            f"{''.join(rects)}</svg>"
+            f"<figcaption>第 {page_no} 页</figcaption></figure>"
+        )
+
+    if not figures:
+        return ""
+    return '<div class="thumbs">' + "".join(figures) + "</div>"

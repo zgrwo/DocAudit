@@ -176,6 +176,7 @@ language: "zh-CN"
 | FMT-OVERLAP | 元素重叠提示 (保守阈值 25%，排除嵌套/全屏背景) | `src/auditors/format.py` → `_check_element_overlap` |
 | FMT-SAFE-MARGIN | 元素贴边提示 (默认页面 1% 安全边距) | `src/auditors/format.py` → `_check_safe_margin` |
 | FMT-TEXT-OVERFLOW | 文本框内容溢出估算 (CJK=2 半角单位，行高≈1.2em) | `src/auditors/format.py` → `_check_text_overflow` |
+| FMT-TABLE-FIT | 表格行高/列宽/页面越界估算 (行高不足/长词断行/表格顶出页面) | `src/auditors/format.py` → `_check_table_fit` |
 | FMT-FOOTER | 页脚/页码/日期占位符部分页面缺失 | `src/auditors/format.py` → `_check_footer_consistency` |
 | FMT-IMAGE | 图片宽高比失真/低 DPI/缺 alt text | `src/auditors/format.py` → `_check_image_quality` |
 | FMT-CHART | 图表缺少标题 | `src/auditors/format.py` → `_check_chart_labeling` |
@@ -187,6 +188,12 @@ language: "zh-CN"
 | PUNCT-005 | 括号/引号不配对 | `src/auditors/language.py` → `_check_punctuation` |
 | PUNCT-006 | 中文语境使用英文省略号 | `src/auditors/language.py` → `_check_punctuation` |
 | PUNCT-007 | 中文语境使用英文双连字符破折号 | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-008 | 日期格式混用 (中文/ISO/斜杠) | `src/auditors/language.py` → `_check_date_format_consistency` |
+| PUNCT-009 | 数值范围连接符混用 (`-`/`—`/`~`/`至`) | `src/auditors/language.py` → `_check_range_separator_consistency` |
+| PUNCT-010 | 数值与单位空格用法不一致 (`10kg` / `10 kg`) | `src/auditors/language.py` → `_check_unit_spacing_consistency` |
+| TXT-BULLET-PUNCT | 项目符号末尾标点不一致 (同页部分有句号) | `src/auditors/language.py` → `_check_bullet_trailing_punctuation` |
+| TXT-DUP-SENTENCE | 跨页重复句子 (归一化后完全相同) | `src/auditors/language.py` → `_check_duplicate_sentences` |
+| TXT-NEAR-DUP | 近似重复页 (字符二元组 Jaccard ≥ 0.90，≥40 字) | `src/auditors/language.py` → `_check_near_duplicate_pages` |
 | TXT-REDUNDANT | 高精度中文冗余表达 | `src/auditors/language.py` → `_check_redundancy` |
 | VOCAB-REJECT | 禁用词汇检查 (reject.txt) | `src/auditors/language.py` → `_check_rejected_vocab`；引擎 `src/engines/vocabulary.py` |
 | PY-SPELL | 纯 Python 拼写检查 (tier-3 降级) | `src/engines/languagetool.py` → `_check_python` |
@@ -203,4 +210,6 @@ language: "zh-CN"
 | CON-004 判断 2 门槛 | ≥3 内容段落 | 同版式页内容段落数达到门槛才触发结论检查 | `src/auditors/structure.py` → `_check_every_slide_has_conclusion` |
 | 语言分段门槛 | 英文 ≥2 词 / 中文 ≥5 字 | 过短语言段并入相邻段 | `src/auditors/language.py` → `_segment_languages` |
 | 上下文窗口 | ±30 字符 | CON-001 数值上下文切片 | `src/auditors/factual.py` → `_extract_numeric_values` |
+| 表格估算默认字号 | PPTX 18pt / DOCX 10.5pt | 单元格未写显式字号时按应用默认值估算 (FMT-TABLE-FIT) | `src/auditors/format.py` → `DEFAULT_TABLE_FONT_SIZE_*` |
+| 表格单元格内边距 | PPTX 7.2pt / DOCX 5.4pt | 未提取到单元格边距时的估算兜底 | `src/auditors/format.py` → `_check_table_fit` |
 

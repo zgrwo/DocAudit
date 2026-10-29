@@ -630,3 +630,46 @@ class TestDispatchValidation:
         findings = run_auditors(doc, auditors)
         str004 = [f for f in findings if f.rule_id == "STR-004"]
         assert str004, "流水线未产生 STR-004 发现 — 标题长度检查静默失效"
+
+
+class TestCheckRegistry:
+    """2026-10-29: 规则注册表 SSOT — _DISPATCH / _skip_checks 由 CHECK_REGISTRY 派生。"""
+
+    def test_dispatch_derived_from_registry(self):
+        from src.auditors.custom_rules import CHECK_REGISTRY
+
+        assert set(CustomRulesAuditor._DISPATCH) == set(CHECK_REGISTRY)
+        for check_type, spec in CHECK_REGISTRY.items():
+            assert CustomRulesAuditor._DISPATCH[check_type] == (
+                spec.auditor,
+                spec.method,
+                spec.per_page,
+                spec.pptx_only,
+            )
+
+    def test_skip_checks_cover_each_auditor(self):
+        from src.auditors.custom_rules import CHECK_REGISTRY
+
+        for key in ("sa", "fa", "fca"):
+            expected = [
+                spec.skip_key or ct for ct, spec in CHECK_REGISTRY.items() if spec.auditor == key
+            ]
+            assert CustomRulesAuditor.skip_checks_for(key) == expected
+            assert expected, f"{key} 应有注册的检查"
+
+    def test_skip_keys_unique_per_auditor(self):
+        """同一 Auditor 内 skip_key 不得重复，否则一条跳过会误伤另一条检查。"""
+        from collections import Counter
+
+        from src.auditors.custom_rules import CHECK_REGISTRY
+
+        for key in ("sa", "fa", "fca"):
+            skip_keys = [
+                spec.skip_key or ct for ct, spec in CHECK_REGISTRY.items() if spec.auditor == key
+            ]
+            assert not [k for k, n in Counter(skip_keys).items() if n > 1]
+
+    def test_registry_auditor_keys_known(self):
+        from src.auditors.custom_rules import CHECK_REGISTRY
+
+        assert {spec.auditor for spec in CHECK_REGISTRY.values()} <= {"sa", "fa", "fca"}

@@ -24,7 +24,7 @@ pytest tests/ -v
 
 ## 新增审查规则流程
 
-新增一个 `check_type` 必须完成 **三步注册**，缺一不可：
+新增一个 `check_type` 只需 **两步注册**（`_DISPATCH` 与 `_skip_checks` 由注册表自动派生）：
 
 ### 步骤 1：在对应 Auditor 中实现方法
 
@@ -37,27 +37,24 @@ def _check_xxx(self, page, doc) -> list[AuditFinding]:  # per_page=True
     return findings
 ```
 
-方法签名由 `_DISPATCH` 中的 `per_page` 决定：
+方法签名由注册表中的 `per_page` 决定：
 - `per_page=True` → `(self, page, doc)`
 - `per_page=False` → `(self, doc)`
 
-### 步骤 2：在 `_DISPATCH` 表中注册
+### 步骤 2：在 `CHECK_REGISTRY` 注册表加一行
 
 ```python
-# src/auditors/custom_rules.py — _DISPATCH 字典
-"xxx_check_type": ("sa", "_check_xxx", True, False),
-#                   ↑       ↑            ↑     ↑
-#               auditor_key  method_name  per_page  pptx_only
+# src/engines/check_registry.py — CHECK_REGISTRY
+"xxx_check_type": CheckSpec("sa", "_check_xxx", per_page=True, pptx_only=False),
+#                    ↑              ↑        ↑            ↑          ↑
+#                check_type   auditor_key  method   per_page   pptx_only
 ```
 
-### 步骤 3：在 `_skip_checks` 中排除
+`_DISPATCH`（调度）与 pipeline 的 `_skip_checks`（避免 audit() 直调重复执行）
+均由 `CHECK_REGISTRY` 派生 —— **不要再手改这两处**。若该方法在 `audit()` 中有
+独立守卫键且与 check_type 不同名，用 `skip_key="..."` 指定。
 
-```python
-# src/engines/pipeline.py — build_auditors()
-"_skip_checks": [..., "xxx_check_type"],
-```
-
-### 步骤 4：在 `rules.md` 中声明规则
+### 步骤 3：在 `rules.md` 中声明规则
 
 ```markdown
 ## STR-XXX: 规则描述
@@ -66,7 +63,7 @@ def _check_xxx(self, page, doc) -> list[AuditFinding]:  # per_page=True
 - 检查: xxx_check_type
 ```
 
-### 步骤 5：验证
+### 步骤 4：验证
 
 ```bash
 # DISPATCH 完整性

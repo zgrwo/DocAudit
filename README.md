@@ -26,19 +26,24 @@
 | 维度 | 检查内容 | 示例 |
 |------|----------|------|
 | &#128202; **内容结构** | 标题页检测、标题层级递进、图表编号连续、必含章节、重复标题、每页结论 | "缺少概述章节"、"图3跳过了图2" |
-| &#127912; **格式规范** | 字体一致性 (Run级)、字号范围、对齐、元素溢出、段落长度、单页文本密度 | "非标准字体 +mj-lt"、"单页932字超限" |
-| &#128221; **语言文字** | 语法拼写 (LanguageTool)、中英混排、半导体术语一致性、禁用词 | "TSV首次未标注全称"、"中英文间缺空格" |
+| &#127912; **格式规范** | 字体一致性 (Run级)、字号范围、对齐、元素溢出、表格行高/列宽 fit、段落长度、单页文本密度 | "非标准字体 +mj-lt"、"单页932字超限" |
+| &#128221; **语言文字** | 语法拼写 (LanguageTool)、中英混排、标点/日期/单位/范围一致性、重复句与近似重复页、半导体术语一致性、禁用词 | "TSV首次未标注全称"、"中英文间缺空格" |
 | &#128300; **事实精准** | 数值跨页一致性、缩写定义管理、重复定义检测 | "良率95.3%在第3页为95.8%" |
+
+> DOCX 页眉/页脚/脚注同样参与语言文字类检查（无版面检查）。
 
 ### 亮点
 
 - **完全离线** &#8212; 文档不上传任何服务器，工艺数据安全
 - **配置驱动** &#8212; 通过 `rules.md` 调整审查规则，无需改代码
-- **自定义规则引擎** &#8212; 支持正则匹配 + 检查委托两种模式
+- **配置可校验** &#8212; `docaudit rules validate` 静态检查 rules/术语表/词汇表，CI 可直接用
+- **自定义规则引擎** &#8212; 支持正则匹配 + 检查委托两种模式（注册表自动派生调度）
 - **LanguageTool 三层降级** &#8212; Docker &#8594; Java 子进程 &#8594; Python 内置，零依赖也能跑
 - **智能术语检查** &#8212; 3 本半导体术语表 (45+ 术语)，含自动跳过去重
-- **批量审查** &#8212; 支持文件夹 + 多文件拖拽，按文件汇总
-- **灵活豁免** &#8212; 规则/页面/类型/单条，四个层级豁免
+- **批量审查** &#8212; 支持文件夹 + 多文件拖拽，按文件汇总、报告按文件分组
+- **灵活豁免** &#8212; 规则/页面/类型/单条，四个层级豁免，可持久化到 `.docauditignore`
+- **多格式报告** &#8212; HTML（页面 SVG 线框 + 按文件分组）/ JSON / CSV / SARIF v2.1.0
+- **双 PDF 后端** &#8212; Docling（版面/表格）或 PyMuPDF（可选，中文路径安全、更快）
 - **自动修复** &#8212; 字体标准化、字号修正、中英文间距、元素溢出、标题标点、项目符号
 
 ---
@@ -195,8 +200,12 @@ bash scripts/setup_offline.sh install
 # 单文件审查
 python src/cli.py report.pptx
 
-# 审查 + 导出 HTML
+# 审查 + 导出 HTML（含页面 SVG 线框）
 python src/cli.py report.pptx -o report.html
+
+# 导出 CSV / SARIF（SARIF 可上传 GitHub Code Scanning）
+python src/cli.py report.pptx -o report.csv
+python src/cli.py report.pptx -o report.sarif
 
 # 批量审查目录
 python src/cli.py docs/ -o batch_report.html
@@ -206,6 +215,12 @@ python src/cli.py report.pptx --fix
 
 # 仅修复字体
 python src/cli.py report.pptx --fix --fix-type font
+
+# 校验规则/术语表/词汇表配置（CI 可用，错误时 exit 1）
+python src/cli.py rules validate
+
+# 使用豁免基线（命中项不计入报告与退出码）
+python src/cli.py report.pptx --exempt-file .docauditignore
 ```
 
 > 完整参数 &#8594; [用户手册](docs/user-manual/user-manual.md)
@@ -273,7 +288,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **427 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
+- **529 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）
@@ -287,8 +302,9 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - **大文件处理**：>100 MB 的 PPTX/DOCX 需要较多内存
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
 - **PDF 转换依赖 docling 本地完整安装**：docling 未安装或其本地数据文件（如 docling-parse 依赖）不完整时报错，需完整安装 `[pdf]` 依赖组
+- **PDF 可选 PyMuPDF 后端**：`pip install pymupdf` 后自动启用（或 `DOCAUDIT_PDF_BACKEND=pymupdf`），不依赖 docling 模型、不受下方非 ASCII 路径限制；代价是不恢复表格结构（表格文字按普通文本审查）
 - **PDF 首次转换需 docling 模型缓存**：docling 布局模型不随 pip 包分发（2026-08 实证），首次转换时从 HuggingFace Hub 下载；离线机器需在有网机器上预下载后随项目拷贝（见下方「方案 C」离线章节）
-- **PDF 转换要求纯英文 (ASCII) 安装路径**（Windows）：docling-parse 的 C++ 层无法处理含中文等非 ASCII 字符的项目/虚拟环境路径，路径含中文时 PDF 转换必然失败（报 `filename does not exists`）。请将项目与 venv 放在纯英文目录；程序会在该情况下提前抛出可操作提示（详见 `docs/governance/tooling-pitfalls.md` #18）
+- **docling 后端要求纯英文 (ASCII) 安装路径**（Windows）：docling-parse 的 C++ 层无法处理含中文等非 ASCII 字符的项目/虚拟环境路径，路径含中文时 docling 转换必然失败（报 `filename does not exists`）。请将项目与 venv 放在纯英文目录，或改用 PyMuPDF 后端；程序会在该情况下提前抛出可操作提示（详见 `docs/governance/tooling-pitfalls.md` #18）
 - **LanguageTool 服务地址**：`languagetool_url` 可由 `rules.md` 配置（M3，仅允许 localhost/127.0.0.1/::1），指向外部地址会报错（防文档文本外发）
 - **Windows 上 pytest 清理临时目录偶发权限错误**：会话结束时清理 `%TEMP%` 下 pytest symlink 偶发 PermissionError，属环境性噪音，不影响测试结果
 
@@ -347,4 +363,4 @@ python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。
 
-<!-- last_updated: 2026-10-28 -->
+<!-- last_updated: 2026-10-29 -->

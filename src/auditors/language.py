@@ -2,6 +2,7 @@
 
 import logging
 import re
+from itertools import combinations
 
 from src.auditors.base import BaseAuditor
 from src.engines.languagetool import LanguageToolClient, check_chinese_patterns
@@ -13,6 +14,9 @@ from src.text_utils import (
     CJK_LATIN_BOUNDARY,
     CJK_RE,
     LATIN_CJK_BOUNDARY,
+    LETTERED_BULLET_RE,
+    NUMBERED_BULLET_RE,
+    SYMBOL_BULLET_RE,
 )
 from src.text_utils import (
     LATIN_CHINESE_PUNCT as _LATIN_CHINESE_PUNCT,
@@ -96,6 +100,54 @@ _REDUNDANT_PATTERNS = [
         "改为“唯一”",
     ),
 ]
+
+# ── 文档级格式一致性 (2026-10-29 补全) ──────────────────────
+# 说明: 都是 INFO/WARNING 级提示，供人工确认；阈值偏保守以避免噪声。
+
+# 常见日期格式 (顺序即示例优先级)
+_DATE_FORMAT_PATTERNS = (
+    ("中文", re.compile(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日")),
+    ("ISO", re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b")),
+    ("斜杠", re.compile(r"\b\d{4}/\d{1,2}/\d{1,2}\b")),
+)
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{1,2}-\d{1,2}\b")
+# 数值范围连接符: 半角连字符 / 长短破折号 / 波浪号 / 中文"至/到"
+_RANGE_SEPARATOR_RE = re.compile(r"(?<=\d)\s*([-–—~～]|至|到)\s*(?=\d)")
+_RANGE_CLASS = {
+    "-": "半角连字符",
+    "–": "短破折号",
+    "—": "长破折号",
+    "~": "半角波浪号",
+    "～": "全角波浪号",
+    "至": "中文“至”",
+    "到": "中文“到”",
+}
+# 数值+单位 (长的单位排前面，避免 "kg" 被 "g" 抢先匹配)
+_UNIT_RE = re.compile(
+    r"(?<![\w.])(\d+(?:\.\d+)?)\s?"
+    r"(GHz|MHz|kHz|Hz|kg|mg|g|km|cm|mm|μm|um|nm|ms|min|mL|ml|L|dB|kV|V|mA|A|kW|W|GB|MB|TB|KB|pt|℃|°C|%)"
+    r"(?![A-Za-z])"
+)
+_TERMINAL_PUNCT = ("。", "；", "，", "、", "！", "？", ".", ";", ",", "!", "?")
+_BULLET_MARKER_RE = re.compile(r"^\s*(?:[•◦▪▸◆\-*]|\d+[\.\)]|\(\d+\)|[a-zA-Z][\.\)])\s+")
+_SENTENCE_SPLIT_RE = re.compile(r"[。！？!?\n]+|\.\s+")
+
+
+def _mask_dates(text: str) -> str:
+    """掩码 ISO 日期，避免 "2026-10" 被当成数值范围。"""
+    return _ISO_DATE_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def _normalize_sentence(sentence: str) -> str:
+    """句级去重归一化: 去掉空白与句末/句中常见标点，大小写不敏感。"""
+    norm = re.sub(r"\s+", "", sentence)
+    norm = norm.strip("，,、；;：:。.！!？?")
+    return norm.lower()
+
+
+def _bigrams(text: str) -> set[str]:
+    """字符二元组集合（用于页面相似度 Jaccard）。"""
+    return {text[i : i + 2] for i in range(len(text) - 1)}
 
 
 def _mask_prose_noise(text: str) -> str:
@@ -187,6 +239,9 @@ class LanguageAuditor(BaseAuditor):
             findings.extend(self._check_punctuation(page_text, page.index, page_label))
             findings.extend(self._check_redundancy(page_text, page.index, page_label))
 
+            # 3d. 项目符号末尾标点一致性 (页内)
+            findings.extend(self._check_bullet_trailing_punctuation(page))
+
             # 4. 禁用词汇检查 (reject.txt)
             findings.extend(self._check_rejected_vocab(page_text, page.index, page_label))
 
@@ -196,6 +251,37 @@ class LanguageAuditor(BaseAuditor):
                     self.terminology.check(page.notes, page.index, f"{page_label} (备注)")
                 )
 
+        # 6. 页眉/页脚/脚注 (DOCX): 只做语言/术语类检查（无独立版面几何）
+        findings.extend(self._audit_auxiliary(doc))
+
+        # 7. 文档级格式一致性 (2026-10-29): 日期/范围/单位写法、重复句、近似重复页
+        findings.extend(self._check_date_format_consistency(doc))
+        findings.extend(self._check_range_separator_consistency(doc))
+        findings.extend(self._check_unit_spacing_consistency(doc))
+        findings.extend(self._check_duplicate_sentences(doc))
+        findings.extend(self._check_near_duplicate_pages(doc))
+
+        return findings
+
+    def _audit_auxiliary(self, doc: Document) -> list[AuditFinding]:
+        """审查正文之外的辅助文本：页眉 / 页脚 / 脚注 (2026-10-29)。
+
+        这些内容没有独立页面几何，只做与位置无关的语言/术语类检查。
+        page_index=-1 表示「非正文页」。
+        """
+        findings: list[AuditFinding] = []
+        labels = {"header": "页眉", "footer": "页脚", "footnote": "脚注"}
+        for elem in doc.auxiliary_elements:
+            text = "\n".join(p.text for p in elem.paragraphs if p.text and p.text.strip())
+            if not text.strip():
+                continue
+            label = labels.get(elem.placeholder_type or "", "正文外内容")
+            findings.extend(self._check_mixed_formatting(text, -1, label))
+            findings.extend(self._check_builtin_chinese_patterns(text, -1, label))
+            findings.extend(self._check_punctuation(text, -1, label))
+            findings.extend(self._check_redundancy(text, -1, label))
+            findings.extend(self._check_rejected_vocab(text, -1, label))
+            findings.extend(self.terminology.check(text, -1, label))
         return findings
 
     def _check_text(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
@@ -465,6 +551,204 @@ class LanguageAuditor(BaseAuditor):
                 metadata={"match_count": len(matches), "rule": rule_id},
             )
         )
+
+    # ── 文档级格式一致性 (2026-10-29) ────────────────────────
+
+    def _check_date_format_consistency(self, doc: Document) -> list[AuditFinding]:
+        """检测全文日期格式混用 (中文/ISO/斜杠)。"""
+        found: dict[str, str] = {}
+        for page in doc.pages:
+            text = page.all_text
+            for label, regex in _DATE_FORMAT_PATTERNS:
+                if label in found:
+                    continue
+                m = regex.search(text)
+                if m:
+                    found[label] = m.group(0)
+        if len(found) < 2:
+            return []
+        examples = "、".join(f"{label}「{ex}」" for label, ex in found.items())
+        return [
+            AuditFinding(
+                type=FindingType.LANGUAGE,
+                severity=FindingSeverity.INFO,
+                message="日期格式混用（同一文档存在多种写法）",
+                rule_id="PUNCT-008",
+                page_index=None,
+                location="全文",
+                context=examples[:150],
+                suggestion="统一为一种日期格式（推荐 ISO 8601，如 2026-10-29）",
+                metadata={"formats": sorted(found)},
+            )
+        ]
+
+    def _check_range_separator_consistency(self, doc: Document) -> list[AuditFinding]:
+        """检测数值范围连接符混用 (3-5 / 3—5 / 3~5 / 3至5)。"""
+        found: dict[str, str] = {}
+        for page in doc.pages:
+            text = _mask_dates(page.all_text)
+            for m in _RANGE_SEPARATOR_RE.finditer(text):
+                sep = m.group(1)
+                label = _RANGE_CLASS.get(sep)
+                if label and label not in found:
+                    found[label] = m.group(0).strip()
+        if len(found) < 2:
+            return []
+        examples = "、".join(f"{label}「{ex}」" for label, ex in found.items())
+        return [
+            AuditFinding(
+                type=FindingType.LANGUAGE,
+                severity=FindingSeverity.INFO,
+                message="数值范围连接符混用",
+                rule_id="PUNCT-009",
+                page_index=None,
+                location="全文",
+                context=examples[:150],
+                suggestion="全文统一范围写法（推荐半角连字符，如 3-5）",
+                metadata={"separators": sorted(found)},
+            )
+        ]
+
+    def _check_unit_spacing_consistency(self, doc: Document) -> list[AuditFinding]:
+        """检测同一单位既有紧贴又有空格的混用 (10kg / 10 kg)。"""
+        variants: dict[str, dict[str, str]] = {}
+        for page in doc.pages:
+            text = page.all_text
+            for m in _UNIT_RE.finditer(text):
+                number, unit = m.group(1), m.group(2)
+                gap = text[m.start(1) + len(number) : m.start(2)]
+                kind = "spaced" if gap else "tight"
+                variants.setdefault(unit, {}).setdefault(kind, m.group(0))
+        mixed = {unit: v for unit, v in variants.items() if len(v) == 2}
+        if not mixed:
+            return []
+        examples = "、".join(
+            f"{unit}: {v['tight']} / {v['spaced']}" for unit, v in sorted(mixed.items())[:5]
+        )
+        return [
+            AuditFinding(
+                type=FindingType.LANGUAGE,
+                severity=FindingSeverity.INFO,
+                message="数值与单位的空格用法不一致",
+                rule_id="PUNCT-010",
+                page_index=None,
+                location="全文",
+                context=examples[:150],
+                suggestion="同一文档内统一写法（推荐数字与单位间加空格，如 10 kg）",
+                metadata={"units": sorted(mixed)},
+            )
+        ]
+
+    def _check_bullet_trailing_punctuation(self, page) -> list[AuditFinding]:
+        """页内项目符号末尾标点不一致（部分有句号、部分没有）。"""
+        bullet_texts: list[str] = []
+        for elem in page.flattened_elements:
+            for para in elem.paragraphs:
+                text = (para.text or "").strip()
+                if not text:
+                    continue
+                is_bullet = (
+                    para.bullet_type in ("char", "number")
+                    or SYMBOL_BULLET_RE.match(text)
+                    or NUMBERED_BULLET_RE.match(text)
+                    or LETTERED_BULLET_RE.match(text)
+                )
+                if is_bullet:
+                    bullet_texts.append(_BULLET_MARKER_RE.sub("", text).strip())
+        if len(bullet_texts) < 3:
+            return []
+        with_punct = [t for t in bullet_texts if t.endswith(_TERMINAL_PUNCT)]
+        without_punct = [t for t in bullet_texts if not t.endswith(_TERMINAL_PUNCT)]
+        if not with_punct or not without_punct:
+            return []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+        return [
+            AuditFinding(
+                type=FindingType.LANGUAGE,
+                severity=FindingSeverity.INFO,
+                message="项目符号末尾标点不一致",
+                rule_id="TXT-BULLET-PUNCT",
+                page_index=page.index,
+                location=page_label,
+                context=(
+                    f"{len(with_punct)} 条以标点结尾，{len(without_punct)} 条没有；"
+                    f"例: 「{with_punct[0][:40]}」/「{without_punct[0][:40]}」"
+                )[:150],
+                suggestion="同一层级项目符号统一：要么都加句号，要么都不加",
+                metadata={"with_punct": len(with_punct), "without_punct": len(without_punct)},
+            )
+        ]
+
+    def _check_duplicate_sentences(self, doc: Document) -> list[AuditFinding]:
+        """跨页重复句子检测（归一化后完全相同的长句）。"""
+        first_seen: dict[str, tuple[int, str]] = {}
+        findings: list[AuditFinding] = []
+        for page in doc.pages:
+            for raw in _SENTENCE_SPLIT_RE.split(page.all_text):
+                sentence = raw.strip()
+                if len(sentence) < 12:
+                    continue
+                if not re.search(r"[\u4e00-\u9fffA-Za-z]", sentence):
+                    continue
+                norm = _normalize_sentence(sentence)
+                if len(norm) < 8:
+                    continue
+                prev = first_seen.get(norm)
+                if prev is None:
+                    first_seen[norm] = (page.index, sentence)
+                elif prev[0] != page.index and len(findings) < 10:
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.LANGUAGE,
+                            severity=FindingSeverity.INFO,
+                            message=f"重复句子（与第 {prev[0] + 1} 页相同）",
+                            rule_id="TXT-DUP-SENTENCE",
+                            page_index=page.index,
+                            location=f"第 {page.index + 1} 页",
+                            context=sentence[:150],
+                            suggestion="确认是否为有意重复；若为复制遗留请删除或改写",
+                            metadata={"first_page": prev[0] + 1},
+                        )
+                    )
+        return findings
+
+    def _check_near_duplicate_pages(self, doc: Document) -> list[AuditFinding]:
+        """近似重复页检测（字符二元组 Jaccard ≥ 0.90，至少 40 字）。"""
+        entries: list[tuple[int, set[str]]] = []
+        for page in doc.pages:
+            norm = re.sub(r"\s+", "", page.all_text)
+            if len(norm) < 40:
+                continue
+            entries.append((page.index, _bigrams(norm)))
+        pairs: list[tuple[int, int, float]] = []
+        for (i, si), (j, sj) in combinations(entries, 2):
+            if not si or not sj:
+                continue
+            union = len(si | sj)
+            if not union:
+                continue
+            similarity = len(si & sj) / union
+            if similarity >= 0.90:
+                pairs.append((i, j, similarity))
+        pairs.sort(key=lambda p: -p[2])
+        findings: list[AuditFinding] = []
+        for i, j, similarity in pairs[:3]:
+            findings.append(
+                AuditFinding(
+                    type=FindingType.LANGUAGE,
+                    severity=FindingSeverity.WARNING,
+                    message=(
+                        f"第 {i + 1} 页与第 {j + 1} 页内容高度相似（相似度 {similarity:.0%}）"
+                    ),
+                    rule_id="TXT-NEAR-DUP",
+                    page_index=j,
+                    location=f"第 {j + 1} 页",
+                    context=f"与第 {i + 1} 页重复度 {similarity:.0%}",
+                    suggestion="确认是否为误复制页；确需保留可在报告中豁免",
+                    metadata={"similar_to": i + 1, "similarity": round(similarity, 3)},
+                )
+            )
+        return findings
 
     def _check_punctuation(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
         """标点冗余/冲突/全半角/配对检查 (2026-10-28)。

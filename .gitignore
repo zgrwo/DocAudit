@@ -49,8 +49,5 @@ packages/
 logs/
 *.log
 
-# Cache
-.docaudit_cache.json
-
 # LanguageTool ngrams 数据（docker-compose 挂载）
 languagetool-data/

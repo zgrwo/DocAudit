@@ -9,17 +9,12 @@ from itertools import combinations
 from src.auditors.base import BaseAuditor
 from src.models.document import Document, Page
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
+from src.text_utils import LETTERED_BULLET_RE as _LETTERED_BULLET_RE
+from src.text_utils import NUMBERED_BULLET_RE as _NUMBERED_BULLET_RE
+from src.text_utils import SYMBOL_BULLET_RE as _SYMBOL_BULLET_RE
 from src.text_utils import is_cjk_char as _is_cjk_char
 
 logger = logging.getLogger(__name__)
-
-# ── 项目符号分类正则 (模块级预编译，避免每页重复编译) ──
-# 符号类: • ◦ ▪ ▸ ◆ - *
-_SYMBOL_BULLET_RE = re.compile(r"^\s*[•◦▪▸◆\-*]\s")
-# 数字类: 1. 2) (1) ①
-_NUMBERED_BULLET_RE = re.compile(r"^\s*(?:\d+[\.\)]\s|\(\d+\)\s|[①②③④⑤⑥⑦⑧⑨⑩]\s)")
-# 字母类: a) A. i. (a)
-_LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
 
 
 def _effective_latin_font(run) -> str | None:
@@ -77,6 +72,71 @@ def _contrast_ratio(color_a: str, color_b: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+# ── 文本排版估算 (FMT-TEXT-OVERFLOW / FMT-TABLE-FIT 共用 SSOT) ──
+# 说明：非渲染级估算。CJK 计 2 半角单位，半角单位宽 ≈ 0.5em，行高 ≈ 1.2em。
+
+
+def _estimate_text_height(
+    text: str, font_size: float, inner_w: float, line_spacing: float | None = None
+) -> float:
+    """估算一段文本在给定内宽下的高度 (pt)。"""
+    units = 0.0
+    explicit_lines = 1
+    for ch in text:
+        if ch == "\n":
+            explicit_lines += 1
+        elif _is_cjk_char(ch):
+            units += 2.0
+        elif ch.isspace():
+            units += 0.5
+        else:
+            units += 1.0
+    capacity = max(1.0, inner_w / (font_size * 0.5))
+    lines = explicit_lines + max(0, math.ceil(units / capacity) - 1)
+    if line_spacing and line_spacing > 5:
+        line_height = line_spacing  # 固定行距 (pt)
+    else:
+        line_height = font_size * 1.2 * (line_spacing or 1.0)
+    return lines * line_height
+
+
+def _estimate_paragraphs_height(paragraphs, inner_w: float) -> float | None:
+    """估算段落组高度 (pt)。任一段均无字号信息时返回 None (无法判定)。
+
+    公式与 2026-10-29 FMT-TEXT-OVERFLOW 首版一致，此处收敛为单一实现。
+    """
+    estimated_h = 0.0
+    has_size = False
+    for para in paragraphs:
+        text = para.text
+        if not text.strip():
+            continue
+        sizes = [
+            _effective_font_size(run) for run in para.runs if _effective_font_size(run) is not None
+        ]
+        if not sizes:
+            continue
+        has_size = True
+        font_size = sum(sizes) / len(sizes)
+        estimated_h += _estimate_text_height(text, font_size, inner_w, para.line_spacing)
+        estimated_h += (para.space_before or 0.0) + (para.space_after or 0.0)
+    return estimated_h if has_size else None
+
+
+def _longest_unbreakable_token_width(text: str, font_size: float) -> float:
+    """最长不可断词宽度 (pt)。CJK 可任意断行，不计入 token。"""
+    best = 0.0
+    current = 0.0
+    for ch in text:
+        if ch.isspace() or _is_cjk_char(ch):
+            best = max(best, current)
+            current = 0.0
+        else:
+            current += 1.0
+    best = max(best, current)
+    return best * font_size * 0.5
+
+
 class FormatAuditor(BaseAuditor):
     """检查文档的格式规范"""
 
@@ -85,6 +145,10 @@ class FormatAuditor(BaseAuditor):
     DEFAULT_TITLE_SIZE_RANGE = (28, 44)  # pt  (rules.md FMT-002: 标题 28-44pt)
     DEFAULT_BODY_SIZE_RANGE = (12, 32)  # pt  (rules.md FMT-002: 正文 12-32pt)
     DEFAULT_ALIGNMENT_TOLERANCE = 5.0  # pt — 位置偏差容忍度
+    # 表格 fit 估算默认字号 (单元格未写显式字号时)：PowerPoint 表格默认 18pt，
+    # Word 正文默认 10.5pt。仅用于 FMT-TABLE-FIT 估算，不改写模型数据。
+    DEFAULT_TABLE_FONT_SIZE_PPTX = 18.0
+    DEFAULT_TABLE_FONT_SIZE_DOCX = 10.5
     DEFAULT_MAX_CHINESE_CHARS = 150  # 单段中文字数上限 (~3行×50字/行)
     DEFAULT_MAX_ENGLISH_CHARS = 300  # 单段英文字符上限 (~3行×100字符/行)
     DEFAULT_MAX_EXPLICIT_NEWLINES = 3  # 单段显式换行上限
@@ -180,6 +244,7 @@ class FormatAuditor(BaseAuditor):
                 findings.extend(self._check_per_page_char_limit(page))
             if "table_contrast" not in skip:
                 findings.extend(self._check_table_contrast(page, doc))
+            findings.extend(self._check_table_fit(page, doc))
 
         # 全局字体统计（PPTX 品牌字体语义）
         if is_pptx and self._rule_enabled("FMT-001"):
@@ -653,43 +718,8 @@ class FormatAuditor(BaseAuditor):
             inner_w = max(1.0, elem.width - margin_l - margin_r)
             inner_h = max(1.0, elem.height - margin_t - margin_b)
 
-            estimated_h = 0.0
-            has_size = False
-            for para in elem.paragraphs:
-                text = para.text
-                if not text.strip():
-                    continue
-                sizes = [
-                    _effective_font_size(run)
-                    for run in para.runs
-                    if _effective_font_size(run) is not None
-                ]
-                if not sizes:
-                    continue
-                has_size = True
-                font_size = sum(sizes) / len(sizes)
-                units = 0.0
-                explicit_lines = 1
-                for ch in text:
-                    if ch == "\n":
-                        explicit_lines += 1
-                    elif _is_cjk_char(ch):
-                        units += 2.0
-                    elif ch.isspace():
-                        units += 0.5
-                    else:
-                        units += 1.0
-                # 1 个半角单位 ≈ 0.5em
-                capacity = max(1.0, inner_w / (font_size * 0.5))
-                lines = explicit_lines + max(0, math.ceil(units / capacity) - 1)
-                spacing = (para.space_before or 0.0) + (para.space_after or 0.0)
-                if para.line_spacing and para.line_spacing > 5:
-                    line_height = para.line_spacing  # 固定行距 (pt)
-                else:
-                    line_height = font_size * 1.2 * (para.line_spacing or 1.0)
-                estimated_h += lines * line_height + spacing
-
-            if not has_size or estimated_h <= inner_h * 1.15:
+            estimated_h = _estimate_paragraphs_height(elem.paragraphs, inner_w)
+            if estimated_h is None or estimated_h <= inner_h * 1.15:
                 continue
             if estimated_h - inner_h < 8.0:
                 continue
@@ -1078,6 +1108,139 @@ class FormatAuditor(BaseAuditor):
                             },
                         )
                     )
+
+        return findings
+
+    def _check_table_fit(self, page: Page, doc: Document | None = None) -> list[AuditFinding]:
+        """估算表格行高/列宽是否容纳内容 (FMT-TABLE-FIT, 2026-10-29)。
+
+        说明：几何估算，非渲染级。仅当转换器提取到行高/列宽 (>0) 时判定：
+          - 行高小于单元格内容估算高度 → INFO（表格会自动增高、易错位）
+          - 最长不可断词宽于可用列宽 → INFO（会被强制断行，排版难看）
+          - 估算表格高度越过页面底部 → WARNING（真实越界风险）
+        每个表格的同类问题聚合为一条 finding，避免逐行刷屏。
+        """
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+        if doc is not None:
+            sh = doc.metadata.custom_properties.get("slide_height", 540) or 540
+        else:
+            sh = 540
+        is_pptx = doc is not None and doc.format == "pptx"
+        default_margin = 7.2 if is_pptx else 5.4  # PPTX 0.1in / Word 约 0.075in
+        # 单元格通常不写显式字号（继承表格样式）：估算时用应用默认值，
+        # 否则真实文件会整表静默跳过。values 见 rules.md「不可配阈值」表。
+        default_size = (
+            self.DEFAULT_TABLE_FONT_SIZE_PPTX if is_pptx else self.DEFAULT_TABLE_FONT_SIZE_DOCX
+        )
+
+        for elem in page.flattened_elements:
+            if elem.type != "table":
+                continue
+            row_heights = elem.table_row_heights or []
+            col_widths = elem.table_col_widths or []
+            if not row_heights and not col_widths:
+                continue  # 无几何信息 → 降级跳过，不误报
+
+            bad_rows: list[tuple[int, float, float]] = []
+            narrow_cols: dict[int, tuple[float, float]] = {}
+            estimated_total = 0.0
+
+            for row_idx, row in enumerate(elem.tables):
+                avail_h = row_heights[row_idx] if row_idx < len(row_heights) else 0.0
+                needed_h = 0.0
+                for cell in row:
+                    if cell.col >= len(col_widths):
+                        continue
+                    col_w = col_widths[cell.col]
+                    if col_w <= 0:
+                        continue
+                    margin_l = cell.margin_left if cell.margin_left is not None else default_margin
+                    margin_r = (
+                        cell.margin_right if cell.margin_right is not None else default_margin
+                    )
+                    inner_w = max(1.0, col_w - margin_l - margin_r)
+                    text = (cell.text or "").strip()
+                    if not text:
+                        continue
+                    font_size = float(cell.font_size) if cell.font_size else default_size
+                    needed_h = max(
+                        needed_h,
+                        _estimate_text_height(text, font_size, inner_w),
+                    )
+                    token_w = _longest_unbreakable_token_width(text, font_size)
+                    if token_w > inner_w * 1.05 and token_w - inner_w >= 2.0:
+                        prev = narrow_cols.get(cell.col)
+                        if prev is None or token_w > prev[0]:
+                            narrow_cols[cell.col] = (token_w, inner_w)
+
+                if avail_h > 0:
+                    estimated_total += max(avail_h, needed_h)
+                    if needed_h > avail_h * 1.15 and needed_h - avail_h >= 6.0:
+                        bad_rows.append((row_idx, needed_h, avail_h))
+                else:
+                    estimated_total += needed_h
+
+            if bad_rows:
+                rows_str = "/".join(f"第{r + 1}行" for r, _n, _a in bad_rows[:5])
+                worst_needed, worst_avail = max((n, a) for _r, n, a in bad_rows)
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="表格行高小于内容估算高度（表格会自动增高，可能错位或顶出边界）",
+                        rule_id="FMT-TABLE-FIT",
+                        page_index=page.index,
+                        location=f"{page_label} [表格] {rows_str}",
+                        context=(
+                            f"{rows_str} 行高 {worst_avail:.0f}pt < 估算内容 {worst_needed:.0f}pt"
+                        )[:150],
+                        suggestion="增大行高、精简单元格文字或减小字号",
+                        metadata={
+                            "kind": "row_height",
+                            "rows": [r for r, _n, _a in bad_rows],
+                            "estimated": True,
+                        },
+                    )
+                )
+
+            if narrow_cols:
+                cols_str = "、".join(f"第{c + 1}列" for c in sorted(narrow_cols)[:5])
+                widest = max(w for w, _i in narrow_cols.values())
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="表格列宽小于最长不可断词宽度（文字将被强制断行）",
+                        rule_id="FMT-TABLE-FIT",
+                        page_index=page.index,
+                        location=f"{page_label} [表格] {cols_str}",
+                        context=f"{cols_str} 最长词约 {widest:.0f}pt，超出可用列宽"[:150],
+                        suggestion="加宽列、缩小字号或为长词添加断行/空格",
+                        metadata={
+                            "kind": "col_width",
+                            "cols": sorted(narrow_cols),
+                            "estimated": True,
+                        },
+                    )
+                )
+
+            if elem.top is not None and elem.top + estimated_total > sh + 5.0:
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.WARNING,
+                        message="表格内容估算高度越过页面底部（表格将超出显示区域）",
+                        rule_id="FMT-TABLE-FIT",
+                        page_index=page.index,
+                        location=f"{page_label} [表格]",
+                        context=(
+                            f"top={elem.top:.0f}pt + 估算高度 {estimated_total:.0f}pt > 页高 {sh}pt"
+                        )[:150],
+                        suggestion="缩小表格（减少行数/字号）或移动到新页",
+                        metadata={"kind": "page_overflow", "estimated": True},
+                    )
+                )
 
         return findings
 

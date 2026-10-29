@@ -1,6 +1,6 @@
 # AGENTS.md — DocAudit 项目宪法
 
-> 本地离线文档审查系统：PPTX/DOCX/PDF/MD → 26 条规则 → HTML/JSON 报告。完全离线，零数据上报。
+> 本地离线文档审查系统：PPTX/DOCX/PDF/MD → 26 条规则 → HTML/JSON/CSV/SARIF 报告。完全离线，零数据上报。
 > 本文件面向 AI 编程助手（QoderCN / Claude Code / Codex / Copilot），是项目唯一宪法文件。
 > 兼容性：本文件即 `AGENTS.md`（大写）——2026 年跨工具事实标准，多数 AI 工具可直接读取；Claude Code 按需使用 `CLAUDE.md` 副本（见「AGENTS.md 生态兼容」）。
 
@@ -38,7 +38,7 @@
 
 | 而不是 | 而是 |
 |--------|------|
-| "添加审查规则" | "新规则通过 3 步注册 + 黄金测试三路径一致。去验证。" |
+| "添加审查规则" | "新规则通过 2 步注册（方法 + CHECK_REGISTRY）+ 黄金测试三路径一致。去验证。" |
 | "修复 Bug" | "复现测试 FAILS → 修复后 PASSES + 无回归。去验证。" |
 
 ## 技能加载
@@ -75,8 +75,9 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `docs/` 分区：`governance/`（治理与陷阱清单）、`specification/`（规格与签名 SSOT）、`user-manual/`（用户手册）；`.venv`、`build/`、`docaudit.egg-info/`、`__pycache__/` 为生成物，扫描/审查时排除
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（427 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（529 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
+- [ ] 配置门禁与豁免：改 rules.md/glossary/vocab 后跑 `python src/cli.py rules validate`；`.docauditignore` 是团队豁免基线（可入库），Web UI 保存、CLI `--exempt-file` 读取
 - [ ] 修改模块边界前必读 `docs/specification/api-reference.md`（签名唯一信源）
 
 ## 架构分层
@@ -99,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 427 个用例（18 个文件，含黄金测试）
+├── tests/                            # 529 个用例（21 个文件，含黄金测试）
 ├── docs/                             # 治理与规范文档（governance / specification / user-manual）
 ├── skills/                           # Skill 定义
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
@@ -127,13 +128,14 @@ DocAudit/
 - 不在代码中硬编码规则参数（字体列表、字号范围、关键词）
 - 所有阈值从 `extract_auditor_config()` 获取
 
-### 4. 新增 check_type 三步注册
+### 4. 新增 check_type 两步注册
 
-1. Auditor 方法实现
-2. `_DISPATCH` 表注册
-3. `_skip_checks` 添加
+1. 在对应 Auditor 实现方法
+2. 在 `src/engines/check_registry.py` 的 `CHECK_REGISTRY` 增加一行 `CheckSpec`
 
-> 缺一不可。遗漏 _DISPATCH → 检查不执行；遗漏 _skip_checks → 重复执行。
+> `_DISPATCH` 与 pipeline 的 `_skip_checks` 均由注册表自动派生（2026-10-29），
+> 不要再手改这两处。遗漏任一 → `validate_dispatch()` / `test_check_registry` 报错。
+> 历史 3 次「三步注册缺一」故障由此消除。
 
 ### 5. 异常处理纪律
 
@@ -151,14 +153,17 @@ DocAudit/
 
 ## 关键设计模式
 
-- **委托模式**：CustomRulesAuditor 通过 `_DISPATCH` 表委托到对应 Auditor
+- **规则注册表**：`CHECK_REGISTRY`（CheckSpec）是 dispatch 检查的单一真相来源，`_DISPATCH`/`_skip_checks` 派生
+- **委托模式**：CustomRulesAuditor 通过派生 `_DISPATCH` 表委托到对应 Auditor
 - **配置流**：rules.md → rule_parser → extract_auditor_config → Auditor
+- **配置校验**：`docaudit rules validate` 静态校验 rules/glossary/vocab（运行时降级、校验时显式失败）
 - **降级策略**：LanguageTool 不可用时跳过语法检查，不阻塞整体审查
+- **PDF 双后端**：docling（默认，表格/版面）↔ PyMuPDF（可选，中文路径安全/更快）
 - **离线自检**：setup_offline 下载后自动 dry-run 校验 packages/ 完整性（联网端拦截）
 
 ## 测试
 
-427 个用例，18 个文件：
+529 个用例，21 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -179,6 +184,9 @@ DocAudit/
 | test_language_auditor.py | 语言审计器细节 |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
+| test_report_workflow.py | 报告工作流（HTML 分组/缩略图、CSV、SARIF、CLI 导出） |
+| test_exemptions.py | 豁免持久化 `.docauditignore`（加载/保存/CLI `--exempt-file`） |
+| test_validation.py | 配置校验（rules/glossary/vocab schema + `docaudit rules validate`） |
 | test_gates.py | 治理门禁 pytest 化（裸异常 / HTML 转义 / api 同步 / 文档数字，原 tools/ 五门禁回归版） |
 
 ### 黄金测试
@@ -193,6 +201,9 @@ DocAudit/
 | 运行测试 | `pytest tests/ -v` |
 | 启动 Web UI | `streamlit run app.py` |
 | CLI 审查 | `python src/cli.py report.pptx --rules rules.md` |
+| 报告导出 | `-o report.{html,json,csv,sarif}`（SARIF 批量聚合为单文件） |
+| 配置校验 | `python src/cli.py rules validate`（退出码 1 = 配置有错误） |
+| 豁免持久化 | `python src/cli.py report.pptx --exempt-file .docauditignore` |
 | DISPATCH 验证 | `python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(CustomRulesAuditor.validate_dispatch())"` |
 | 治理门禁 | `pytest tests/test_gates.py -v`（裸异常 / HTML 转义 / api 同步 / 文档数字） |
 | 离线下载/安装 | `bash scripts/setup_offline.sh download|install [core\|pdf\|full]` |
@@ -204,7 +215,7 @@ DocAudit/
 
 | 模式 | 出现次数 | 根因 |
 |------|----------|------|
-| DISPATCH 注册遗漏 | 3 | 新增 check 只写方法忘注册 |
+| DISPATCH 注册遗漏 | 3 | 新增 check 只写方法忘注册；2026-10-29 改为 CHECK_REGISTRY 派生 `_DISPATCH`/`_skip_checks`，根因消除 |
 | html.escape 遗漏 | 2 | 新增字段未转义 |
 | 空值安全 | 4 | None 输入未守卫 |
 | rules.md 格式变更未同步 parser | 2 | 新属性键无法解析 |
@@ -224,6 +235,7 @@ DocAudit/
 
 - 完全离线：Streamlit 本地运行，无网络依赖
 - 配置驱动：rules.md 声明式规则，代码不硬编码
+- 规则注册表：`CHECK_REGISTRY` 单一注册，调度与跳过自动派生
 - 委托模式：CustomRulesAuditor 路由，各 Auditor 专注单一职责
 - 黄金测试：三路径一致性保证
 - 离线可复现：requirements-*.txt 锁文件 + 下载后 dry-run 自检
@@ -247,7 +259,7 @@ DocAudit/
 
 - [ ] `pytest tests/ -v` 全绿（含 `tests/test_gates.py` 四门禁：裸异常 / HTML 转义 / api 同步 / 文档数字）
 - [ ] `ruff check` + `ruff format --check` 通过
-- [ ] 新增 check_type 已完成 3 步注册（Auditor方法 + _DISPATCH + _skip_checks）
+- [ ] 新增 check_type 已完成 2 步注册（Auditor 方法 + `CHECK_REGISTRY`；`_DISPATCH`/`_skip_checks` 自动派生）
 - [ ] 新增 Public 接口已同步 api-reference.md
 - [ ] 目录变更已同步 project-structure.md
 - [ ] 测试用例数/文件数变更已同步白名单文档（test_doc_numbers_gate 会拦截漂移）

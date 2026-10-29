@@ -62,6 +62,11 @@ class TableCell:
     font_size: float | None = None
     fill_color: str | None = None  # 单元格底色 hex RGB (e.g. "1E3A5F")，无填充为 None
     font_color: str | None = None  # 首 run 字体色 hex RGB (e.g. "FFFFFF")，未提取到为 None
+    # 单元格内边距 (pt)；PPTX 默认为 7.2pt (0.1 inch)，DOCX 未提取为 None
+    margin_left: float | None = None
+    margin_top: float | None = None
+    margin_right: float | None = None
+    margin_bottom: float | None = None
 
 
 @dataclass
@@ -72,6 +77,10 @@ class PageElement:
     paragraphs: list[Paragraph] = field(default_factory=list)
     tables: list[list[TableCell]] = field(default_factory=list)  # 按行分组
     children: list["PageElement"] = field(default_factory=list)  # Group 子元素 (PageElement 列表)
+
+    # 表格几何 (pt；FMT-TABLE-FIT 依据)。与行列索引对齐，0.0 表示未设置/自动
+    table_row_heights: list[float] = field(default_factory=list)
+    table_col_widths: list[float] = field(default_factory=list)
 
     # 占位符语义 (title/body/subtitle/slide_number/footer/date/other)
     placeholder_type: str | None = None
@@ -215,6 +224,9 @@ class Document:
     format: str  # "pptx" | "docx" | "pdf" | "md"
     metadata: DocumentMetadata
     pages: list[Page] = field(default_factory=list)
+    # 正文之外的辅助文本 (2026-10-29): DOCX 页眉/页脚/脚注内容。
+    # 只参与语言/术语/标点类检查（不含版面检查，因为无独立页面几何）。
+    auxiliary_elements: list[PageElement] = field(default_factory=list)
 
     def invalidate_cache(self) -> None:
         """清除 Document 级缓存（当 pages/elements 被修改后调用）。

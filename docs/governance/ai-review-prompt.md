@@ -2,7 +2,7 @@
 
 > 本文档是**一份可直接投喂给任意 AI 审查代理的 Prompt 模板**，用于对本项目的任何变更（PR / 提交 / 发版前全量）做一次"先想后写、实证优先、杜绝假阳性"的深度审查。
 > 配套治理规则见 [documentation.md](documentation.md)；项目宪法见 [AGENTS.md](../../AGENTS.md)；审查产出报告一律归档 `logs/reports/`（`logs/` 已 gitignore，**不入库**）。
-> **事实基准**：文中数字（26 条规则 / 19 个 _DISPATCH 条目 / 369 用例 / 18 测试文件 / CI 3 job）已于 2026-09-06 对照 v0.1.0（HEAD b2aeb1f）逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
+> **事实基准**：文中数字（26 条规则 / 19 个注册检查 / 529 用例 / 21 测试文件 / CI 3 job）已于 2026-10-29 逐条实测校准。版本前进后，引用任何数字前先重测（见 6.4）。
 
 ---
 
@@ -49,7 +49,7 @@
 
 ### 3.1 一句话定位
 
-本地离线文档审查系统：PPTX/DOCX/PDF/MD → 四格式转换到统一 Document 模型 → 26 条配置驱动规则 + 7 项内置检查 → HTML/JSON 报告。半导体场景（术语密度高、中英混排、数值/图表编号严格）。**完全离线是发行红线**：文档不上传任何服务器、无遥测、LanguageTool 只连本地服务（Docker 8010 / Java 8011 / 纯 Python 内置三层降级）。规则数与函数签名以 [api-reference.md](../specification/api-reference.md) 为**唯一数字基准**。
+本地离线文档审查系统：PPTX/DOCX/PDF/MD → 四格式转换到统一 Document 模型 → 26 条配置驱动规则 + 23 项内置检查 → HTML/JSON/CSV/SARIF 报告。半导体场景（术语密度高、中英混排、数值/图表编号严格）。**完全离线是发行红线**：文档不上传任何服务器、无遥测、LanguageTool 只连本地服务（Docker 8010 / Java 8011 / 纯 Python 内置三层降级）。规则数与函数签名以 [api-reference.md](../specification/api-reference.md) 为**唯一数字基准**。
 
 ### 3.2 架构分层（红线）
 
@@ -67,35 +67,36 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 两条并行的核心数据流：
 
 ```
-文档流：上传文件 → Converter → Document → Auditor₁…₅ → deduplicate → Reporter → HTML/JSON
+文档流：上传文件 → Converter → Document → Auditor₁…₅ → deduplicate → Reporter → HTML/JSON/CSV/SARIF
 配置流：rules.md → parse_rules_md() → extract_auditor_config() → build_auditors() → Auditor(config)
 ```
 
-### 3.3 规则体系与三步注册（决定 Auditor 层审查重点）
+### 3.3 规则体系与两步注册（决定 Auditor 层审查重点）
 
 - **rules.md 是规则配置唯一入口**：26 条 `##` 规则（STR-001~008 结构 / FMT-001~008 格式 / TERM-001~003 术语 / CON-001~004 及 003-A/B/C 内容）。**禁止在代码中硬编码规则参数**（字体列表、字号范围、关键词、阈值）——一切阈值从 `extract_auditor_config()` 获取。
-- **7 项内置检查**不经 rules.md 声明与 _DISPATCH 调度（FMT-MIXED-001~003 / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR / SYS-ERROR），不参与 26 条计数，清单见 rules.md 末尾表格。
-- **新增 check_type 三步注册，缺一不可**（由 `CustomRulesAuditor.validate_dispatch()` + `tests/test_rules.py` 双重守护，但**语义漂移门禁拦不住**）：
+- **23 项内置检查**不经 rules.md 声明与 `CHECK_REGISTRY` 调度（FMT-MIXED-001~003 / PUNCT-001~010 / TXT-* / FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/TABLE-FIT/FOOTER/IMAGE/CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR / SYS-ERROR），不参与 26 条计数，清单见 rules.md 末尾表格。
+- **新增 check_type 两步注册**（2026-10-29 起；由 `CustomRulesAuditor.validate_dispatch()` + `tests/test_rules.py::TestCheckRegistry` 双重守护）：
   1. Auditor 方法实现（`_check_*`）
-  2. `_DISPATCH` 表注册（`check_type → (auditor_key, method, per_page, pptx_only)`，当前 19 条目）
-  3. `_skip_checks` 添加（防 `Auditor.audit()` 直接调用 + 委托调度的**双重执行**）
+  2. `CHECK_REGISTRY` 增加一行 `CheckSpec`（`check_type → (auditor_key, method, per_page, pptx_only, skip_key)`，当前 19 条目）
 
-  遗漏 _DISPATCH → 检查不执行；遗漏 _skip_checks → 重复执行（仅靠 dedup 兜底）。
-- `_DISPATCH` 三方对账：rules.md 的 `检查:` 键 ↔ `_DISPATCH` 键 ↔ [api-reference.md](../specification/api-reference.md) DISPATCH 表**逐项对照**（含 per_page / pptx_only 标志列——STR-003 曾因 pptx_only 标志与方法内守卫叠加导致规则在流水线中静默死亡，2026-09-06 修复；表格 ≠ 代码）。
+  `_DISPATCH` 与 pipeline 的 `_skip_checks` 均由注册表**派生**——直接改这两处属于违规修改（会被下次重构覆盖/产生脱钩），审查时应予指出。若 `audit()` 中有直调守卫而未加入注册表 `skip_key`，仍会双重执行。
+- `_DISPATCH` 三方对账：rules.md 的 `检查:` 键 ↔ `CHECK_REGISTRY` 键 ↔ [api-reference.md](../specification/api-reference.md) DISPATCH 表**逐项对照**（含 per_page / pptx_only 标志列——STR-003 曾因 pptx_only 标志与方法内守卫叠加导致规则在流水线中静默死亡，2026-09-06 修复；表格 ≠ 代码）。
+- **配置校验门禁**：`python src/cli.py rules validate` 必须 exit 0（rules/glossary/vocab 的 ID/严重度/正则/范围/重复项）。
 
 ### 3.4 验证体系（黄金测试 + 门禁）
 
 ```
-① 全量测试      pytest tests/ -v（369 用例 / 18 文件，2026-09-06 快照，当轮重测）
+① 全量测试      pytest tests/ -v（529 用例 / 21 文件，2026-10-29 快照，当轮重测）
 ② 黄金测试      tests/test_golden_paths.py — Python API = 真实 CLI subprocess = AppTest WebUI
                 三路径对同一输入必须产生完全相同的发现
 ③ DISPATCH 验证 python -c "from src.auditors.custom_rules import CustomRulesAuditor; \
                 print(CustomRulesAuditor.validate_dispatch())"   # 必须 []
-④ lint          ruff check + ruff format --check（ruff==0.16.3 钉版，src/tests/scripts/app.py）
-⑤ 治理门禁      pytest tests/test_gates.py -v（裸异常 AST / HTML 转义 / api-reference 同步 /
+④ 配置校验      python src/cli.py rules validate   # OK — 0 warning(s) 为基线
+⑤ lint          ruff check + ruff format --check（src/tests/scripts/app.py）
+⑥ 治理门禁      pytest tests/test_gates.py -v（裸异常 AST / HTML 转义 / api-reference 同步 /
                 文档数字一致性——原 tools/ 五门禁 2026-09-06 5S 移除后 pytest 化回归；
                 skill 双份同步门禁因 .qoder/ 移除不再需要）
-⑥ CLI 退出码    0=成功且无 error 级 finding；1=处理失败/导出失败/含 error finding；2=不支持扩展名/路径不存在
+⑦ CLI 退出码    0=成功且无 error 级 finding；1=处理失败/导出失败/含 error finding；2=不支持扩展名/路径不存在
                 （契约以 tests/test_cli_exit_codes.py 实测为准）
 ```
 
@@ -122,7 +123,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 | # | 陷阱 | 验证方法 |
 |---|------|---------|
 | 1 | **配置流断裂**：rules.md 声明参数但 5 节点链某处断了（parser 键名 → extract_auditor_config 分支 → build_auditors 传递 → `__init__` 读取 → 方法实际使用 self.xxx） | 新增/改动任何配置参数，5 节点逐个 Read 验证（历史：STR-004 一次断 4 处） |
-| 2 | **双重执行**：`_check_*` 同时被 `audit()` 直接调用 + `_DISPATCH` 注册 | 交集排查；正确机制是 `_skip_checks`（build_auditors 必须传递） |
+| 2 | **双重执行**：`_check_*` 同时被 `audit()` 直接调用 + 注册表调度 | 交集排查；正确机制是 `CHECK_REGISTRY.skip_key` → 派生 `_skip_checks`（勿手改） |
 | 3 | **功能死代码**：引擎实现了但审计流程零调用（历史：`Vocabulary.is_accepted()` 曾全库无调用者） | 引擎公开方法逐个 grep `src/` 找调用者 |
 | 4 | **`_create_auditor` 回退路径配置遗漏**：注入失败回退创建的 config dict 与 `build_auditors` 键集合漂移（历史：exempt_layouts 空列表覆盖默认豁免） | 两处 config dict 键集合逐键比对 |
 | 5 | **`int()` 转换无保护**：extract_auditor_config 对用户配置值 int() 必须 try/except (ValueError, TypeError) | grep `int(rule.params` 核对保护 |
@@ -212,11 +213,11 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 ### 维度 C：配置流与规则注册（Config Flow——本项目头号专项）
 
 - C1 5 节点配置流：rules.md 声明 → `parse_rules_md` 键名解析 → `extract_auditor_config` 分支 → `build_auditors` 传递 → Auditor `__init__` 读取并**实际使用**。任何一环断裂 = 该配置项静默失效（历史：STR-004 断 4 处）。
-- C2 三步注册：新 check_type = Auditor 方法 + `_DISPATCH` + `_skip_checks` 三全；`_skip_checks` 列表必须被 build_auditors 真实传递。
-- C3 三方对账：rules.md `检查:` ↔ `_DISPATCH` ↔ api-reference DISPATCH 表逐项核对（**含 per_page / pptx_only 标志列**）；未知 check_type 必须转 SYS-ERROR finding（UI 可见）而非静默跳过。
-- C4 双重执行：`audit()` 直接调用 ∩ `_DISPATCH` 注册 = 违规（靠 dedup 兜底的隐性双跑）。
+- C2 两步注册：新 check_type = Auditor 方法 + `CHECK_REGISTRY` 一行；`_DISPATCH`/`_skip_checks` 必须仍由注册表派生（手改其一即违规）。
+- C3 三方对账：rules.md `检查:` ↔ `CHECK_REGISTRY` ↔ api-reference DISPATCH 表逐项核对（**含 per_page / pptx_only 标志列**）；未知 check_type 必须转 SYS-ERROR finding（UI 可见）而非静默跳过。
+- C4 双重执行：`audit()` 直接调用 ∩ 注册表调度 = 违规（靠 dedup 兜底的隐性双跑）。
 - C5 回退路径：`_create_auditor` 的 config dict 与 `build_auditors` 键集合一致（专项陷阱 #4）。
-- C6 int/float 保护：配置值数值转换必须 (ValueError, TypeError) 双捕；布尔参数解析统一（"false" 字符串不得误判为真）。
+- C6 int/float 保护：配置值数值转换必须 (ValueError, TypeError) 双捕；布尔参数解析统一（"false" 字符串不得误判为真）；`docaudit rules validate` 必须通过。
 - C7 零硬编码：字体列表、字号范围、关键词表、豁免版式、对比度阈值、标题长度上限……grep 确认只出现在 rules.md / glossary / vocab 与代码默认值回退处，且默认值与 rules.md 声明一致。
 
 ### 维度 D：审计器检查语义（Audit Semantics）
@@ -306,7 +307,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 | 陷阱 | 防控 |
 | :--- | :--- |
 | 把历史已修复项当未修复复报 | CHANGELOG「Unreleased → Fixed」登记了大量已修复项（DOCX 样式级回退、CON-004 格式守卫、SYS-ERROR 不折叠、缓存串档等）。引用旧问题前先对当前 HEAD 重验源码 |
-| 引用过期数字 | 本文档 3.4 节数字是 2026-09-06 快照（369 用例 / 18 文件 / 19 DISPATCH / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
+| 引用过期数字 | 本文档 3.4 节数字是 2026-10-29 快照（529 用例 / 21 文件 / 19 注册检查 / 覆盖率基线 84%）；每轮用 `pytest --collect-only`、`grep -c` 实测 |
 | 文档表格当代码事实 | api-reference 的 DISPATCH 标志列、documentation.md 的同步链均为人工维护文档——**逐项与源码对照**，表格曾漂移 |
 | 把门禁全绿当语义正确背书 | 本项目多轮 P0 均在门禁全绿状态下合入；全绿只是下限 |
 | 生成物冒充源码 | `build/lib/` 内有 src 副本、`.venv` 有整套第三方库——grep 命中两者 = 扫描范围错误，重跑限定路径的扫描 |
@@ -363,7 +364,7 @@ grep -rn "<配置键名>" src/engines/rule_parser.py src/auditors/ # 配置流�
 3. **二、按维度分类的问题清单**：A–H 分节，每条含「八」模板。
 4. **三、对抗验证执行记录**：注入内容 / 预期 FAIL / 恢复结果 / 独立参考比对表 / 未执行步骤声明。
 5. **四、问题总表与优先级**：按 静默错误结果 → 验证体系可信度 → 正确性 → 工程治理 四批排序；每条含 关键编号 / 严重度 / 位置 / 动作。
-6. **五、保持项（勿在后续重构中破坏）**：经本轮复核确认健康的机制逐条列出（如：黄金测试三路径、负向注入纪律、_skip_checks 机制、编码回退链、SYS-ERROR 可见化、样式级标题回退、HF 离线注入、falsy 守卫约定），作为回归守卫——历史教训：keep-list 丢失 = 同类缺陷复活。
+6. **五、保持项（勿在后续重构中破坏）**：经本轮复核确认健康的机制逐条列出（如：黄金测试三路径、负向注入纪律、注册表派生机制、编码回退链、SYS-ERROR 可见化、样式级标题回退、HF 离线注入、falsy 守卫约定），作为回归守卫——历史教训：keep-list 丢失 = 同类缺陷复活。
 7. **附、审查执行记录**：基准 commit、工作区状态、实际执行过的命令清单、声明未执行的步骤（含原因）。
 
 **提交前自检**（任一不满足即退回补做）：① 每条 finding 均有 `文件:行号` + 对抗验证证据；② P0/P1 均在当前 HEAD 复测复现；③ 全部数字本轮实测，无旧报告搬运；④ 保持项已列；⑤ 缺输入项已显式标注；⑥ 已按 6.4 过滤复检陷阱；⑦ **全部扫描与 finding 均未涉及 `.venv/` 及其他生成物目录**。

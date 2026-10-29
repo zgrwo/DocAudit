@@ -1,8 +1,9 @@
 # DocAudit — 重构计划
 
-> **执行状态（2026-08-18 批注）**：本文件为 2026-07 制定的历史规划参考，非当前事实。
-> 多数 Phase 已完成或决策已搁置——LICENSE/CONTRIBUTING/CHANGELOG 已补齐、CI 与
-> DISPATCH/裸异常/文档数字门禁已上线、LanguageTool 降级已落地、插件化与七层重构已明确搁置；
+> **执行状态（2026-10-29 收口）**：本文件为 2026-07 制定的历史规划参考，**已全部收口，无待办**。
+> 原 Phase 0~2 与 Phase 4 的多数目标已落地（LICENSE/CONTRIBUTING/CHANGELOG、CI 与四门禁、
+> LanguageTool 降级、边界测试、黄金三路径、`--fix`、规则注册表化）；仍未做的部分已明确
+> **决策搁置**（见文末「10. 收口结论」），不再作为待办跟踪。
 > 文中"7 commits / 25 条规则 / 139 用例"等数字均为规划当时快照，不代表当前状态。
 > **当前事实以 AGENTS.md / README.md / rules.md 为准**，本文件不再逐项更新。
 
@@ -351,3 +352,24 @@ Phase 结束后：
 **对策**：
 - 统一截断工具函数（50-150 字符）
 - 所有输出点调用截断函数
+
+
+---
+
+## 9. 收口结论（2026-10-29）
+
+| 原规划项 | 结论 | 现状 |
+|---|---|---|
+| Phase 0 审计 / Phase 1 工程化 | ✅ 完成 | LICENSE/CONTRIBUTING/CHANGELOG/CI/边界测试/门禁全就位 |
+| Phase 2 规则独立化（每条规则独立文件 + YAML front-matter） | ⏸️ 决策搁置 | 规则由 `rules.md` + `CHECK_REGISTRY` 统一声明；拆成 26 个文件会增加跳转成本，收益不足 |
+| Phase 2 每条规则 ≥3 测试 | ✅ 完成 | `test_rule_coverage.py` + 各文件定向触发/不触发用例 |
+| Phase 2 `--fix` 术语替换 | ✅ 完成 | AutoFixer（字体/字号/间距/溢出/标题标点/项目符号） |
+| Phase 2 三步注册法自动化 | ✅ 完成 | `CHECK_REGISTRY` 派生 `_DISPATCH`/`_skip_checks`（见 AGENTS 红线 4） |
+| Phase 3 SARIF 输出 | ✅ 完成 | `src/reporters/sarif_reporter.py` + CLI `-o *.sarif` + Web UI 下载 |
+| Phase 3 Jinja2 模板引擎 / 多模板 | ⏸️ 决策搁置 | 单页离线报告足够；引入模板依赖违背"最少依赖" |
+| Phase 4 Docker Compose 一键启动 | ✅ 完成 | `docker-compose.yml`（LanguageTool） |
+| Phase 4 增量审查（文件 hash 缓存） | ⏸️ 决策搁置 | 全量审查耗时可控；缓存会掩盖配置/模型变更导致的结果漂移 |
+| Phase 4 并行审查 | ⏸️ 决策搁置 | 单文件审查已为分钟级；并行增加内存与确定性风险 |
+| Phase 4 Semantic Versioning | ⏸️ 待维护者决定 | 当前包版本 0.1.0，变更累积于 CHANGELOG `[Unreleased]`；发版（0.2.0）由维护者决定并打 tag |
+
+<!-- last_updated: 2026-10-29 -->

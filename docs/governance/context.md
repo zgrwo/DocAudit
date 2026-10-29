@@ -73,12 +73,12 @@ rules.md → rule_parser → extract_auditor_config() → Auditor(config={...})
 ### 优雅降级 (Graceful Degradation)
 
 - LanguageTool: Docker → Java 子进程 → Python 内置，零外部依赖也能跑基础检查
-- PDF Converter: Docling → 回退 Markdown 导出
+- PDF Converter: 双后端 — Docling（版面/表格）或 PyMuPDF（可选，文本/书签）；Docling 失败回退 Markdown 导出
 - PPTX 元数据丰富的检查（字体/溢出/版式）在 MD/PDF 上自动跳过
 
 ### 委托模式 (Delegation Pattern)
 
-CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `_DISPATCH` 表委托给对应 Auditor 的内部方法。CustomRulesAuditor 是"路由器"，不是"执行者"。
+CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `CHECK_REGISTRY` 注册并按派生出的 `_DISPATCH` 表委托给对应 Auditor 的内部方法。CustomRulesAuditor 是"路由器"，不是"执行者"。
 
 ---
 
@@ -118,11 +118,11 @@ CustomRulesAuditor 不包含任何检查逻辑 — 所有 check 类型通过 `_D
 | **规则 (Rule)** | `rules.md` 中的一条审查声明，如 STR-001 |
 | **发现 (Finding)** | 审查过程中产生的一个问题报告 (`AuditFinding`) |
 | **审计器 (Auditor)** | 执行一类审查的组件 (StructureAuditor, FormatAuditor...) |
-| **检查类型 (check_type)** | `_DISPATCH` 表中的 key，如 `"title_trailing_punctuation"` |
+| **检查类型 (check_type)** | `CHECK_REGISTRY` 中的 key（`_DISPATCH` 由它派生），如 `"title_trailing_punctuation"` |
 | **转换器 (Converter)** | 将原始格式转为统一 Document 模型的组件 |
 | **引擎 (Engine)** | 可复用的后端服务 (RuleParser, AutoFixer, LanguageTool) |
 | **流水线 (Pipeline)** | `build_auditors()` + `run_auditors()` — 审查编排 |
-| **豁免 (Exempt)** | 在 Web UI 中忽略特定 Finding，不删除，可恢复 |
+| **豁免 (Exempt)** | 在 Web UI 中忽略特定 Finding，不删除，可恢复；可持久化到 `.docauditignore` |
 
 ---
 

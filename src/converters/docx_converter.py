@@ -211,7 +211,10 @@ class DocxConverter(BaseConverter):
         # 未解析嵌套内容提示 (仅日志，不改变解析行为)
         self._warn_unparsed_nested_content(doc)
 
-        logger.info("DOCX 解析完毕: %d 元素", len(elements))
+        # 页眉/页脚/脚注文本 → 辅助元素 (只参与语言/术语类审查)
+        auxiliary = self._extract_auxiliary_elements(doc)
+
+        logger.info("DOCX 解析完毕: %d 元素 (%d 辅助文本)", len(elements), len(auxiliary))
 
         # 分页
         pages = self._split_into_pages(elements)
@@ -221,12 +224,87 @@ class DocxConverter(BaseConverter):
             format="docx",
             metadata=metadata,
             pages=pages,
+            auxiliary_elements=auxiliary,
         )
 
-    def _warn_unparsed_nested_content(self, doc: DocxDocument) -> None:
-        """提示当前未解析的嵌套内容：文本框、页眉页脚、脚注。
+    def _extract_auxiliary_elements(self, doc: DocxDocument) -> list[PageElement]:
+        """提取页眉/页脚/脚注文本 (2026-10-29)。
 
-        仅输出 logger.warning 说明跳过范围，不改变现有解析行为。
+        只保留文本 (不做版面几何)，供 LanguageAuditor 做中英混排/标点/
+        术语/禁用词检查。按 (类型, 文本) 去重：多节文档常共享同一页眉。
+        """
+        auxiliary: list[PageElement] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(kind: str, label: str, text: str) -> None:
+            cleaned = (text or "").strip()
+            if not cleaned:
+                return
+            key = (kind, cleaned)
+            if key in seen:
+                return
+            seen.add(key)
+            paragraphs = [Paragraph(text=line) for line in cleaned.splitlines() if line.strip()]
+            auxiliary.append(
+                PageElement(
+                    type="text_frame",
+                    placeholder_type=kind,
+                    shape_name=label,
+                    paragraphs=paragraphs,
+                )
+            )
+
+        try:
+            for section in doc.sections:
+                for hf, kind, label in (
+                    (section.header, "header", "页眉"),
+                    (section.footer, "footer", "页脚"),
+                    (section.first_page_header, "header", "首页页眉"),
+                    (section.first_page_footer, "footer", "首页页脚"),
+                    (section.even_page_header, "header", "偶数页页眉"),
+                    (section.even_page_footer, "footer", "偶数页页脚"),
+                ):
+                    text = "\n".join(p.text for p in hf.paragraphs if p.text.strip())
+                    add(kind, label, text)
+        except Exception as e:
+            logger.warning("页眉/页脚提取失败，跳过页眉页脚审查: %s", e)
+
+        # 脚注: 通过 rels 找到 footnotes 部件并解析 w:footnote (id <= 0 为分隔符)
+        try:
+            for rel in doc.part.rels.values():
+                if rel.reltype.endswith("/footnotes"):
+                    for text in self._extract_footnote_texts(rel.target_part):
+                        add("footnote", "脚注", text)
+        except Exception as e:
+            logger.warning("脚注提取失败，跳过脚注审查: %s", e)
+
+        return auxiliary
+
+    @staticmethod
+    def _extract_footnote_texts(part) -> list[str]:
+        """从 footnotes 部件解析正文脚注文本 (跳过 separator/continuation)。"""
+        from docx.oxml import parse_xml
+
+        try:
+            root = parse_xml(part.blob)
+        except Exception:
+            return []
+        ns_w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        texts: list[str] = []
+        for footnote in root.findall(f"{ns_w}footnote"):
+            fid = footnote.get(f"{ns_w}id")
+            if fid is None or int(fid) <= 0:
+                continue
+            text = "".join(node.text or "" for node in footnote.iter(f"{ns_w}t")).strip()
+            if text:
+                texts.append(text)
+        return texts
+
+    def _warn_unparsed_nested_content(self, doc: DocxDocument) -> None:
+        """提示当前仍未解析的嵌套内容（文本框）。
+
+        页眉/页脚/脚注自 2026-10-29 起已提取到 `Document.auxiliary_elements`，
+        不再在此告警。
         """
         # 文本框: 段落内 w:drawing/w:txbxContent (画布文本框中的文字)
         try:
@@ -238,24 +316,6 @@ class DocxConverter(BaseConverter):
                     )
         except Exception:
             pass  # bare-handler-ok — 文本框检测降级，不影响解析
-
-        # 页眉/页脚
-        try:
-            for section in doc.sections:
-                for hf in (section.header, section.footer):
-                    if not hf.is_linked_to_previous and any(p.text.strip() for p in hf.paragraphs):
-                        logger.warning("检测到页眉/页脚内容，当前跳过未解析（不在正文审查范围内）")
-                        break  # 每节最多一条
-        except Exception:
-            pass  # bare-handler-ok — 页眉页脚检测降级，不影响解析
-
-        # 脚注: 文档部件存在 footnotes 关系即视为含脚注
-        try:
-            has_footnotes = any("footnotes" in rel.reltype for rel in doc.part.rels.values())
-            if has_footnotes:
-                logger.warning("检测到脚注内容，当前跳过未解析")
-        except Exception:
-            pass  # bare-handler-ok — 脚注检测降级，不影响解析
 
     def _extract_metadata(self, doc: DocxDocument) -> DocumentMetadata:
         """提取文档元数据"""
@@ -468,9 +528,28 @@ class DocxConverter(BaseConverter):
                 row_map[c.row].append(c)
             rows: list[list[TableCell]] = [row_map[r] for r in sorted(row_map) if r < nrows]
 
+            # 表格几何 (FMT-TABLE-FIT)：Word 自动布局下为 None/0 → 保留 0.0 占位，
+            # 保证与行列索引对齐；判定时跳过 <= 0。
+            row_heights: list[float] = []
+            for row in table.rows:
+                try:
+                    h = row.height.pt if row.height is not None else 0.0
+                except (AttributeError, TypeError):
+                    h = 0.0
+                row_heights.append(float(h) if h and h > 0 else 0.0)
+            col_widths: list[float] = []
+            for col in table.columns:
+                try:
+                    w = col.width.pt if col.width is not None else 0.0
+                except (AttributeError, TypeError):
+                    w = 0.0
+                col_widths.append(float(w) if w and w > 0 else 0.0)
+
             return PageElement(
                 type="table",
                 tables=rows,
+                table_row_heights=row_heights,
+                table_col_widths=col_widths,
             )
         except Exception as e:
             logger.warning("表格转换失败: %s", e)

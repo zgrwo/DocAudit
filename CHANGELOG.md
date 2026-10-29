@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **第二批收尾（2026-10-29）** —— 完成 handoff §5 全部建议项：
+  - **表格 fit**：新增内置检查 `FMT-TABLE-FIT`（行高不足 / 长词超列宽 / 表格估算越界）；
+    `TableCell` 增加单元格边距，`PageElement` 增加 `table_row_heights` / `table_col_widths`，
+    PPTX（EMU→pt）与 DOCX（Length）均提取行列几何；复用 FMT-TEXT-OVERFLOW 的估算器（抽取为模块级 SSOT）
+  - **报告工作流**：HTML 报告内联 SVG 页面线框缩略图（上限 80 页）+ 批量按文件分组（含每文件严重度计数）；
+    新增 `src/reporters/csv_reporter.py`（UTF-8 BOM、防 Excel 公式注入）与
+    `src/reporters/sarif_reporter.py`（SARIF v2.1.0、稳定 partialFingerprints）；
+    CLI `-o` 支持 `.csv` / `.sarif`（批量 SARIF 聚合为单文件）；`--thumbnails/--no-thumbnails`；
+    Web UI 增加 CSV/SARIF 下载按钮
+  - **豁免持久化**：新增 `src/engines/exemptions.py`（`.docauditignore` JSON v1，读取只信任稳定
+    `exemption_key`，文件损坏 fail-open 到多报）；CLI `--exempt-file`；Web UI「💾 保存豁免到 .docauditignore」
+    并在启动时自动载入
+  - **规则注册表**：`CHECK_REGISTRY`（`CheckSpec`）成为 dispatch 检查唯一真相来源，
+    `_DISPATCH` 与 pipeline `_skip_checks` 自动派生 —— 新增 check_type 由三步降为两步
+  - **配置校验**：新增 `src/engines/validation.py`（rules/glossary/vocab schema 校验：ID/严重度/
+    check_type/正则/数值范围/重复项/未知字段）+ CLI `docaudit rules validate`（错误时 exit 1）；
+    修复 `vocab/accept.txt` 两条大小写重复条目
+  - **标点/文字补全**：`PUNCT-008`（日期格式混用）、`PUNCT-009`（范围连接符混用，先掩码 ISO 日期）、
+    `PUNCT-010`（数值与单位空格不一致）、`TXT-BULLET-PUNCT`（项目符号末尾标点不一致）、
+    `TXT-DUP-SENTENCE`（跨页重复句）、`TXT-NEAR-DUP`（近似重复页，字符二元组 Jaccard ≥ 0.90）
+  - **DOCX 辅助文本**：页眉/页脚/脚注提取到 `Document.auxiliary_elements`（按类型+文本去重），
+    参与中英混排/标点/冗余/术语/禁用词检查（位置显示「页眉/页脚/脚注」），不再只告警跳过
+  - **PDF 双后端**：`PdfConverter` 支持 PyMuPDF（可选安装，文本块+书签层级+bbox，规避 docling
+    非 ASCII 路径限制）；`DOCAUDIT_PDF_BACKEND=auto|pymupdf|docling` 可覆盖；缺 PyMuPDF 时回退 Docling
+  - 测试 427 → **529**（新增报告工作流/豁免/配置校验三文件及审计器、转换器补测），文档同步
+
 ### Fixed
 
 - **质量复核整改批次**（2026-10-28，`logs/reports/deep-review-quality-2026-10-28.md` R-01~R-24）：

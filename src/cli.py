@@ -16,11 +16,16 @@ if sys.platform == "win32":
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.engines.exemptions import apply_exemptions, load_exemptions
 from src.engines.pipeline import build_auditors, find_converter, run_auditors
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
+from src.reporters.csv_reporter import generate_csv_report
 from src.reporters.html_reporter import generate_html_report
 from src.reporters.json_reporter import generate_json_report
+from src.reporters.sarif_reporter import generate_sarif_report
+
+REPORT_SUFFIXES = (".html", ".json", ".sarif", ".csv")
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -249,12 +254,21 @@ def main():
   docaudit docs/ --rules my-rules.md      批量审查目录，使用自定义规则
   docaudit report.pptx --fix              审查并自动修复格式问题
   docaudit doctor                         环境诊断
+  docaudit rules validate                 校验 rules.md / glossary / vocab 配置
         """,
     )
     subparsers = parser.add_subparsers(dest="command")
 
     # doctor subcommand
     subparsers.add_parser("doctor", help="环境诊断：检查运行环境健康状态")
+
+    # rules subcommand (配置校验)
+    rules_parser = subparsers.add_parser("rules", help="规则配置工具")
+    rules_sub = rules_parser.add_subparsers(dest="rules_command")
+    validate_parser = rules_sub.add_parser("validate", help="静态校验配置（退出码 1 = 有错误）")
+    validate_parser.add_argument("--rules", default="rules.md", help="规则文件 (默认: rules.md)")
+    validate_parser.add_argument("--glossary", default="glossary", help="术语表目录")
+    validate_parser.add_argument("--vocab", default="vocab", help="词汇表目录")
 
     # audit (default) arguments
     audit_parser = subparsers.add_parser("audit", help="审查文档")
@@ -271,6 +285,17 @@ def main():
         help="按格式过滤 (批量模式)",
     )
     audit_parser.add_argument("--fix", action="store_true", help="自动修复简单格式问题")
+    audit_parser.add_argument(
+        "--exempt-file",
+        default=None,
+        help="豁免文件路径 (如 .docauditignore)；命中的 exemption_key 不计入报告与退出码",
+    )
+    audit_parser.add_argument(
+        "--thumbnails",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="HTML 报告是否内嵌页面 SVG 线框缩略图 (默认开启)",
+    )
     audit_parser.add_argument(
         "--fix-type",
         choices=["all", "font", "spacing", "overflow", "title_punct", "bullet"],
@@ -294,7 +319,7 @@ def main():
         # 显式子命令 (audit/doctor) 的参数错误 → 严格重解析，
         # 交还 argparse 报标准用法错误 (exit 2)，不回退为 audit
         first = sys.argv[1] if len(sys.argv) > 1 else ""
-        if first in ("audit", "doctor"):
+        if first in ("audit", "doctor", "rules"):
             parser.parse_args()
         # 位置参数 (如 "docaudit report.pptx") 会被子命令解析器视为
         # invalid choice 而报错退出 → 回退为按 audit 子命令重新解析
@@ -304,6 +329,26 @@ def main():
     if args.command == "doctor":
         sys.exit(doctor_check())
 
+    if args.command == "rules":
+        if getattr(args, "rules_command", None) != "validate":
+            rules_parser.print_help()
+            print("\n[ERROR] 需要子命令: docaudit rules validate")
+            sys.exit(2)
+        from src.engines.validation import validate_configuration
+
+        result = validate_configuration(args.rules, args.glossary, args.vocab)
+        print(f"[VALIDATE] rules={args.rules} glossary={args.glossary} vocab={args.vocab}")
+        for line in result.to_lines():
+            print(line)
+        if not result.ok:
+            print(
+                f"[VALIDATE] FAILED — {len(result.errors)} error(s), "
+                f"{len(result.warnings)} warning(s)"
+            )
+            sys.exit(1)
+        print(f"[VALIDATE] OK — {len(result.warnings)} warning(s)")
+        sys.exit(0)
+
     # 无子命令但存在未知选项 → 严格报错 (exit 2)，不静默接受
     if args.command is None and remaining:
         parser.error(f"unrecognized arguments: {' '.join(remaining)}")
@@ -312,9 +357,12 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    # -o 仅支持 .html/.json (M9: 其他扩展名 → 用法错误 exit 2)
-    if args.output and Path(args.output).suffix not in (".html", ".json"):
-        print(f"[ERROR] 不支持的输出格式: {Path(args.output).suffix}（仅支持 .html 或 .json）")
+    # -o 仅支持 .html/.json/.sarif/.csv (M9: 其他扩展名 → 用法错误 exit 2)
+    if args.output and Path(args.output).suffix not in REPORT_SUFFIXES:
+        print(
+            f"[ERROR] 不支持的输出格式: {Path(args.output).suffix}"
+            f"（仅支持 {' / '.join(REPORT_SUFFIXES)}）"
+        )
         sys.exit(2)
 
     # Collect files
@@ -344,6 +392,9 @@ def main():
     # 处理每个文件
     total_findings = []
     failed_files = 0  # 处理失败的文件数 (README: 处理失败 → 退出码 1)
+    last_doc: Document | None = None  # SARIF 聚合写入需要文档元数据 (工具/artifact)
+    exempt_keys = load_exemptions(args.exempt_file) if args.exempt_file else set()
+    exempted_total = 0
     for i, file_path in enumerate(files, 1):
         if len(files) > 1:
             print(f"\n[{i}/{len(files)}] {'=' * 40}")
@@ -356,6 +407,12 @@ def main():
                 vocab_dir=args.vocab,
                 verbose=args.verbose,
             )
+            # 豁免文件命中项不计入报告/退出码 (--exempt-file)
+            if exempt_keys:
+                findings, exempted = apply_exemptions(findings, exempt_keys)
+                exempted_total += exempted
+                if exempted:
+                    print(f"[EXEMPT] {exempted} finding(s) exempted by {args.exempt_file}")
             total_findings.extend(findings)
             print_summary(findings)
 
@@ -442,22 +499,32 @@ def main():
             elif args.fix:
                 print(f"[FIX] 格式 {doc.format.upper()} 暂不支持自动修复（仅支持 PPTX/DOCX）")
 
-            # 导出报告 — 批量模式每文件独立命名，单文件保持不变
-            if args.output:
+            # 导出报告 — 批量模式每文件独立命名，单文件保持不变。
+            # .sarif 例外：批量聚合到循环后写入一个文件 (CI 集成通常一次运行一个 SARIF)。
+            if args.output and Path(args.output).suffix != ".sarif":
                 out_path = Path(args.output)
                 if len(files) > 1:
                     # 仅多文件时添加序号后缀
                     stem, suffix = out_path.stem, out_path.suffix
                     out_path = out_path.parent / f"{stem}_{i:02d}{suffix}"
                 if out_path.suffix == ".html":
-                    generate_html_report(doc, findings, output_path=out_path)
+                    generate_html_report(
+                        doc,
+                        findings,
+                        output_path=out_path,
+                        show_thumbnails=args.thumbnails,
+                    )
                     print(f"\n[EXPORT] HTML report saved: {out_path}")
                 elif out_path.suffix == ".json":
                     generate_json_report(doc, findings, output_path=out_path)
                     print(f"\n[EXPORT] JSON report saved: {out_path}")
+                elif out_path.suffix == ".csv":
+                    generate_csv_report(findings, output_path=out_path)
+                    print(f"\n[EXPORT] CSV report saved: {out_path}")
                 # M6: 报告器内部吞掉 OSError，导出后必须校验产物存在，失败 → exit 1
                 if not out_path.exists():
                     raise OSError(f"报告导出失败，输出文件未生成: {out_path}")
+            last_doc = doc
 
         except Exception as e:
             failed_files += 1
@@ -467,11 +534,25 @@ def main():
 
                 traceback.print_exc()
 
+    # SARIF: 一次运行聚合为一个文件 (含批量所有 finding)
+    if args.output and Path(args.output).suffix == ".sarif" and last_doc is not None:
+        sarif_path = Path(args.output)
+        try:
+            generate_sarif_report(last_doc, total_findings, output_path=sarif_path)
+            if not sarif_path.exists():
+                raise OSError(f"报告导出失败，输出文件未生成: {sarif_path}")
+            print(f"\n[EXPORT] SARIF report saved: {sarif_path}")
+        except Exception as e:
+            failed_files += 1
+            print(f"[ERROR] Processing failed: {sarif_path} -- {e}")
+
     # 批量总结
     if len(files) > 1:
         print(f"\n{'=' * 60}")
         print(f"[BATCH] {len(files)} files audited, {len(total_findings)} total findings")
         print(f"{'=' * 60}")
+    if exempted_total:
+        print(f"[EXEMPT] 共豁免 {exempted_total} 条 finding（来源: {args.exempt_file}）")
 
     # ── Exit code 按严重度 (inspired by markdownlint) ──
     # 处理失败的文件优先置 1 (README: 处理失败 → 退出码 1)

@@ -1129,3 +1129,67 @@ class TestLayoutChecks:
         findings = StructureAuditor(config={"required_sections": []})._check_master_consistency(doc)
         assert len(findings) == 1
         assert findings[0].rule_id == "STR-MASTER"
+
+
+class TestTableFit:
+    """2026-10-29: 表格 fit 估算 (行高/列宽/越界)。几何估算，非渲染级。"""
+
+    @staticmethod
+    def _doc(page, fmt="pptx"):
+        return Document(
+            format=fmt, source_path=f"x.{fmt}", metadata=DocumentMetadata(), pages=[page]
+        )
+
+    @staticmethod
+    def _table(text="", *, row_heights=None, col_widths=None, top=50, font_size=None):
+        from src.models.document import TableCell
+
+        cell = TableCell(text=text, row=0, col=0, font_size=font_size)
+        return PageElement(
+            type="table",
+            top=top,
+            tables=[[cell]],
+            table_row_heights=[] if row_heights is None else row_heights,
+            table_col_widths=[] if col_widths is None else col_widths,
+        )
+
+    def _findings(self, elem, fmt="pptx"):
+        page = Page(index=0, slide_number=1, elements=[elem])
+        return FormatAuditor()._check_table_fit(page, self._doc(page, fmt))
+
+    def test_row_height_insufficient_flagged(self):
+        fs = self._findings(self._table("测" * 40, row_heights=[20.0], col_widths=[120.0]))
+        kinds = {f.metadata["kind"] for f in fs}
+        assert "row_height" in kinds
+        assert all(f.rule_id == "FMT-TABLE-FIT" for f in fs)
+
+    def test_tall_row_not_flagged(self):
+        elem = self._table("短文本", row_heights=[120.0], col_widths=[200.0])
+        assert self._findings(elem) == []
+
+    def test_narrow_column_flagged(self):
+        elem = self._table(
+            "Supercalifragilisticexpialidocious",
+            row_heights=[0.0],
+            col_widths=[60.0],
+        )
+        fs = self._findings(elem)
+        assert any(f.metadata["kind"] == "col_width" for f in fs)
+
+    def test_page_overflow_is_warning(self):
+        elem = self._table("测" * 40, row_heights=[100.0], col_widths=[60.0], top=500.0)
+        overflow = [f for f in self._findings(elem) if f.metadata["kind"] == "page_overflow"]
+        assert len(overflow) == 1
+        assert overflow[0].severity == FindingSeverity.WARNING
+
+    def test_no_geometry_degrades_silently(self):
+        assert self._findings(self._table("测" * 100)) == []
+
+    def test_docx_unknown_font_size_uses_default(self):
+        """DOCX 单元格通常无显式字号 → 用 10.5pt 默认估算，而非整表静默跳过。"""
+        elem = self._table("x" * 40, row_heights=[10.0], col_widths=[50.0])
+        assert self._findings(elem, fmt="docx")
+
+    def test_clean_table_not_flagged(self):
+        elem = self._table("A1", row_heights=[30.0], col_widths=[120.0])
+        assert self._findings(elem) == []

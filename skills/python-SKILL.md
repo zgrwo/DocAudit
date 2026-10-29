@@ -3,9 +3,9 @@ name: python
 description: >
   DocAudit Python 开发规范。
   在编写、审查或重构 DocAudit Python 代码时使用，涵盖：
-  Auditor 开发、Finding 创建、_DISPATCH 注册、_skip_checks 配置、
+  Auditor 开发、Finding 创建、CHECK_REGISTRY 注册、
   rules.md 规则编写、中文文本规范、测试编写、AutoFix 实现。
-last_updated: 2026-07-11
+last_updated: 2026-10-29
 ---
 
 # DocAudit Python 开发规范
@@ -18,20 +18,20 @@ last_updated: 2026-07-11
 
 | 场景 | 规则 | § |
 |------|------|---|
-| 新增 check_type | 🔴 必须三处注册：Auditor 方法 + `_DISPATCH` + `_skip_checks` | §1.1 |
+| 新增 check_type | 🔴 两步注册：Auditor 方法 + `CHECK_REGISTRY` 一行（`_DISPATCH`/`_skip_checks` 自动派生） | §1.1 |
 | 新增规则声明 | 🔴 必须在 `rules.md` 中声明，否则 CustomRulesAuditor 不执行 | §1.1 |
 | per_page=True 方法 | 签名必须为 `(self, page, doc)`，CustomRulesAuditor 逐页调用 | §1.2 |
 | Finding 消息 | 必须中文；`message` 说明问题，`suggestion` 给出修改建议 | §2.1 |
 | Finding rule_id | 必须与 `rules.md` 中的规则 ID 一致 | §2.2 |
 | Finding context | 截断到 50-150 字符，避免报告冗余 | §2.3 |
-| `_skip_checks` | 只在 `pipeline.py` 的 `build_auditors()` 中设置，不在 Auditor 构造时预设 | §1.3 |
+| `_skip_checks` | 🔴 不要手改 `pipeline.py`——由 `CustomRulesAuditor.skip_checks_for()` 从注册表派生 | §1.3 |
 | HTML 报告 | 🔴 所有用户文本必须 `html.escape()` — 见 `src/reporters/html_reporter.py` | §2.4 |
 
 ## 1. Auditor 开发规范
 
-### 1.1 新增 check_type 的三步注册法
+### 1.1 新增 check_type 的两步注册法（2026-10-29 起）
 
-每新增一个可通过 `rules.md` 配置的检查类型，必须修改 3 个位置，缺一不可：
+每新增一个可通过 `rules.md` 配置的检查类型，只需修改 2 个位置：
 
 **位置 1：在对应 Auditor 中新增方法**
 
@@ -43,26 +43,32 @@ def _check_xxx(self, page, doc) -> list[AuditFinding]:  # per_page=True
     return findings
 ```
 
-方法签名由 `_DISPATCH` 中的 `per_page` 决定：
+方法签名由注册表中的 `per_page` 决定：
 - `per_page=True` → `(self, page, doc)`
 - `per_page=False` → `(self, doc)`
 
-**位置 2：在 `_DISPATCH` 表中注册**
+**位置 2：在 `CHECK_REGISTRY` 中注册一行**
 
 ```python
-# src/auditors/custom_rules.py — _DISPATCH 字典
-"xxx_check_type": ("sa", "_check_xxx", True, False),
-#                   ↑       ↑            ↑     ↑
-#               auditor_key  method_name  per_page  pptx_only
+# src/engines/check_registry.py — CHECK_REGISTRY
+"xxx_check_type": CheckSpec("sa", "_check_xxx", per_page=True, pptx_only=False),
+#                    ↑              ↑        ↑            ↑          ↑
+#                check_type   auditor_key  method   per_page   pptx_only
 ```
 
 auditor_key: `"sa"`=StructureAuditor, `"fa"`=FormatAuditor, `"fca"`=FactualAuditor
 
-**位置 3：在 `_skip_checks` 中排除**
+`_DISPATCH`（调度）与 pipeline 的 `_skip_checks`（避免 audit() 直调重复执行）均由
+注册表派生，**不要再手改这两处**。若 `audit()` 里的守卫键与 check_type 不同名，
+用 `skip_key="..."` 指定（Structure/Factual 的历史简写即此用法）。
+
+**位置 3（仅当 `audit()` 有直调入口）：加 skip 守卫**
 
 ```python
-# src/engines/pipeline.py — build_auditors()
-"_skip_checks": [..., "xxx_check_type"],
+# 在 Auditor.audit() 中
+if "xxx_check_type" not in skip:
+    for page in doc.pages:          # per_page=True
+        findings.extend(self._check_xxx(page, doc))
 ```
 
 这确保 Auditor 自身的 `audit()` 不直接执行该检查，而是由 CustomRulesAuditor 通过 Dispatch 统一调度，避免重复执行。
@@ -81,9 +87,10 @@ def _check_figure_caption_format(self, doc) -> list[AuditFinding]:
         ...
 ```
 
-### 1.3 在 Auditor.audit() 中添加调用
+### 1.3 在 Auditor.audit() 中添加 skip 守卫
 
-当 check 方法可通过 `_DISPATCH` 调度时，在 `audit()` 中需加 skip 守卫：
+当检查同时被 `audit()` 直接调用、又经 dispatch 调度时，`audit()` 中必须有守卫，
+否则同一检查执行两次（`_skip_checks` 由注册表派生并注入 `self._skip_checks`）：
 
 ```python
 # 在 audit() 方法中
@@ -266,8 +273,9 @@ fixer.fix_spacing(out, out)          # Step 2: 间距（在 Step 1 输出上继�
 
 | 陷阱 | 后果 | 解决方案 |
 |------|------|---------|
-| 新增 check 只写 Auditor 方法，忘注册 `_DISPATCH` | CustomRulesAuditor 不执行 | 三步注册法 (§1.1) |
-| 忘加 `_skip_checks` | 同一检查执行两次 | `pipeline.py` 中加排除 |
+| 新增 check 只写 Auditor 方法，忘注册 `CHECK_REGISTRY` | CustomRulesAuditor 不执行 | 两步注册法 (§1.1) |
+| 手改 `_DISPATCH` / `pipeline._skip_checks` | 与注册表脱钩，下次重构覆盖 | 只改 `CHECK_REGISTRY`（§1.1） |
+| 注册了检查但 `audit()` 忘加 skip 守卫 | 同一检查执行两次 | 在 `audit()` 加 `if "key" not in skip`（§1.1 位置 3） |
 | `per_page=True` 但方法签名为 `(self, doc)` | CustomRulesAuditor 调用时报错 | 改为 `(self, page, doc)` |
 | Finding 的 `rule_id` 与 `rules.md` 不一致 | 用户无法追溯规则来源 | 严格对齐 |
 | `context` 字段不截断 | HTML 报告中显示异常 | 截断到 100-150 字符 |

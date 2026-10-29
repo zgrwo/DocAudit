@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.auditors.base import BaseAuditor
+from src.engines.check_registry import CHECK_REGISTRY, CheckSpec  # noqa: F401 — 向后兼容 re-export
 from src.engines.rule_parser import AuditRule, parse_rules_md
 from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
@@ -21,52 +22,29 @@ class CustomRulesAuditor(BaseAuditor):
     - regex: 正则模式匹配
     - check: 检查类型标识 (如 first_slide_has_title_layout 等)
     - 参数: 通过 params 传递 (如 allowed_fonts, required_sections)
+
+    dispatch 检查由 src/engines/check_registry.py 的 CHECK_REGISTRY 派生（单一真相来源，
+    注册表置于 Engine 层以避免 Engine→Auditor 反向依赖）。
     """
 
-    # ── Check type dispatch: check_type → (auditor_key, method_name, per_page, pptx_only) ──
-    # auditor_key: "sa"=structure, "fa"=format, "fca"=factual
-    # NOTE: "la" (LanguageAuditor) 故意排除 — 语言检查依赖 lt_client/vocabulary/terminology
-    # 有状态实例，始终直接运行，不走 dispatch 委托机制。
+    # ── 派生: check_type → (auditor_key, method_name, per_page, pptx_only) ──
     _DISPATCH = {
-        "first_slide_has_title_layout": ("sa", "_check_title_slide", False, True),
-        "figure_numbering_sequential": ("sa", "_check_figure_numbering", False, False),
-        # pptx_only 必须 False: 方法内已有 PPTX 守卫 (para.level 是缩进级别),
-        # dispatch 再按 PPTX 过滤会让非 PPTX 的标题层级检查彻底失效 (2026-09-06 回归)
-        "heading_level_sequential": ("sa", "_check_heading_levels", False, False),
-        "numeric_cross_reference": ("fca", "_check_numeric_consistency", False, False),
-        "abbreviation_first_defined": ("fca", "_check_abbreviation_first_defined", False, False),
-        "abbreviation_defined_never_used": (
-            "fca",
-            "_check_abbreviation_defined_never_used",
-            False,
-            False,
-        ),
-        "abbreviation_multiply_defined": (
-            "fca",
-            "_check_abbreviation_multiply_defined",
-            False,
-            False,
-        ),
-        "abbreviation_used_before_defined": (
-            "fca",
-            "_check_abbreviation_used_before_defined",
-            False,
-            False,
-        ),
-        "every_slide_has_conclusion": ("sa", "_check_every_slide_has_conclusion", False, True),
-        "duplicate_title": ("sa", "_check_duplicate_title", False, False),
-        "title_trailing_punctuation": ("sa", "_check_title_trailing_punctuation", True, False),
-        "figure_caption_format": ("sa", "_check_figure_caption_format", False, False),
-        # element_overflow / per_page_char_limit 是幻灯片版面语义 (位置/单页字数),
-        # DOCX/MD/PDF 的"页"是逻辑章节或真实分页, 不适用 — 2026-10-28 收敛为 PPTX only。
-        "element_overflow": ("fa", "_check_element_overflow", True, True),
-        "empty_placeholder": ("fa", "_check_empty_placeholders", True, True),
-        "bullet_consistency": ("fa", "_check_bullet_consistency", True, False),
-        "per_page_char_limit": ("fa", "_check_per_page_char_limit", True, True),
-        "table_contrast": ("fa", "_check_table_contrast", True, False),
-        "slide_structure_consistency": ("sa", "_check_slide_structure_consistency", False, True),
-        "title_length": ("sa", "_check_title_length", False, False),
+        check_type: (spec.auditor, spec.method, spec.per_page, spec.pptx_only)
+        for check_type, spec in CHECK_REGISTRY.items()
     }
+
+    @classmethod
+    def skip_checks_for(cls, auditor_key: str) -> list[str]:
+        """返回某 Auditor 在 pipeline 模式下应跳过的内部守卫键。
+
+        pipeline 用它替代手写 `_skip_checks` 列表：dispatch 注册与跳过名单
+        永远一致，不会出现"注册了但没跳过 → 重复执行"或反之。
+        """
+        return [
+            spec.skip_key or check_type
+            for check_type, spec in CHECK_REGISTRY.items()
+            if spec.auditor == auditor_key
+        ]
 
     # ── Severity mapping ───────────────────────────────────────
     _SEVERITY_MAP = {

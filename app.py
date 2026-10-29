@@ -18,11 +18,21 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src import __version__
+from src.engines.exemptions import (
+    DEFAULT_EXEMPTION_FILE,
+    load_exemptions,
+    save_exemptions,
+)
 from src.engines.pipeline import find_converter, run_auditors
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
+from src.reporters.csv_reporter import generate_csv_report
 from src.reporters.html_reporter import generate_html_report
 from src.reporters.json_reporter import generate_json_report
+from src.reporters.sarif_reporter import generate_sarif_report
+
+# 豁免持久化文件名 (工作目录下；可入库供团队共享)
+EXEMPTION_FILE = DEFAULT_EXEMPTION_FILE
 
 
 def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFinding]:
@@ -107,7 +117,8 @@ if "audit_completed" not in st.session_state:
 if "audit_progress" not in st.session_state:
     st.session_state.audit_progress = {}
 if "exempted_finding_ids" not in st.session_state:
-    st.session_state.exempted_finding_ids = set()
+    # 启动时自动载入工作目录的 .docauditignore（跨会话复用误报豁免）
+    st.session_state.exempted_finding_ids = load_exemptions(EXEMPTION_FILE)
 # 批量模式
 if "batch_mode" not in st.session_state:
     st.session_state.batch_mode = False
@@ -528,6 +539,8 @@ with st.sidebar:
                 title=report_title,
                 file_label=file_label,
                 page_count=page_count,
+                # 批量聚合报告不含单一文件的页面几何 → 关闭缩略图避免误导
+                show_thumbnails=not st.session_state.get("batch_mode"),
             )
             st.download_button(
                 "📥 下载 HTML 报告",
@@ -548,6 +561,43 @@ with st.sidebar:
                 mime="application/json",
                 use_container_width=True,
             )
+
+            csv_text = generate_csv_report(filtered_download)
+            st.download_button(
+                "📊 下载 CSV 报告",
+                # utf-8-sig BOM: Excel 直接打开不乱码
+                "\ufeff" + csv_text,
+                file_name=f"audit_report_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+            sarif_text = generate_sarif_report(
+                st.session_state.doc,
+                filtered_download,
+            )
+            st.download_button(
+                "🔧 下载 SARIF 报告",
+                sarif_text,
+                file_name=f"audit_report_{datetime.now().strftime('%Y%m%d_%H%M')}.sarif",
+                mime="application/sarif+json",
+                use_container_width=True,
+            )
+
+        # ── 持久化豁免 (.docauditignore) ──────────────────
+        _exempt_keys = st.session_state.get("exempted_finding_ids") or set()
+        st.caption(f"💾 豁免: {len(_exempt_keys)} 条 · 文件 `{EXEMPTION_FILE}`")
+        if st.button(
+            "💾 保存豁免到 .docauditignore",
+            use_container_width=True,
+            help="把当前豁免写入工作目录的 .docauditignore，下次启动/CLI --exempt-file 自动生效",
+        ):
+            save_exemptions(
+                EXEMPTION_FILE,
+                _exempt_keys,
+                st.session_state.get("findings") or [],
+            )
+            st.success(f"已保存 {len(_exempt_keys)} 条豁免到 {EXEMPTION_FILE}")
 
         # ── 清除豁免 ─────────────────────────────────────
         if st.button(

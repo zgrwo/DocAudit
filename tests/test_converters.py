@@ -837,7 +837,7 @@ class TestPptxConverterEastAsia:
 
 
 class TestDocxNestedContentWarnings:
-    """DOCX 未解析嵌套内容 (文本框/页眉页脚/脚注) 跳过时输出 logger.warning"""
+    """DOCX 嵌套内容处理：文本框仍告警跳过；页眉/页脚/脚注自 2026-10-29 起已提取。"""
 
     @staticmethod
     def _make_textbox_docx(path) -> None:
@@ -871,20 +871,25 @@ class TestDocxNestedContentWarnings:
             f"应输出文本框跳过警告, got: {[r.message for r in caplog.records]}"
         )
 
-    def test_header_footer_skip_warned(self, docx_converter, tmp_path, caplog):
-        """含页眉内容 → logger.warning 提示跳过范围"""
+    def test_header_footer_extracted_not_warned(self, docx_converter, tmp_path, caplog):
+        """页眉/页脚不再告警跳过，而是进入 auxiliary_elements 参与文本审查。"""
         path = tmp_path / "hdr.docx"
         doc = DocxDocument()
         doc.sections[0].header.paragraphs[0].text = "页眉内容"
         doc.save(str(path))
         with caplog.at_level(logging.WARNING, logger="src.converters.docx_converter"):
-            docx_converter.convert(str(path))
-        assert any("页眉" in r.message for r in caplog.records), (
-            f"应输出页眉/页脚跳过警告, got: {[r.message for r in caplog.records]}"
-        )
+            result = docx_converter.convert(str(path))
+        assert not any("页眉/页脚" in r.message for r in caplog.records)
+        texts = [
+            p.text
+            for e in result.auxiliary_elements
+            if e.placeholder_type == "header"
+            for p in e.paragraphs
+        ]
+        assert "页眉内容" in texts
 
-    def test_footnote_skip_warned(self, docx_converter, tmp_path, caplog):
-        """含脚注部件 → logger.warning 提示跳过范围"""
+    def test_footnote_extracted_not_warned(self, docx_converter, tmp_path, caplog):
+        """脚注部件 → 解析为 auxiliary_elements[footnote]，不再告警跳过。"""
         from docx.opc.constants import CONTENT_TYPE, RELATIONSHIP_TYPE
         from docx.opc.packuri import PackURI
         from docx.opc.part import Part
@@ -907,10 +912,15 @@ class TestDocxNestedContentWarnings:
         doc.part.relate_to(part, RELATIONSHIP_TYPE.FOOTNOTES)
         doc.save(str(path))
         with caplog.at_level(logging.WARNING, logger="src.converters.docx_converter"):
-            docx_converter.convert(str(path))
-        assert any("脚注" in r.message for r in caplog.records), (
-            f"应输出脚注跳过警告, got: {[r.message for r in caplog.records]}"
-        )
+            result = docx_converter.convert(str(path))
+        assert not any("脚注" in r.message for r in caplog.records)
+        footnote_texts = [
+            p.text
+            for e in result.auxiliary_elements
+            if e.placeholder_type == "footnote"
+            for p in e.paragraphs
+        ]
+        assert any("脚注内容" in t for t in footnote_texts)
 
 
 class TestPptxConverterMemory:
@@ -1526,3 +1536,309 @@ class TestPdfConverterAsciiPath:
         monkeypatch.setattr(sys, "platform", "darwin")
         monkeypatch.setattr(sys, "prefix", "/Users/文档审查/.venv")
         _ensure_ascii_install_path()  # 不抛异常
+
+
+class TestTableGeometry:
+    """2026-10-29: 表格行高/列宽/单元格边距提取 (FMT-TABLE-FIT 数据源)。"""
+
+    def test_pptx_table_geometry_extracted(self, tmp_path):
+        from pptx import Presentation
+        from pptx.util import Pt
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        shape = slide.shapes.add_table(2, 2, Pt(50), Pt(50), Pt(300), Pt(100))
+        table = shape.table
+        table.rows[0].height = Pt(30)
+        table.rows[1].height = Pt(40)
+        table.columns[0].width = Pt(120)
+        table.columns[1].width = Pt(180)
+        table.cell(0, 0).text = "A"
+        table.cell(1, 0).text = "B"
+
+        path = tmp_path / "table_geo.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        tables = [e for p in doc.pages for e in p.flattened_elements if e.type == "table"]
+        elem = tables[0]
+        assert elem.table_row_heights == [30.0, 40.0]
+        assert elem.table_col_widths == [120.0, 180.0]
+        # PPTX 单元格默认内边距 0.1in = 7.2pt
+        assert elem.tables[0][0].margin_left == 7.2
+        assert elem.tables[0][0].margin_right == 7.2
+
+    def test_pptx_table_default_geometry_present(self, tmp_path):
+        """python-pptx 按 shape 高度均分行高 → 默认也有几何，且与行列数对齐。"""
+        from pptx import Presentation
+        from pptx.util import Pt
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        shape = slide.shapes.add_table(2, 1, Pt(50), Pt(50), Pt(300), Pt(100))
+        shape.table.cell(0, 0).text = "A"
+        shape.table.cell(1, 0).text = "B"
+        path = tmp_path / "table_auto.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        elem = [e for p in doc.pages for e in p.flattened_elements if e.type == "table"][0]
+        assert len(elem.table_row_heights) == 2
+        assert all(h > 0 for h in elem.table_row_heights)
+        assert len(elem.table_col_widths) == 1
+
+    def test_docx_table_geometry_extracted(self, docx_converter, tmp_path):
+        from docx import Document as DocxDocument
+        from docx.shared import Pt
+
+        doc = DocxDocument()
+        table = doc.add_table(rows=2, cols=2)
+        table.autofit = False
+        table.columns[0].width = Pt(120)
+        table.columns[1].width = Pt(180)
+        table.rows[0].height = Pt(30)
+        table.rows[1].height = Pt(40)
+        table.cell(0, 0).text = "A"
+        path = tmp_path / "table_geo.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        elem = [e for p in result.pages for e in p.flattened_elements if e.type == "table"][0]
+        assert elem.table_row_heights == [30.0, 40.0]
+        assert elem.table_col_widths == [120.0, 180.0]
+        # python-docx 不暴露单元格边距 → None (审查器用默认值降级)
+        assert elem.tables[0][0].margin_left is None
+
+    def test_docx_autofit_table_degrades(self, docx_converter, tmp_path):
+        """自动布局表格: 行高为自动 (0.0 占位)，列宽取 grid 值，不崩溃。"""
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "A"
+        table.cell(0, 1).text = "B"
+        path = tmp_path / "table_autofit.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        elem = [e for p in result.pages for e in p.flattened_elements if e.type == "table"][0]
+        assert len(elem.table_col_widths) == 2
+        assert len(elem.table_row_heights) == 1
+        assert elem.table_row_heights == [0.0]  # Word 自动行高 → 判定时跳过
+
+
+class TestDocxAuxiliaryText:
+    """2026-10-29: 页眉/页脚/脚注提取 → Document.auxiliary_elements。"""
+
+    def test_header_and_footer_extracted(self, docx_converter, tmp_path):
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("正文内容。")
+        doc.sections[0].header.paragraphs[0].text = "页眉 使用FinFET"
+        doc.sections[0].footer.paragraphs[0].text = "页脚：结论。"
+        path = tmp_path / "aux.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        kinds = {e.placeholder_type for e in result.auxiliary_elements}
+        assert "header" in kinds and "footer" in kinds
+        header = next(e for e in result.auxiliary_elements if e.placeholder_type == "header")
+        assert "使用FinFET" in header.paragraphs[0].text
+
+    def test_duplicate_header_deduped(self, docx_converter, tmp_path):
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("第一节。")
+        doc.sections[0].header.paragraphs[0].text = "公司保密"
+        doc.add_section()
+        doc.add_paragraph("第二节。")
+        doc.sections[1].header.paragraphs[0].text = "公司保密"
+        path = tmp_path / "dedup.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        headers = [e for e in result.auxiliary_elements if e.placeholder_type == "header"]
+        assert len(headers) == 1
+
+    def test_footnotes_extracted_skipping_separators(self):
+        from src.converters.docx_converter import DocxConverter
+
+        class _Part:
+            blob = (
+                '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:footnote w:id="-1"><w:p><w:r><w:t>separator</w:t></w:r></w:p></w:footnote>'
+                '<w:footnote w:id="0"><w:p><w:r><w:t>continuation</w:t></w:r></w:p></w:footnote>'
+                '<w:footnote w:id="1"><w:p><w:r><w:t>脚注一</w:t></w:r></w:p></w:footnote>'
+                '<w:footnote w:id="2"><w:p><w:r><w:t>脚注二</w:t></w:r></w:p></w:footnote>'
+                "</w:footnotes>"
+            ).encode()
+
+        assert DocxConverter._extract_footnote_texts(_Part()) == ["脚注一", "脚注二"]
+
+    def test_plain_docx_has_no_auxiliary(self, docx_converter, sample_docx):
+        result = docx_converter.convert(str(sample_docx))
+        assert result.auxiliary_elements == []
+
+
+class TestPdfBackendSelection:
+    """2026-10-29: PDF 可选 PyMuPDF 后端（auto 探测 / 环境变量覆盖 / 回退 Docling）。"""
+
+    def test_auto_without_pymupdf_uses_docling(self, monkeypatch):
+        from src.converters import pdf_converter as pdf_mod
+
+        monkeypatch.setattr(pdf_mod, "_import_pymupdf", lambda: None)
+        monkeypatch.delenv(pdf_mod.PDF_BACKEND_ENV, raising=False)
+        assert pdf_mod._select_pdf_backend() == "docling"
+
+    def test_auto_with_pymupdf_uses_pymupdf(self, monkeypatch):
+        from src.converters import pdf_converter as pdf_mod
+
+        monkeypatch.setattr(pdf_mod, "_import_pymupdf", lambda: object())
+        monkeypatch.delenv(pdf_mod.PDF_BACKEND_ENV, raising=False)
+        assert pdf_mod._select_pdf_backend() == "pymupdf"
+
+    def test_env_override_wins(self, monkeypatch):
+        from src.converters import pdf_converter as pdf_mod
+
+        monkeypatch.setattr(pdf_mod, "_import_pymupdf", lambda: object())
+        monkeypatch.setenv(pdf_mod.PDF_BACKEND_ENV, "docling")
+        assert pdf_mod._select_pdf_backend() == "docling"
+
+    def test_constructor_backend_override(self, monkeypatch):
+        from src.converters import pdf_converter as pdf_mod
+
+        monkeypatch.delenv(pdf_mod.PDF_BACKEND_ENV, raising=False)
+        assert pdf_mod.PdfConverter(backend="docling").backend == "docling"
+        assert pdf_mod.PdfConverter(backend="auto").backend == "auto"
+
+    def test_missing_pymupdf_falls_back_to_docling(self, monkeypatch, tmp_path):
+        from src.converters import pdf_converter as pdf_mod
+        from src.models.document import Document, DocumentMetadata
+
+        monkeypatch.setattr(pdf_mod, "_import_pymupdf", lambda: None)
+        sentinel = Document(format="pdf", source_path="x", metadata=DocumentMetadata())
+        monkeypatch.setattr(pdf_mod.PdfConverter, "_convert_with_docling", lambda self, p: sentinel)
+        path = tmp_path / "a.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+        result = pdf_mod.PdfConverter(backend="pymupdf").convert(str(path))
+        assert result is sentinel
+
+
+class TestPdfPymupdfExtraction:
+    """PyMuPDF 后端提取契约 (用桩模块，不依赖真实 pymupdf 安装)。"""
+
+    @staticmethod
+    def _install_fake(monkeypatch, *, toc=None, blocks=None):
+        import sys
+        import types
+
+        class _Rect:
+            width = 595.0
+            height = 842.0
+
+        class _Page:
+            rect = _Rect()
+
+            def get_text(self, mode):
+                assert mode == "dict"
+                return {"blocks": blocks or []}
+
+        class _PDF:
+            def __iter__(self):
+                return iter([_Page()])
+
+            def __getitem__(self, idx):
+                return _Page()
+
+            def get_toc(self, simple=True):
+                return toc or []
+
+            def close(self):
+                return None
+
+        fake = types.SimpleNamespace(open=lambda path: _PDF())
+        monkeypatch.setitem(sys.modules, "pymupdf", fake)
+        return fake
+
+    def test_extracts_text_geometry_and_heading_level(self, monkeypatch, tmp_path):
+        from src.converters.pdf_converter import PdfConverter
+
+        blocks = [
+            {
+                "type": 0,
+                "bbox": (10, 20, 300, 60),
+                "lines": [{"spans": [{"text": "第一章 概述", "size": 18.0}]}],
+            },
+            {
+                "type": 0,
+                "bbox": (10, 70, 500, 110),
+                "lines": [{"spans": [{"text": "正文内容。", "size": 10.5}]}],
+            },
+            {"type": 1, "bbox": (0, 0, 10, 10)},  # 图片块应跳过
+        ]
+        self._install_fake(monkeypatch, toc=[[1, "第一章 概述", 1]], blocks=blocks)
+        path = tmp_path / "a.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter(backend="pymupdf").convert(str(path))
+        assert doc.format == "pdf"
+        assert doc.metadata.page_count == 1
+        assert doc.metadata.custom_properties["slide_width"] == 595.0
+        elems = doc.pages[0].elements
+        assert len(elems) == 2
+        assert elems[0].is_title and elems[0].paragraphs[0].level == 1
+        assert elems[0].left == 10.0 and elems[0].height == 40.0
+        assert elems[1].paragraphs[0].level is None
+
+    def test_multiline_block_kept_as_one_paragraph(self, monkeypatch, tmp_path):
+        from src.converters.pdf_converter import PdfConverter
+
+        blocks = [
+            {
+                "type": 0,
+                "bbox": (0, 0, 100, 40),
+                "lines": [
+                    {"spans": [{"text": "第一行", "size": 10.0}]},
+                    {"spans": [{"text": "第二行", "size": 10.0}]},
+                ],
+            }
+        ]
+        self._install_fake(monkeypatch, blocks=blocks)
+        path = tmp_path / "b.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter(backend="pymupdf").convert(str(path))
+        para = doc.pages[0].elements[0].paragraphs[0]
+        assert para.text == "第一行\n第二行"
+        assert len(para.runs) == 2
+
+    def test_empty_pdf_returns_no_pages(self, monkeypatch, tmp_path):
+        import sys
+        import types
+
+        from src.converters.pdf_converter import PdfConverter
+
+        class _PDF:
+            def __iter__(self):
+                return iter([])
+
+            def __getitem__(self, idx):
+                raise IndexError
+
+            def get_toc(self, simple=True):
+                return []
+
+            def close(self):
+                return None
+
+        monkeypatch.setitem(sys.modules, "pymupdf", types.SimpleNamespace(open=lambda p: _PDF()))
+        path = tmp_path / "empty.pdf"
+        path.write_bytes(b"%PDF-1.4 fake")
+        doc = PdfConverter(backend="pymupdf").convert(str(path))
+        assert doc.pages == []

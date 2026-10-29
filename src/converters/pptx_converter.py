@@ -512,6 +512,10 @@ class PptxConverter(BaseConverter):
                         font_size=font_size,
                         fill_color=fill_color,
                         font_color=font_color,
+                        margin_left=_emu_to_pt(cell.margin_left),
+                        margin_top=_emu_to_pt(cell.margin_top),
+                        margin_right=_emu_to_pt(cell.margin_right),
+                        margin_bottom=_emu_to_pt(cell.margin_bottom),
                     )
                 )
 
@@ -521,9 +525,21 @@ class PptxConverter(BaseConverter):
             row_map[c.row].append(c)
         rows = [row_map[r] for r in sorted(row_map)]
 
+        # 表格几何 (FMT-TABLE-FIT): 行高/列宽；0 表示自动/未设置 → 不参与判定
+        row_heights = [
+            _emu_to_pt(r.height) if r.height is not None and r.height > 0 else 0.0
+            for r in table.rows
+        ]
+        col_widths = [
+            _emu_to_pt(c.width) if c.width is not None and c.width > 0 else 0.0
+            for c in table.columns
+        ]
+
         return PageElement(
             type="table",
             tables=rows,
+            table_row_heights=row_heights,
+            table_col_widths=col_widths,
             left=_emu_to_pt(shape.left) if shape.left is not None else None,
             top=_emu_to_pt(shape.top) if shape.top is not None else None,
             width=_emu_to_pt(shape.width) if shape.width is not None else None,

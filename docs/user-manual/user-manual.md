@@ -13,7 +13,7 @@
 | 改字体白名单/字号范围 | [§场景3](#场景3-自定义字体要求) |
 | 添加新的半导体术语规则 | [§场景4](#场景4-添加新的术语规则) |
 | 自动修复格式问题（字体/间距/溢出） | [§场景5](#场景5-自动修复格式问题) |
-| 导出 HTML/JSON 审查报告 | [§场景6](#场景6-导出审查报告) |
+| 导出 HTML/JSON/CSV/SARIF 审查报告 | [§场景6](#场景6-导出审查报告) |
 | 豁免误报/噪音问题 | [§场景7](#场景7-豁免误报问题) |
 | 只用命令行不用浏览器 | [§CLI](#cli-完整参数参考) |
 | 了解 rules.md 怎么写 | [§规则编写](#rulesmd-写作指南) |
@@ -217,21 +217,29 @@
 ### Web UI 导出
 
 审查完成后，侧边栏底部：
-1. 点击 **📥 下载 HTML 报告** — 独立网页，可离线查看，含完整样式
-2. 点击 **📥 下载 JSON 报告** — 结构化数据，可用于二次处理（Python/pandas/Excel）
+1. 点击 **📥 下载 HTML 报告** — 独立网页，可离线查看，含完整样式、页面 SVG 线框缩略图；批量模式按文件分组
+2. 点击 **📋 下载 JSON 报告** — 结构化数据，可用于二次处理（Python/pandas/Excel）
+3. 点击 **📊 下载 CSV 报告** — 一行一条问题，可直接用 Excel 透视分析
+4. 点击 **🔧 下载 SARIF 报告** — SARIF v2.1.0，可导入 GitHub Code Scanning / VS Code SARIF Viewer
 
 > 下载的报告会尊重当前豁免设置 — 先过滤再下载。
 
 ### CLI 导出
 
 ```bash
-# HTML 报告
+# HTML 报告（默认含页面 SVG 线框；--no-thumbnails 可关闭）
 .venv\Scripts\python src/cli.py report.pptx -o report.html
 
 # JSON 报告
 .venv\Scripts\python src/cli.py report.pptx -o report.json
 
-# 批量模式 — 每文件自动编号
+# CSV 报告（UTF-8 BOM，Excel 直接打开不乱码）
+.venv\Scripts\python src/cli.py report.pptx -o report.csv
+
+# SARIF 报告（批量时聚合为单个文件，便于 CI 一次性上传）
+.venv\Scripts\python src/cli.py report.pptx -o report.sarif
+
+# 批量模式 — 每文件自动编号（SARIF 例外：聚合为单文件）
 .venv\Scripts\python src/cli.py docs/ -o batch_report.html
 # 输出: batch_report_01.html, batch_report_02.html, ...
 ```
@@ -254,6 +262,21 @@
 
 **恢复豁免**：侧边栏 **🔄 清除全部豁免** 恢复所有被隐藏的问题。
 
+### 跨会话持久化（`.docauditignore`）
+
+临时豁免只存在当前会话；要长期复用：
+
+1. 豁免完成后点击侧边栏 **💾 保存豁免到 .docauditignore**
+2. 生成 JSON 文件（含稳定 `exemption_key` 与 rule_id/页码/消息，便于代码评审）
+3. 下次打开 Web UI 时自动载入；CLI 用 `--exempt-file .docauditignore` 显式启用
+
+```bash
+python src/cli.py report.pptx --exempt-file .docauditignore
+# 命中项不计入报告与退出码，输出 [EXEMPT] 计数
+```
+
+> 豁免键基于「规则 + 页码 + 文本上下文」，文档内容改动后旧键可能失效（属于预期：问题变了应重新确认）。
+
 ### 永久排除（修改规则）
 
 如果想永久关闭某条规则，编辑 `rules.md`，注释或删除该规则块，或将其严重度改为 `info`。
@@ -274,9 +297,11 @@ python src/cli.py <path> [选项]
 | `--rules` | `str` | `rules.md` | 自定义规则文件路径 |
 | `--glossary` | `str` | `glossary` | 术语表目录路径 |
 | `--vocab` | `str` | `None` | 词汇表目录 (默认 `glossary/../vocab/`) |
-| `-o`, `--output` | `str` | `None` | 输出报告 (.html 或 .json) |
+| `-o`, `--output` | `str` | `None` | 输出报告后缀: `.html` / `.json` / `.sarif` / `.csv` |
 | `-v`, `--verbose` | flag | `False` | 详细日志输出 |
 | `--format` | choice | `all` | 按格式过滤: `pptx` / `docx` / `pdf` / `md` / `all` |
+| `--thumbnails` / `--no-thumbnails` | flag | 开启 | HTML 报告是否内嵌页面 SVG 线框缩略图 |
+| `--exempt-file` | `str` | `None` | 豁免文件路径（如 `.docauditignore`），命中项不计入报告与退出码 |
 | `--fix` | flag | `False` | 自动修复格式问题 |
 | `--fix-type` | choice | `all` | 修复类型: `all` / `font` / `spacing` / `overflow` / `title_punct` / `bullet` |
 
@@ -330,11 +355,14 @@ python src/cli.py <path> [选项]
 | `FMT-MIXED-001~003` | 中英混排规范（CJK-Latin 间距、中文标点） | LanguageAuditor |
 | `VOCAB-REJECT` | 词汇表黑名单（`vocab/reject.txt`） | LanguageAuditor |
 | `FMT-ALIGN` / `FMT-OVERLAP` / `FMT-SAFE-MARGIN` | 同页对齐 / 元素重叠 / 安全边距 | FormatAuditor |
-| `FMT-TEXT-OVERFLOW` / `FMT-FOOTER` | 文本溢出估算 / 页脚页码一致性 | FormatAuditor |
+| `FMT-TEXT-OVERFLOW` / `FMT-TABLE-FIT` | 文本溢出估算 / 表格行高列宽与页面越界估算 | FormatAuditor |
+| `FMT-FOOTER` | 页脚/页码/日期占位符部分缺失 | FormatAuditor |
 | `FMT-IMAGE` / `FMT-CHART` | 图片比例/DPI/alt text / 图表标题 | FormatAuditor |
 | `STR-MASTER` | 多母版检测 | StructureAuditor |
-| `PUNCT-001~007` | 重复/冲突标点、中英标点混用、全半角、括号配对、省略号/破折号 | LanguageAuditor |
+| `PUNCT-001~010` | 重复/冲突标点、中英标点混用、全半角、括号配对、省略号/破折号、日期/范围/单位写法混用 | LanguageAuditor |
 | `TXT-REDUNDANT` | 中文冗余表达 | LanguageAuditor |
+| `TXT-BULLET-PUNCT` | 项目符号末尾标点不一致 | LanguageAuditor |
+| `TXT-DUP-SENTENCE` / `TXT-NEAR-DUP` | 跨页重复句子 / 近似重复页 | LanguageAuditor |
 | `PY-SPELL` / `PY-ZH-GRAMMAR` | 拼写与中文语法/标点；`PY-ZH-GRAMMAR` 始终执行，不依赖 LanguageTool 后端 | LanguageAuditor |
 | `SYS-ERROR` | 系统级错误（审计器/规则执行失败时产生） | 流水线 |
 
@@ -389,6 +417,15 @@ CLI 完全支持所有功能：`python src/cli.py report.pptx -o report.html --f
 
 **Q: 为什么 PDF 的字体/溢出检查没有结果？**
 PDF 转换仅提取文本和标题级别，无字体/位置元数据。如需完整检查请使用 PPTX/DOCX 格式。
+
+**Q: PDF 转换报 “filename does not exists” / 想更快转换？**
+默认 docling 后端要求安装路径为纯英文。可选安装 PyMuPDF 后端：`pip install pymupdf`（装好后自动启用），
+或用 `DOCAUDIT_PDF_BACKEND=pymupdf` / `docling` 显式指定。PyMuPDF 更快且不受中文路径限制，
+但不恢复表格结构（表格文字按普通文本审查）。
+
+**Q: DOCX 的页眉、页脚、脚注会检查吗？**
+会检查文本类问题（中英混排、标点、冗余表达、术语、禁用词），报告位置显示为「页眉 / 页脚 / 脚注」。
+不做字体/版面检查，因为这两类内容没有独立页面几何。
 
 ---
 

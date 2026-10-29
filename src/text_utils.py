@@ -56,6 +56,17 @@ ENGLISH_WORD_RE = re.compile(r"\b[a-zA-Z]+\b")
 ENGLISH_WORD_MIN4_RE = re.compile(r"\b[a-zA-Z]{4,}\b")
 """提取 4+ 字符英文词（过滤短缩写/介词）"""
 
+# ── 项目符号识别 (格式/语言审计器共用 SSOT) ─────────────────
+
+SYMBOL_BULLET_RE = re.compile(r"^\s*[•◦▪▸◆\-*]\s")
+"""符号类项目符号: • ◦ ▪ ▸ ◆ - *"""
+
+NUMBERED_BULLET_RE = re.compile(r"^\s*(?:\d+[\.\)]\s|\(\d+\)\s|[①②③④⑤⑥⑦⑧⑨⑩]\s)")
+"""数字类项目符号: 1. 2) (1) ①"""
+
+LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
+"""字母类项目符号: a) A. (a)"""
+
 
 def is_technical_token(word: str) -> bool:
     """判断英文词是否为技术缩写/驼峰词，拼写检查时应跳过。

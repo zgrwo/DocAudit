@@ -4,7 +4,7 @@
 > 完整用法 → [用户手册](../user-manual/user-manual.md) &nbsp;|&nbsp; 编码规范 → [skills/python/SKILL.md](../../skills/python-SKILL.md)
 > 结构导航 → [project-structure.md](../governance/project-structure.md)
 
-**总模块**: 15 | **总公开函数**: 30+ | **规则**: 26 条
+**总模块**: 28 | **规则**: 26 条
 
 ---
 
@@ -38,8 +38,13 @@
 
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
+| `__init__` | `(backend: str \| None = None)` | — | `None`/`"auto"` 自动探测（有 PyMuPDF 用 PyMuPDF）\| `"pymupdf"` \| `"docling"`；环境变量 `DOCAUDIT_PDF_BACKEND` 可覆盖 |
 | `can_handle` | `(source_path: str \| Path)` | `bool` | `.pdf` 扩展名匹配 |
-| `convert` | `(source_path: str \| Path)` | `Document` | PDF → Document (Docling)。回退 Markdown 导出 |
+| `convert` | `(source_path: str \| Path)` | `Document` | PDF → Document；auto 模式选择 PyMuPDF/Docling，PyMuPDF 缺失时回退 Docling |
+| `_convert_with_pymupdf` | `(source_path: Path)` | `Document` | PyMuPDF 路径：文本块 + 书签标题层级 + bbox 几何（无表格结构、无 docling 模型依赖） |
+| `_convert_with_docling` | `(source_path: Path)` | `Document` | Docling 路径：版面分析 + 表格结构；保留 Markdown 导出回退 |
+
+> 后端选择辅助函数：`_select_pdf_backend(explicit=None) -> str`、`_import_pymupdf() -> module | None`（模块级，测试可 monkeypatch）。
 
 ### `MarkdownConverter` `src/converters/md_converter.py`
 
@@ -132,7 +137,12 @@
 | `load_rules` | `(rules_path: str \| Path)` | 加载 rules.md |
 | `set_delegate_auditors` | `(sa, fa, fca)` | 注入主流水线审计器实例 |
 | `audit` | `(doc: Document)` | → `list[AuditFinding]` 执行所有 check 规则 |
-| `validate_dispatch` | `()` (classmethod) | → `list[str]` 验证所有 DISPATCH 条目有效 |
+| `validate_dispatch` | `()` (classmethod) | → `list[str]` 验证所有注册条目有效（方法存在性） |
+| `skip_checks_for` | `(auditor_key: str)` (classmethod) | → `list[str]` 该 Auditor 应跳过的内部守卫键（pipeline 用，替代手写 `_skip_checks`） |
+
+**注册表** (`CHECK_REGISTRY: dict[str, CheckSpec]`) 是唯一真相来源；`_DISPATCH` 与
+pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`CheckSpec` 字段：
+`auditor` / `method` / `per_page` / `pptx_only` / `skip_key`（空串表示与 check_type 同名）。
 
 **DISPATCH 表** (check_type → auditor_key, method, per_page, pptx_only):
 
@@ -150,8 +160,8 @@
 | `duplicate_title` | sa | `_check_duplicate_title` | ✗ | ✗ |
 | `title_trailing_punctuation` | sa | `_check_title_trailing_punctuation` | ✓ | ✗ |
 | `figure_caption_format` | sa | `_check_figure_caption_format` | ✗ | ✗ |
-| `element_overflow` | fa | `_check_element_overflow` | ✓ | ✗ |
-| `per_page_char_limit` | fa | `_check_per_page_char_limit` | ✓ | ✗ |
+| `element_overflow` | fa | `_check_element_overflow` | ✓ | ✓ |
+| `per_page_char_limit` | fa | `_check_per_page_char_limit` | ✓ | ✓ |
 | `empty_placeholder` | fa | `_check_empty_placeholders` | ✓ | ✓ |
 | `bullet_consistency` | fa | `_check_bullet_consistency` | ✓ | ✗ |
 | `table_contrast` | fa | `_check_table_contrast` | ✓ | ✗ |
@@ -240,6 +250,29 @@
 | `should_reject` | `(text: str)` | `list[(word, reason)]` | 匹配黑名单 |
 | `filter_accepted` | `(words: set)` | `set` | 过滤出白名单中的词 |
 
+### CheckRegistry `src/engines/check_registry.py`
+
+dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → Auditor 反向依赖）。
+`_DISPATCH`（`custom_rules`）与 `_skip_checks`（`pipeline`）均由它派生。
+
+| 符号 | 签名/字段 | 说明 |
+|------|-----------|------|
+| `CheckSpec` | `(auditor: str, method: str, per_page: bool = False, pptx_only: bool = False, skip_key: str = "")` | 单条检查声明；`skip_key` 为空表示与 check_type 同名 |
+| `CHECK_REGISTRY` | `dict[str, CheckSpec]` | check_type → 声明（当前 19 条） |
+
+### Exemptions `src/engines/exemptions.py`
+
+豁免持久化（`.docauditignore`，JSON v1）。读取只信任 `key` 字段（稳定 `exemption_key`），
+其余为人工评审元数据；文件缺失/损坏返回空集合（fail-open 到"多报"）。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `load_exemptions` | `(path: str \| Path = DEFAULT_EXEMPTION_FILE)` | `set[str]` | 读取豁免键；兼容裸列表与 `{"exemptions": [...]}` 两种形态 |
+| `save_exemptions` | `(path: str \| Path, keys: Iterable[str], findings: list[AuditFinding] \| None = None)` | `None` | 写入版本化 JSON；findings 用于补齐 rule_id/page/message 元数据 |
+| `apply_exemptions` | `(findings: list[AuditFinding], keys: set[str])` | `tuple[list[AuditFinding], int]` | 过滤已豁免项，返回 (保留列表, 豁免条数) |
+| `DEFAULT_EXEMPTION_FILE` | `str` | `".docauditignore"` | 默认文件名 |
+| `_extract_keys` | `(data)` | `set[str]` | 内部：解析两种文件形态 |
+
 ---
 
 ## Models（数据模型）
@@ -270,6 +303,7 @@
 | `format` | `str` | `"pptx"` \| `"docx"` \| `"pdf"` \| `"md"` |
 | `metadata` | `DocumentMetadata` | title, author, created, modified, slide_count, page_count, word_count, custom_properties |
 | `pages` | `list[Page]` | 页/幻灯片列表 |
+| `auxiliary_elements` | `list[PageElement]` | 正文之外的文本 (DOCX 页眉/页脚/脚注)；`placeholder_type` 为 header/footer/footnote，仅参与语言/术语类检查（无版面几何） |
 | `all_text` (属性) | `str` | 全文拼接 (缓存) |
 | `all_paragraphs` (属性) | `list[Paragraph]` | 全文档段落 |
 
@@ -303,6 +337,8 @@
 | `type` | `str` | `"text_frame"` \| `"table"` \| `"image"` \| `"chart"` \| `"group"` |
 | `paragraphs` | `list[Paragraph]` | 段落列表 |
 | `tables` | `list[list[TableCell]]` | 表格数据 (按行) |
+| `table_row_heights` | `list[float]` | 表格行高 (pt)；与行索引对齐，0.0 表示自动/未设置 |
+| `table_col_widths` | `list[float]` | 表格列宽 (pt)；与列索引对齐，0.0 表示自动/未设置 |
 | `children` | `list[PageElement]` | Group 子元素 |
 | `left` / `top` / `width` / `height` | `float \| None` | 位置尺寸 (pt) |
 | `shape_name` | `str \| None` | PPTX shape 名称 (DOCX 为 None) |
@@ -332,6 +368,7 @@
 | `font_name` / `font_size` | `str \| None` / `float \| None` | 首 run 字体信息 (FMT-008 大字判定依据) |
 | `fill_color` | `str \| None` | 单元格底色 hex RGB (e.g. "1E3A5F")；无填充/渐变/主题色为 None |
 | `font_color` | `str \| None` | 首 run 字体色 hex RGB (e.g. "FFFFFF")；未提取到为 None |
+| `margin_left/top/right/bottom` | `float \| None` | 单元格内边距 (pt)；PPTX 默认 7.2，DOCX 未提取为 None |
 
 ### AuditFinding `src/models/finding.py`
 
@@ -358,19 +395,49 @@
 
 ## Reporters（报告生成）
 
-`src/reporters/` — AuditFinding → HTML / JSON
+`src/reporters/` — AuditFinding → HTML / JSON / CSV / SARIF
 
 ### HtmlReporter `src/reporters/html_reporter.py`
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None, page_count: int \| None = None)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行；`page_count` 覆盖总页数（批量模式传聚合页数，None 保持现状） |
+| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None, page_count: int \| None = None, show_thumbnails: bool = True)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行；`page_count` 覆盖总页数（批量模式传聚合页数，None 保持现状）；`show_thumbnails` 控制内联 SVG 线框缩略图（批量聚合报告传 False）；批量 finding 带 `metadata["source_file"]` 时按文件分组 |
 
 ### JsonReporter `src/reporters/json_reporter.py`
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `generate_json_report` | `(doc: Document, findings: list[AuditFinding], output_path: str \| Path \| None)` | `dict` | 生成 JSON 报告，可选写入文件 |
+
+### CsvReporter `src/reporters/csv_reporter.py`
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `generate_csv_report` | `(findings: list[AuditFinding], output_path: str \| Path \| None = None)` | `str` | 生成 CSV 报告（UTF-8 BOM，Excel 友好）；以 `= + - @` 开头的单元格加单引号防公式注入；列：rule_id/severity/type/page/location/message/context/suggestion/source_file |
+
+### SarifReporter `src/reporters/sarif_reporter.py`
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `generate_sarif_report` | `(doc: Document, findings: list[AuditFinding], output_path: str \| Path \| None = None)` | `str` | 生成 SARIF v2.1.0 文本（可对接 GitHub Code Scanning / VS Code SARIF Viewer）；severity → level: error/warning/note；`partialFingerprints` 用稳定 `exemption_key`；artifact 优先 `metadata["source_file"]` |
+
+> 排序 SSOT：`src/reporters/ordering.py` 的 `_sort_findings`（error → warning → info → 页码 → rule_id → message）被 HTML/CSV/SARIF 共用；`_group_by_source` 供 HTML 按文件分组。
+
+---
+
+### ConfigValidation `src/engines/validation.py`
+
+配置静态校验（`docaudit rules validate`）。运行时加载器告警降级，本模块让配置错误显式失败。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `validate_rules` | `(rules_path: str \| Path = "rules.md")` | `ValidationResult` | ID/严重度/check_type/正则/数值范围/重复项校验 |
+| `validate_glossary` | `(glossary_dir: str \| Path = "glossary")` | `ValidationResult` | YAML 结构、term 必填字段、正则、未知字段 |
+| `validate_vocab` | `(vocab_dir: str \| Path = "vocab")` | `ValidationResult` | accept/reject 编码、重复项、reject 正则 |
+| `validate_configuration` | `(rules_path="rules.md", glossary_dir="glossary", vocab_dir="vocab")` | `ValidationResult` | 聚合三部分（None 跳过） |
+
+`ValidationResult` 字段：`errors: list[str]`、`warnings: list[str]`；属性 `ok`（errors 为空）；
+方法 `merge(other)` / `to_lines()`。
 
 ---
 
@@ -384,6 +451,8 @@
 | `print_summary` | `(findings)` | 打印审查结果摘要 |
 | `doctor_check` | `()` → `int` | 环境诊断：检查运行环境健康状态，失败项 > 0 时返回 1 |
 
+子命令：`audit`（默认）、`doctor`、`rules validate`（配置校验，错误时 exit 1）。
+
 ---
 
-<!-- last_updated: 2026-10-28 -->
+<!-- last_updated: 2026-10-29 -->

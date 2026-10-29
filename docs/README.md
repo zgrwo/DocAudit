@@ -13,8 +13,9 @@
 | [documentation.md](governance/documentation.md) | 文档职责规范与同步链 |
 | [tooling-pitfalls.md](governance/tooling-pitfalls.md) | 工具/脚本坑位清单（cmd/bat/pip/git） |
 | [falsy-pitfalls.md](governance/falsy-pitfalls.md) | Python falsy 值误判检查清单 |
-| [refactoring-plan.md](governance/refactoring-plan.md) | 重构计划（历史） |
+| [refactoring-plan.md](governance/refactoring-plan.md) | 重构计划（历史，2026-10-29 收口） |
 | [remediation-plan-2026-08.md](governance/remediation-plan-2026-08.md) | 2026-08 整改计划（历史） |
+| [handoff-2026-10-29.md](governance/handoff-2026-10-29.md) | 2026-10-29 交接说明（含第二批收尾记录与决策） |
 
 ## specification/ — 规格
 

@@ -22,14 +22,13 @@
 | 在代码注释中写使用教程 | 教程属于 user-manual.md |
 | 在 api-reference 中写实现细节 | 只写签名和行为契约 |
 
-## 同步更新链（DocAudit 特定：3 步注册）
+## 同步更新链（DocAudit 特定：2 步注册）
 
 ```
 新增 check_type
   → ① Auditor 方法实现
-  → ② _DISPATCH 表注册
-  → ③ _skip_checks 添加
-  缺一不可！
+  → ② CHECK_REGISTRY 增加一行 CheckSpec
+  缺一不可！（_DISPATCH / _skip_checks 由注册表自动派生，2026-10-29 起）
 
 新增 Public 接口
   → docs/specification/api-reference.md
@@ -37,11 +36,15 @@
 
 修改 rules.md 格式
   → 同步 rule_parser.py
+  → 跑 `docaudit rules validate` 验证
+
+新增报告格式 / CLI 子命令
+  → docs/specification/api-reference.md + user-manual.md + README.md
 ```
 
 ## 审查检查项
 
 - [ ] 变更内容属于该文档的职责范围
 - [ ] 未在其他文档中重复定义同一信息
-- [ ] 3 步注册已完成（如为新增 check_type）
+- [ ] 2 步注册已完成（如为新增 check_type）
 - [ ] 数字/计数与 api-reference.md 一致
