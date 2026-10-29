@@ -121,9 +121,16 @@ def doctor_check() -> int:
 
     checks_passed = 0
     checks_failed = 0
+    checks_optional_failed = 0
 
-    def _check(name: str, ok: bool, detail: str = "") -> None:
-        nonlocal checks_passed, checks_failed
+    def _check(name: str, ok: bool, detail: str = "", optional: bool = False) -> None:
+        nonlocal checks_passed, checks_failed, checks_optional_failed
+        if not ok and optional:
+            # 可选依赖/服务缺失不应让 core-only 环境整体失败 (exit 1)。
+            checks_optional_failed += 1
+            suffix = f" ({detail})" if detail else ""
+            print(f"  [WARN] {name}{suffix}")
+            return
         status = "PASS" if ok else "FAIL"
         if not ok:
             checks_failed += 1
@@ -165,9 +172,14 @@ def doctor_check() -> int:
     for display_name, module_name in optional_deps:
         try:
             importlib.import_module(module_name)
-            _check(f"Optional: {display_name}", True)
+            _check(f"Optional: {display_name}", True, optional=True)
         except ImportError:
-            _check(f"Optional: {display_name}", False, "pip install docaudit[pdf]")
+            _check(
+                f"Optional: {display_name}",
+                False,
+                "pip install docaudit[pdf]",
+                optional=True,
+            )
 
     # 4. rules.md parseable
     rules_path = Path("rules.md")
@@ -206,15 +218,23 @@ def doctor_check() -> int:
 
         resp = req.get("http://localhost:8010/v2/languages", timeout=3)
         if resp.status_code == 200:
-            _check("LanguageTool server", True, "localhost:8010 reachable")
+            _check("LanguageTool server", True, "localhost:8010 reachable", optional=True)
         else:
-            _check("LanguageTool server", False, f"HTTP {resp.status_code}")
+            _check("LanguageTool server", False, f"HTTP {resp.status_code}", optional=True)
     except Exception:
-        _check("LanguageTool server", False, "not reachable (optional: docker-compose up)")
+        _check(
+            "LanguageTool server",
+            False,
+            "not reachable (optional: docker-compose up)",
+            optional=True,
+        )
 
     # Summary
     print(f"\n{'=' * 40}")
-    print(f"Result: {checks_passed} passed, {checks_failed} failed")
+    print(
+        f"Result: {checks_passed} passed, {checks_failed} failed"
+        + (f", {checks_optional_failed} optional unavailable" if checks_optional_failed else "")
+    )
     return 1 if checks_failed > 0 else 0
 
 

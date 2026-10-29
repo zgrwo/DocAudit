@@ -86,6 +86,61 @@ class TestMixedFormatting:
         assert len(rule_ids) == len(set(rule_ids))
 
 
+class TestPunctuation:
+    """2026-10-28: 标点冗余/冲突/全半角/配对检查。"""
+
+    def test_repeated_semicolon(self, auditor):
+        findings = auditor._check_punctuation("参数如下；；请确认。", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-001"]
+
+    def test_adjacent_conflicting_punctuation(self, auditor):
+        findings = auditor._check_punctuation("参数如下，。请确认。", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-002"]
+
+    def test_chinese_followed_by_ascii_punctuation(self, auditor):
+        findings = auditor._check_punctuation("中文, English", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-003"]
+
+    def test_fullwidth_alnum(self, auditor):
+        findings = auditor._check_punctuation("版本ＡＢＣ１２３", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-004"]
+
+    def test_unmatched_quote(self, auditor):
+        findings = auditor._check_punctuation("“未闭合的引号", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-005"]
+
+    def test_english_ellipsis_in_chinese_context(self, auditor):
+        findings = auditor._check_punctuation("中文 test... 内容", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-006"]
+
+    def test_double_hyphen_in_chinese_context(self, auditor):
+        findings = auditor._check_punctuation("中文--测试", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["PUNCT-007"]
+
+    def test_url_with_comma_not_flagged(self, auditor):
+        findings = auditor._check_punctuation(
+            "详见 https://example.com/a,b，然后继续。", 0, "第 1 页"
+        )
+        assert all(f.rule_id != "PUNCT-003" for f in findings)
+
+    def test_fenced_code_not_flagged(self, auditor):
+        findings = auditor._check_punctuation("```python\n中文, English\n```", 0, "第 1 页")
+        assert findings == []
+
+    def test_redundant_phrase(self, auditor):
+        findings = auditor._check_redundancy("原因是设备故障造成的。", 0, "第 1 页")
+        assert [f.rule_id for f in findings] == ["TXT-REDUNDANT"]
+
+    def test_punctuation_and_chinese_patterns_run_without_lt(self, auditor, monkeypatch):
+        """LanguageTool 后端可用 (或 _check_text 返回空) 时，自定义检查仍执行。"""
+        monkeypatch.setattr(auditor, "_check_text", lambda *args, **kwargs: [])
+        doc = _make_doc("他仔细的看了看，；；参数。")
+        findings = auditor.audit(doc)
+        rule_ids = {f.rule_id for f in findings}
+        assert "PY-ZH-GRAMMAR" in rule_ids
+        assert "PUNCT-001" in rule_ids
+
+
 class TestRejectedVocab:
     """_check_rejected_vocab: reject.txt 禁用词检查"""
 

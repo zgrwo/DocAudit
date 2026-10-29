@@ -1,11 +1,13 @@
 """格式审查器 — 字体/字号/颜色/对齐/母版一致性"""
 
 import logging
+import math
 import re
 from collections import Counter
+from itertools import combinations
 
 from src.auditors.base import BaseAuditor
-from src.models.document import Document, Page, PageElement
+from src.models.document import Document, Page
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import is_cjk_char as _is_cjk_char
 
@@ -18,6 +20,27 @@ _SYMBOL_BULLET_RE = re.compile(r"^\s*[•◦▪▸◆\-*]\s")
 _NUMBERED_BULLET_RE = re.compile(r"^\s*(?:\d+[\.\)]\s|\(\d+\)\s|[①②③④⑤⑥⑦⑧⑨⑩]\s)")
 # 字母类: a) A. i. (a)
 _LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
+
+
+def _effective_latin_font(run) -> str | None:
+    """优先使用继承解析后的 latin 字体；未解析的 +mj/+mn token 视为未知。"""
+    name = run.effective_font_name or run.font_name
+    if name and name.startswith("+"):
+        return None
+    return name
+
+
+def _effective_ea_font(run) -> str | None:
+    """优先使用继承解析后的 eastAsia 字体；未解析的 +mj/+mn token 视为未知。"""
+    name = run.effective_font_name_east_asia or run.font_name_east_asia
+    if name and name.startswith("+"):
+        return None
+    return name
+
+
+def _effective_font_size(run) -> float | None:
+    """优先使用继承解析后的字号。"""
+    return run.effective_font_size if run.effective_font_size is not None else run.font_size
 
 
 # ── WCAG 对比度 (FMT-008 表格底色 vs 字体色) ────────────────────────────
@@ -59,8 +82,8 @@ class FormatAuditor(BaseAuditor):
 
     # 默认配置 (对齐 rules.md FMT-001/FMT-002/FMT-003/FMT-004)
     DEFAULT_ALLOWED_FONTS = ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
-    DEFAULT_TITLE_SIZE_RANGE = (28, 40)  # pt  (rules.md FMT-002: 标题 28-40pt)
-    DEFAULT_BODY_SIZE_RANGE = (12, 22)  # pt  (rules.md FMT-002: 正文 12-22pt)
+    DEFAULT_TITLE_SIZE_RANGE = (28, 44)  # pt  (rules.md FMT-002: 标题 28-44pt)
+    DEFAULT_BODY_SIZE_RANGE = (12, 32)  # pt  (rules.md FMT-002: 正文 12-32pt)
     DEFAULT_ALIGNMENT_TOLERANCE = 5.0  # pt — 位置偏差容忍度
     DEFAULT_MAX_CHINESE_CHARS = 150  # 单段中文字数上限 (~3行×50字/行)
     DEFAULT_MAX_ENGLISH_CHARS = 300  # 单段英文字符上限 (~3行×100字符/行)
@@ -105,6 +128,11 @@ class FormatAuditor(BaseAuditor):
             self.large_text_threshold = self.DEFAULT_LARGE_TEXT_THRESHOLD
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
+        # 2026-10-28: FMT-001/002/004 没有 check_type, 旧实现无条件执行 —
+        # 即使用户从 rules.md 删除规则，仍会用默认值报错，违反"rules.md 是唯一入口"。
+        # enabled_rule_ids=None 表示独立使用/未注入配置，保持全部检查 (向后兼容)。
+        enabled = cfg.get("enabled_rule_ids")
+        self.enabled_rule_ids: set[str] | None = set(enabled) if enabled is not None else None
         # rules.md 严重度声明驱动 (2026-09-06 审查 C-1): 无 check_type 的 format
         # 规则 (FMT-001/002/004) 不经 dispatch 严重度覆盖通道, 由 audit() 按
         # rule_id 统一覆盖 — rules.md 是严重度的唯一来源, 硬编码值仅为兜底。
@@ -115,31 +143,51 @@ class FormatAuditor(BaseAuditor):
             except ValueError:
                 logger.warning("rule_severities 中 %s 的严重度无效: %s，忽略", _rid, _sev)
 
+    def _rule_enabled(self, rule_id: str) -> bool:
+        return self.enabled_rule_ids is None or rule_id in self.enabled_rule_ids
+
     def audit(self, doc: Document) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
         skip = self._skip_checks
+        # 2026-10-28: FMT-001/002/003 的阈值是幻灯片语义（标题 28-44pt、
+        # 单页 200 字、品牌字体列表），不能直接套到 DOCX/PDF/MD。
+        # 例：Word 的 Heading 1 通常 16pt、一页 300+ 字、宋体正文都是正常的。
+        # PPTX 专属检查在 audit() 入口统一收敛；dispatch 型检查由
+        # _DISPATCH 的 pptx_only 标志拦截。
+        is_pptx = doc.format == "pptx"
 
         for page in doc.pages:
-            findings.extend(self._check_font_consistency(page))
-            findings.extend(self._check_font_size(page))
-            findings.extend(self._check_alignment(page))
-            findings.extend(self._check_paragraph_length(page))
-            if "empty_placeholder" not in skip and doc.format == "pptx":
+            if is_pptx:
+                if self._rule_enabled("FMT-001"):
+                    findings.extend(self._check_font_consistency(page))
+                if self._rule_enabled("FMT-002"):
+                    findings.extend(self._check_font_size(page))
+                findings.extend(self._check_alignment(page))
+                findings.extend(self._check_element_overlap(page, doc))
+                findings.extend(self._check_safe_margin(page, doc))
+                findings.extend(self._check_text_overflow(page, doc))
+                findings.extend(self._check_image_quality(page, doc))
+                findings.extend(self._check_chart_labeling(page, doc))
+            if self._rule_enabled("FMT-004"):
+                findings.extend(self._check_paragraph_length(page))
+            if "empty_placeholder" not in skip and is_pptx:
                 findings.extend(self._check_empty_placeholders(page, doc))
             if "bullet_consistency" not in skip:
                 findings.extend(self._check_bullet_consistency(page, doc))
-            if "element_overflow" not in skip:
+            if "element_overflow" not in skip and is_pptx:
                 findings.extend(self._check_element_overflow(page, doc))
-            if "per_page_char_limit" not in skip:
+            if "per_page_char_limit" not in skip and is_pptx:
                 findings.extend(self._check_per_page_char_limit(page))
             if "table_contrast" not in skip:
                 findings.extend(self._check_table_contrast(page, doc))
 
-        # 全局字体统计
-        findings.extend(self._check_global_font_consistency(doc))
+        # 全局字体统计（PPTX 品牌字体语义）
+        if is_pptx and self._rule_enabled("FMT-001"):
+            findings.extend(self._check_global_font_consistency(doc))
 
-        # PPTX 特有: 母版/版式合规检查
-        if doc.format == "pptx":
+        # PPTX 特有: 母版/版式/页脚合规检查 (内置提示，暂不占 26 条规则计数)
+        if is_pptx:
+            findings.extend(self._check_footer_consistency(doc))
             findings.extend(self._check_layout_consistency(doc))
 
         # rules.md 严重度统一覆盖 (2026-09-06 审查 C-1): FMT-001/002/004 等
@@ -169,16 +217,15 @@ class FormatAuditor(BaseAuditor):
                 continue
             for para in elem.paragraphs:
                 for run in para.runs:
-                    if run.font_name and run.font_name not in self.allowed_fonts:
-                        violations.setdefault((run.font_name, "latin"), []).append(
+                    latin_font = _effective_latin_font(run)
+                    if latin_font and latin_font not in self.allowed_fonts:
+                        violations.setdefault((latin_font, "latin"), []).append(
                             (run.text[:50], elem.shape_name)
                         )
                     # eastAsia 为 None 时跳过 (纯西文 run)
-                    if (
-                        run.font_name_east_asia
-                        and run.font_name_east_asia not in self.allowed_fonts
-                    ):
-                        violations.setdefault((run.font_name_east_asia, "east_asia"), []).append(
+                    ea_font = _effective_ea_font(run)
+                    if ea_font and ea_font not in self.allowed_fonts:
+                        violations.setdefault((ea_font, "east_asia"), []).append(
                             (run.text[:50], elem.shape_name)
                         )
 
@@ -220,10 +267,12 @@ class FormatAuditor(BaseAuditor):
                     continue
                 for para in elem.paragraphs:
                     for run in para.runs:
-                        if run.font_name:
-                            font_counter[(run.font_name, "latin")] += 1
-                        if run.font_name_east_asia:
-                            font_counter[(run.font_name_east_asia, "east_asia")] += 1
+                        latin_font = _effective_latin_font(run)
+                        ea_font = _effective_ea_font(run)
+                        if latin_font:
+                            font_counter[(latin_font, "latin")] += 1
+                        if ea_font:
+                            font_counter[(ea_font, "east_asia")] += 1
 
         if not font_counter:
             return findings
@@ -268,9 +317,9 @@ class FormatAuditor(BaseAuditor):
                 continue
             for para in elem.paragraphs:
                 for run in para.runs:
-                    if run.font_size is None:
+                    sz = _effective_font_size(run)
+                    if sz is None:
                         continue
-                    sz = run.font_size
 
                     if elem.is_title:
                         if sz < self.title_size_range[0]:
@@ -332,55 +381,463 @@ class FormatAuditor(BaseAuditor):
     # ── 对齐检查 ─────────────────────────────────────────────
 
     def _check_alignment(self, page: Page) -> list[AuditFinding]:
-        """检查同列文本框是否对齐"""
-        findings: list[AuditFinding] = []
+        """检查同页文本框的行/列对齐。
 
-        # 按 left 位置聚类 (已过滤 left=None，避免 None 与 0 混淆)
+        2026-10-28 修复：旧实现按 left 聚类后直接比较 top，把标题
+        (top=22) 与正文 (top=126) 当成"同列未对齐"，样例每页产生 2 条
+        误报。现改为角色感知 + 成对判断：
+
+        - 标题与正文是不同角色，禁止互比；
+        - 同一行（水平分离、垂直重叠）比较 top 是否一致；
+        - 同一列（左边界接近）比较宽度/右边界，不比较 top
+          （上下堆叠的标题与正文 top 本来就应该不同）。
+        """
+        findings: list[AuditFinding] = []
+        tol = self.alignment_tolerance
+
+        # 已过滤 left/top=None，避免 None 与 0 混淆
         text_frames = [
-            e for e in page.flattened_elements if e.type == "text_frame" and e.left is not None
+            e
+            for e in page.flattened_elements
+            if e.type == "text_frame" and e.left is not None and e.top is not None
         ]
         if len(text_frames) < 2:
             return findings
 
-        sorted_frames = sorted(text_frames, key=lambda e: e.left)
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
 
-        # 检查相近 left 值的文本框
-        clustered: list[list[PageElement]] = []
-        current_cluster = [sorted_frames[0]]
+        for first, second in combinations(text_frames, 2):
+            # 标题与正文属于不同角色：它们的 top/height 本来就不同，
+            # 不能作为"未对齐"证据。
+            if bool(first.is_title) != bool(second.is_title):
+                continue
 
-        for frame in sorted_frames[1:]:
-            prev_left = current_cluster[-1].left
-            curr_left = frame.left
-            if abs(curr_left - prev_left) <= self.alignment_tolerance:
-                current_cluster.append(frame)
-            else:
-                if len(current_cluster) >= 2:
-                    clustered.append(current_cluster)
-                current_cluster = [frame]
+            left_gap = abs(first.left - second.left)
+            top_gap = abs(first.top - second.top)
 
-        if len(current_cluster) >= 2:
-            clustered.append(current_cluster)
+            # ── 同一行：水平分离 + 垂直重叠 → 检查 top 是否一致 ──
+            if left_gap > tol and top_gap > tol:
+                first_h = first.height or 0.0
+                second_h = second.height or 0.0
+                min_h = min(first_h, second_h)
+                if min_h <= 0:
+                    continue
+                # 水平方向也大幅重叠 → 更像"嵌套/覆盖"而非并排两栏，
+                # 不作为"同一行未对齐"证据（样例中 TextBox 覆盖在
+                # Content Placeholder 上即此形态）。
+                if first.width is not None and second.width is not None:
+                    h_overlap = min(first.left + first.width, second.left + second.width) - max(
+                        first.left, second.left
+                    )
+                    min_w = min(first.width, second.width)
+                    if min_w > 0 and h_overlap / min_w > 0.2:
+                        continue
+                overlap = min(first.top + first_h, second.top + second_h) - max(
+                    first.top, second.top
+                )
+                if overlap / min_h < 0.5:
+                    continue
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="同一行文本框垂直位置不一致，建议对齐",
+                        rule_id="FMT-ALIGN",
+                        page_index=page.index,
+                        location=page_label,
+                        context=(
+                            f'"{first.shape_name or "文本框"}" top={first.top:.0f}pt, '
+                            f'"{second.shape_name or "文本框"}" top={second.top:.0f}pt'
+                        ),
+                        suggestion="将同一行文本框的 top 调整为一致，形成水平基线",
+                        metadata={"tolerance": tol},
+                    )
+                )
 
-        # 检查每个聚类中的 top 对齐
-        for cluster in clustered:
-            tops = [f.top for f in cluster if f.top is not None]
-            if len(tops) >= 2:
-                avg_top = sum(tops) / len(tops)
-                for i, f in enumerate(cluster):
-                    if f.top is not None and abs(f.top - avg_top) > self.alignment_tolerance * 2:
+            # ── 同一列：左边界接近 → 检查宽度/右边界是否一致 ──
+            elif left_gap <= tol and top_gap > tol:
+                if first.width is None or second.width is None:
+                    continue
+                width_gap = abs(first.width - second.width)
+                right_gap = abs((first.left + first.width) - (second.left + second.width))
+                if width_gap <= tol and right_gap <= tol:
+                    continue
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="同列文本框宽度或右边界不一致，建议对齐",
+                        rule_id="FMT-ALIGN",
+                        page_index=page.index,
+                        location=page_label,
+                        context=(
+                            f'"{first.shape_name or "文本框"}" '
+                            f"width={first.width:.0f}pt right={first.left + first.width:.0f}pt, "
+                            f'"{second.shape_name or "文本框"}" '
+                            f"width={second.width:.0f}pt right={second.left + second.width:.0f}pt"
+                        ),
+                        suggestion="统一同列文本框的宽度或右边界",
+                        metadata={"tolerance": tol},
+                    )
+                )
+
+        return findings
+
+    @staticmethod
+    def _bbox_contains(outer, inner, tol: float = 1.0) -> bool:
+        """outer 是否包含 inner（容差 tol）。"""
+        if None in (outer.left, outer.top, outer.width, outer.height):
+            return False
+        if None in (inner.left, inner.top, inner.width, inner.height):
+            return False
+        return (
+            outer.left <= inner.left + tol
+            and outer.top <= inner.top + tol
+            and outer.left + outer.width >= inner.left + inner.width - tol
+            and outer.top + outer.height >= inner.top + inner.height - tol
+        )
+
+    def _check_element_overlap(self, page: Page, doc: Document) -> list[AuditFinding]:
+        """检查 PPTX 元素重叠 (2026-10-28)。
+
+        保守策略:
+        - 只比较高置信度的叶子元素 (文本框/图片/表格/图表)，不比较 group 容器；
+        - 排除全屏背景 (面积 >= 80% 页面)；
+        - 一个元素包含另一个 → 视为嵌套/叠加纹理，不报；
+        - 交集面积 >= 较小元素 25% 才报，避免边缘擦碰误报。
+        """
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+        SW = doc.metadata.custom_properties.get("slide_width", 960) or 960
+        SH = doc.metadata.custom_properties.get("slide_height", 540) or 540
+        slide_area = SW * SH
+
+        def _has_content(e) -> bool:
+            if e.type == "text_frame":
+                return any(p.text.strip() for p in e.paragraphs)
+            if e.type == "table":
+                return any(cell.text.strip() for row in e.tables for cell in row)
+            return True  # image/chart 视为有内容
+
+        elements = [
+            e
+            for e in page.flattened_elements
+            if e.type in ("text_frame", "table", "image", "chart")
+            and _has_content(e)
+            and e.left is not None
+            and e.top is not None
+            and e.width is not None
+            and e.height is not None
+            and e.width > 0
+            and e.height > 0
+        ]
+
+        for first, second in combinations(elements, 2):
+            first_area = first.width * first.height
+            second_area = second.width * second.height
+            if first_area >= slide_area * 0.8 or second_area >= slide_area * 0.8:
+                continue
+            if self._bbox_contains(first, second) or self._bbox_contains(second, first):
+                continue
+
+            x_overlap = min(first.left + first.width, second.left + second.width) - max(
+                first.left, second.left
+            )
+            y_overlap = min(first.top + first.height, second.top + second.height) - max(
+                first.top, second.top
+            )
+            if x_overlap <= 0 or y_overlap <= 0:
+                continue
+            overlap_area = x_overlap * y_overlap
+            min_area = min(first_area, second_area)
+            if min_area <= 0 or overlap_area / min_area < 0.25:
+                continue
+
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.INFO,
+                    message="检测到元素重叠，可能影响可读性",
+                    rule_id="FMT-OVERLAP",
+                    page_index=page.index,
+                    location=page_label,
+                    context=(
+                        f'"{first.shape_name or first.type}" 与 '
+                        f'"{second.shape_name or second.type}" 重叠 '
+                        f"{overlap_area / min_area:.0%}"
+                    )[:150],
+                    suggestion="调整元素位置/尺寸，或确认重叠是否为有意设计",
+                    metadata={
+                        "overlap_ratio": round(overlap_area / min_area, 3),
+                        "first": first.shape_name or first.type,
+                        "second": second.shape_name or second.type,
+                    },
+                )
+            )
+
+        return findings
+
+    def _check_safe_margin(self, page: Page, doc: Document) -> list[AuditFinding]:
+        """检查 PPTX 文本/表格是否过于贴近页面边缘 (2026-10-28)。
+
+        仅检查文本框/表格，排除全屏背景；默认安全边距为页面宽高的 1%。
+        """
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+        SW = doc.metadata.custom_properties.get("slide_width", 960) or 960
+        SH = doc.metadata.custom_properties.get("slide_height", 540) or 540
+        margin_x = SW * 0.01
+        margin_y = SH * 0.01
+        slide_area = SW * SH
+
+        for elem in page.flattened_elements:
+            if elem.type not in ("text_frame", "table"):
+                continue
+            if None in (elem.left, elem.top, elem.width, elem.height):
+                continue
+            if elem.width * elem.height >= slide_area * 0.8:
+                continue
+            issues = []
+            if elem.left < margin_x:
+                issues.append(f"left={elem.left:.0f}pt")
+            if elem.top < margin_y:
+                issues.append(f"top={elem.top:.0f}pt")
+            if elem.left + elem.width > SW - margin_x:
+                issues.append(f"right={elem.left + elem.width:.0f}pt")
+            if elem.top + elem.height > SH - margin_y:
+                issues.append(f"bottom={elem.top + elem.height:.0f}pt")
+            if not issues:
+                continue
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.INFO,
+                    message="元素过于贴近页面边缘，建议留出安全边距",
+                    rule_id="FMT-SAFE-MARGIN",
+                    page_index=page.index,
+                    location=page_label,
+                    context=f"{elem.shape_name or elem.type}: {', '.join(issues)}"[:150],
+                    suggestion=f"建议保留至少 {margin_x:.0f}×{margin_y:.0f}pt 的页面边距",
+                    metadata={"issues": issues},
+                )
+            )
+        return findings
+
+    def _check_text_overflow(self, page: Page, doc: Document) -> list[AuditFinding]:
+        """估算文本框内容是否可能溢出 (2026-10-29)。
+
+        说明：这是**估算**，不是像素级渲染。只对显式文本框/正文占位符，
+        且 auto_size 不是 SHAPE_TO_FIT_TEXT/TEXT_TO_FIT_SHAPE 时检查；
+        估算行高 = 字号 × 1.2，CJK 字符按 2 个半角单位计。
+        """
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+
+        for elem in page.flattened_elements:
+            if elem.type != "text_frame":
+                continue
+            if elem.placeholder_type in ("slide_number", "footer", "date", "header"):
+                continue
+            if elem.auto_size in ("SHAPE_TO_FIT_TEXT", "TEXT_TO_FIT_SHAPE"):
+                continue
+            if elem.width is None or elem.height is None:
+                continue
+            para_texts = [p.text.strip() for p in elem.paragraphs if p.text.strip()]
+            if not para_texts:
+                continue
+
+            margin_l = elem.margin_left if elem.margin_left is not None else 7.2
+            margin_r = elem.margin_right if elem.margin_right is not None else 7.2
+            margin_t = elem.margin_top if elem.margin_top is not None else 3.6
+            margin_b = elem.margin_bottom if elem.margin_bottom is not None else 3.6
+            inner_w = max(1.0, elem.width - margin_l - margin_r)
+            inner_h = max(1.0, elem.height - margin_t - margin_b)
+
+            estimated_h = 0.0
+            has_size = False
+            for para in elem.paragraphs:
+                text = para.text
+                if not text.strip():
+                    continue
+                sizes = [
+                    _effective_font_size(run)
+                    for run in para.runs
+                    if _effective_font_size(run) is not None
+                ]
+                if not sizes:
+                    continue
+                has_size = True
+                font_size = sum(sizes) / len(sizes)
+                units = 0.0
+                explicit_lines = 1
+                for ch in text:
+                    if ch == "\n":
+                        explicit_lines += 1
+                    elif _is_cjk_char(ch):
+                        units += 2.0
+                    elif ch.isspace():
+                        units += 0.5
+                    else:
+                        units += 1.0
+                # 1 个半角单位 ≈ 0.5em
+                capacity = max(1.0, inner_w / (font_size * 0.5))
+                lines = explicit_lines + max(0, math.ceil(units / capacity) - 1)
+                spacing = (para.space_before or 0.0) + (para.space_after or 0.0)
+                if para.line_spacing and para.line_spacing > 5:
+                    line_height = para.line_spacing  # 固定行距 (pt)
+                else:
+                    line_height = font_size * 1.2 * (para.line_spacing or 1.0)
+                estimated_h += lines * line_height + spacing
+
+            if not has_size or estimated_h <= inner_h * 1.15:
+                continue
+            if estimated_h - inner_h < 8.0:
+                continue
+
+            findings.append(
+                AuditFinding(
+                    type=FindingType.FORMAT,
+                    severity=FindingSeverity.INFO,
+                    message="文本框内容可能溢出（估算）",
+                    rule_id="FMT-TEXT-OVERFLOW",
+                    page_index=page.index,
+                    location=page_label,
+                    context=(
+                        f"{elem.shape_name or '文本框'}: "
+                        f"估算高度 {estimated_h:.0f}pt > 可用 {inner_h:.0f}pt"
+                    )[:150],
+                    suggestion="缩短文本、增大文本框、减小字号，或启用自动缩放",
+                    metadata={
+                        "estimated_height": round(estimated_h, 1),
+                        "available_height": round(inner_h, 1),
+                        "estimated": True,
+                    },
+                )
+            )
+        return findings
+
+    def _check_footer_consistency(self, doc: Document) -> list[AuditFinding]:
+        """检查页脚/页码/日期占位符是否全 deck 一致 (2026-10-29)。
+
+        只在"部分页面有、部分页面没有"时提示；整套都没有视为模板选择，
+        不误报。封面页 (第 1 页) 不参与。
+        """
+        findings: list[AuditFinding] = []
+        content_pages = doc.pages[1:] if len(doc.pages) > 1 else []
+        if not content_pages:
+            return findings
+
+        def _has_footer(page: Page) -> bool:
+            return any(
+                e.placeholder_type in ("footer", "slide_number", "date")
+                for e in page.flattened_elements
+            )
+
+        states = [(_has_footer(page), page) for page in content_pages]
+        with_footer = [page for has, page in states if has]
+        if not with_footer or len(with_footer) == len(states):
+            return findings
+
+        missing = [
+            f"第 {page.slide_number or page.index + 1} 页" for has, page in states if not has
+        ]
+        findings.append(
+            AuditFinding(
+                type=FindingType.FORMAT,
+                severity=FindingSeverity.INFO,
+                message="页脚/页码/日期占位符在部分页面缺失",
+                rule_id="FMT-FOOTER",
+                location="全文",
+                context=f"缺失页面: {', '.join(missing[:8])}",
+                suggestion="统一为所有内容页显示页脚/页码，或统一移除",
+                metadata={"missing_pages": missing},
+            )
+        )
+        return findings
+
+    def _check_image_quality(self, page: Page, doc: Document) -> list[AuditFinding]:
+        """检查图片宽高比失真/低 DPI/缺 alt text (2026-10-29)。"""
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+
+        for elem in page.flattened_elements:
+            if elem.type != "image":
+                continue
+            if elem.width is None or elem.height is None or elem.width <= 0 or elem.height <= 0:
+                continue
+            display_ratio = elem.width / elem.height
+            if elem.image_px_width and elem.image_px_height:
+                intrinsic_ratio = elem.image_px_width / elem.image_px_height
+                if intrinsic_ratio > 0:
+                    distortion = abs(display_ratio - intrinsic_ratio) / intrinsic_ratio
+                    if distortion > 0.02:
                         findings.append(
                             AuditFinding(
                                 type=FindingType.FORMAT,
-                                severity=FindingSeverity.INFO,
-                                message="文本框垂直位置不一致，建议对齐",
-                                rule_id=None,  # 无对应 rules.md 规则，仅供参考
+                                severity=FindingSeverity.WARNING,
+                                message=f"图片宽高比失真 {distortion:.0%}",
+                                rule_id="FMT-IMAGE",
                                 page_index=page.index,
-                                location=f"第 {page.slide_number or page.index + 1} 页",
-                                context=f'"{f.shape_name or "文本框"}" top={f.top:.0f}pt (同列其他 ~{avg_top:.0f}pt)',
-                                suggestion="调整文本框 top 值使其与同列其他元素对齐",
+                                location=page_label,
+                                context=f"{elem.shape_name or '图片'} 显示比例 {display_ratio:.2f}",
+                                suggestion="保持图片原始宽高比，避免拉伸变形",
+                                metadata={"distortion": round(distortion, 3)},
                             )
                         )
 
+                dpi_x = elem.image_px_width / (elem.width / 72.0)
+                dpi_y = elem.image_px_height / (elem.height / 72.0)
+                min_dpi = min(dpi_x, dpi_y)
+                if min_dpi < 150:
+                    findings.append(
+                        AuditFinding(
+                            type=FindingType.FORMAT,
+                            severity=FindingSeverity.INFO,
+                            message=f"图片分辨率偏低（约 {min_dpi:.0f} DPI）",
+                            rule_id="FMT-IMAGE",
+                            page_index=page.index,
+                            location=page_label,
+                            context=f"{elem.shape_name or '图片'} ({elem.image_px_width}×{elem.image_px_height}px)",
+                            suggestion="使用更高分辨率原图，避免投影/打印模糊",
+                            metadata={"dpi": round(min_dpi, 1)},
+                        )
+                    )
+
+            if not elem.image_alt_text:
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="图片缺少替代文本 (alt text)",
+                        rule_id="FMT-IMAGE",
+                        page_index=page.index,
+                        location=page_label,
+                        context=elem.shape_name or "图片",
+                        suggestion="为图片添加替代文本，提升无障碍与可检索性",
+                    )
+                )
+        return findings
+
+    def _check_chart_labeling(self, page: Page, doc: Document) -> list[AuditFinding]:
+        """检查图表是否缺少标题 (2026-10-29)。"""
+        findings: list[AuditFinding] = []
+        page_label = f"第 {page.slide_number or page.index + 1} 页"
+        for elem in page.flattened_elements:
+            if elem.type != "chart":
+                continue
+            if elem.chart_has_title is False:
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FORMAT,
+                        severity=FindingSeverity.INFO,
+                        message="图表缺少标题",
+                        rule_id="FMT-CHART",
+                        page_index=page.index,
+                        location=page_label,
+                        context=elem.shape_name or "图表",
+                        suggestion="为图表添加说明性标题，明确指标与口径",
+                    )
+                )
         return findings
 
     # ── PPTX 版式合规 ────────────────────────────────────────
@@ -684,6 +1141,23 @@ class FormatAuditor(BaseAuditor):
                 text = para.text
                 if not text.strip():
                     continue
+
+                # 优先使用 Converter 从 a:pPr 提取的真实项目符号格式。
+                # 文本前缀仅作为 MD/DOCX/旧数据的回退。
+                bullet_type = getattr(para, "bullet_type", None)
+                if bullet_type == "none":
+                    continue
+                if bullet_type == "char":
+                    if "symbol" not in example_texts:
+                        example_texts["symbol"] = text[:50].strip()
+                    categories_found.add("symbol")
+                    continue
+                if bullet_type == "number":
+                    if "numbered" not in example_texts:
+                        example_texts["numbered"] = text[:50].strip()
+                    categories_found.add("numbered")
+                    continue
+
                 if _SYMBOL_BULLET_RE.match(text):
                     if "symbol" not in example_texts:
                         example_texts["symbol"] = text[:50].strip()

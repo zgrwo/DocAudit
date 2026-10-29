@@ -33,7 +33,7 @@
 | 事实审查 | FactualAuditor | 数值跨页一致性、缩写定义管理、重复定义检测 |
 | 语言审查 | LanguageAuditor | 语法拼写（LanguageTool）、中英混排、术语一致性、禁用词汇 |
 | 自定义规则 | CustomRulesAuditor | rules.md 配置的 26 条规则（委托模式路由，不包含检查逻辑） |
-| 内置检查 | LanguageAuditor 等 | FMT-MIXED / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
+| 内置检查 | LanguageAuditor / FormatAuditor / StructureAuditor 等 | FMT-MIXED / PUNCT-001~007 / TXT-REDUNDANT / FMT-ALIGN / FMT-OVERLAP / FMT-SAFE-MARGIN / FMT-TEXT-OVERFLOW / FMT-FOOTER / FMT-IMAGE / FMT-CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
 
 ### 2.2 规则清单（26 条，以 rules.md 为唯一入口）
 
@@ -50,9 +50,9 @@
 | STR-006 | structure | 标题末尾禁止标点：标题末尾不应使用句号、逗号等标点符号 |
 | STR-007 | structure | 图表标题格式一致性：图表标题编号格式应全文统一 |
 | STR-008 | structure | 幻灯片版式多样性：不应全部使用完全相同版式 |
-| FMT-001 | format | 正文字体统一：正文必须使用指定字体之一 |
-| FMT-002 | format | 标题字号范围：标题 28-40pt，正文 12-22pt |
-| FMT-003 | format | 每页文本量限制：单页文本不应过于密集 |
+| FMT-001 | format | 正文字体统一：幻灯片正文必须使用指定字体之一（仅 PPTX） |
+| FMT-002 | format | 标题字号范围：标题 28-44pt，正文 12-32pt（仅 PPTX） |
+| FMT-003 | format | 每页文本量限制：单张幻灯片文本不应过于密集（仅 PPTX） |
 | FMT-004 | format | 单段不超过 3 行：单个段落不应过长 |
 | FMT-005 | format | 元素不超出页面边界：文本框/图片/表格不得超出幻灯片边界 |
 | FMT-006 | format | 空占位符检测：不应有未填充内容的空白占位符 |
@@ -60,7 +60,7 @@
 | FMT-008 | format | 表格文字与底色对比度：深底配浅字/浅底配深字（WCAG AA） |
 | TERM-001 | terminology | 先进封装术语：fan-out 应使用完整术语（regex） |
 | TERM-002 | terminology | 硅通孔术语：through silicon via 首次出现应标注缩写（regex） |
-| TERM-003 | terminology | 中英文混用规范：英文术语首次出现应附带中文翻译（regex） |
+| TERM-003 | terminology | 技术缩写首次出现应附中文翻译（全大写缩写；白名单/仅首次出现；regex） |
 | CON-001 | factual | 数值一致性：同一指标在前文出现过的数值应保持一致 |
 | CON-002 | factual | 必须包含的章节：技术报告必须包含概述/工艺流程/关键参数/结论 |
 | CON-003 | factual | 缩写首次定义：技术缩写首次出现时必须给出全称 |
@@ -193,4 +193,4 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | 语言检查 | LanguageTool | 开源，支持中英文；三层降级保离线可用 |
 | 报告格式 | HTML + JSON | 可视化 + 程序化处理 |
 
-<!-- last_updated: 2026-08-18 -->
+<!-- last_updated: 2026-10-28 -->

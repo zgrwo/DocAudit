@@ -107,7 +107,8 @@ DocAudit/
 │   │   ├── tooling-pitfalls.md      #     工具/脚本坑位清单 (cmd/bat/pip/git)
 │   │   ├── falsy-pitfalls.md        #     Python falsy 值误判检查清单
 │   │   ├── refactoring-plan.md      #     重构计划（历史）
-│   │   └── remediation-plan-2026-08.md  # 2026-08 整改计划（历史）
+│   │   ├── remediation-plan-2026-08.md  # 2026-08 整改计划（历史）
+│   │   └── handoff-2026-10-29.md    # 2026-10-29 交接说明（验证/决策/剩余项）
 │   ├── specification/               #   规格文档
 │   │   ├── specification.md         #     项目规格文档
 │   │   └── api-reference.md         #     函数签名速查 — 唯一信源
@@ -190,7 +191,7 @@ DocAudit/
 │       ├── html_reporter.py         #     HTML 报告生成
 │       └── json_reporter.py         #     JSON 报告生成
 │
-└── tests/                           # 🧪 测试 (369 用例)
+└── tests/                           # 🧪 测试 (427 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -243,7 +244,7 @@ DocAudit/
 | 文件 | 关键类 | 规则 ID | 检查数 |
 |------|--------|---------|--------|
 | `structure.py` | `StructureAuditor` | STR-001~008 | 10 |
-| `format.py` | `FormatAuditor` | FMT-001~008 | 11 |
+| `format.py` | `FormatAuditor` | FMT-001~008 + FMT-ALIGN/OVERLAP/SAFE-MARGIN/TEXT-OVERFLOW/FOOTER/IMAGE/CHART | 17 |
 | `language.py` | `LanguageAuditor` | PY-SPELL, PY-ZH-GRAMMAR, FMT-MIXED | 语言+术语+词汇 |
 | `factual.py` | `FactualAuditor` | CON-001~003-C | 5 |
 | `custom_rules.py` | `CustomRulesAuditor` | 路由所有 check_type | 中枢路由器 |

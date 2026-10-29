@@ -36,6 +36,7 @@ def _finding(
     message: str = "测试发现",
     rule_id: str | None = "FMT-001",
     page_index: int | None = 0,
+    metadata: dict | None = None,
 ) -> AuditFinding:
     return AuditFinding(
         type=type_,
@@ -43,6 +44,7 @@ def _finding(
         message=message,
         rule_id=rule_id,
         page_index=page_index,
+        metadata=metadata or {},
     )
 
 
@@ -124,10 +126,18 @@ def test_apply_filters_page_exemption():
     assert [f.message for f in result] == ["第1页", "无页"]
 
 
+def test_apply_filters_batch_page_scoped_by_file():
+    """批量模式: 排除 "[a.pptx] 第 2 页" 不得隐藏 b.pptx 的同页问题。"""
+    a = _finding(page_index=1, message="A2", metadata={"source_file": "a.pptx"})
+    b = _finding(page_index=1, message="B2", metadata={"source_file": "b.pptx"})
+    result = app._apply_filters([a, b], _base_state(excluded_pages=["[a.pptx] 第 2 页"]))
+    assert [f.message for f in result] == ["B2"]
+
+
 def test_apply_filters_single_exemption():
     f1 = _finding(message="a")
     f2 = _finding(message="b")
-    result = app._apply_filters([f1, f2], _base_state(exempted_finding_ids={f1.id}))
+    result = app._apply_filters([f1, f2], _base_state(exempted_finding_ids={f1.exemption_key}))
     assert [f.message for f in result] == ["b"]
 
 
@@ -246,6 +256,7 @@ def _run_app_with(findings, doc=None):
     at = AppTest.from_file(APP_FILE, default_timeout=30)
     at.run()
     at.session_state["findings"] = findings
+    at.session_state["audit_completed"] = True
     if doc is not None:
         at.session_state["doc"] = doc
     at.run()
@@ -299,12 +310,25 @@ def test_p7_multiselect_explicit_keys_and_clear_sync():
     assert at.session_state["exempted_finding_ids"] == set()
 
 
+def test_clean_document_still_renders_result_and_download():
+    """回归: findings=[] 的干净文档也必须渲染结果页和报告下载。
+
+    2026-10-28: 旧实现用 `if doc and findings` 判断，干净文档审查后主区空白，
+    用户会误以为审查失败。
+    """
+    at = _run_app_with([], doc=_doc(pages=1))
+    assert at.session_state["audit_completed"] is True
+    assert any("未发现任何问题" in s.value for s in at.success)
+    assert [db.label for db in at.download_button if "HTML" in db.label]
+
+
 def test_p6_batch_report_generation_runs():
     """P6: 批量模式下载区使用聚合元数据 (page_count=sum 页数, file_label=批量 N 个文件) 不抛异常。"""
     at = AppTest.from_file(APP_FILE, default_timeout=30)
     at.run()
     at.session_state["doc"] = _doc(pages=3)
     at.session_state["findings"] = [_finding(message="问题")]
+    at.session_state["audit_completed"] = True
     at.session_state["batch_mode"] = True
     at.session_state["batch_docs"] = [_doc(pages=3), _doc(pages=2)]
     at.run()

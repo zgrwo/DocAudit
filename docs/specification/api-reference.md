@@ -24,7 +24,7 @@
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `can_handle` | `(source_path: str \| Path)` | `bool` | `.pptx` / `.ppt` 扩展名匹配 |
-| `convert` | `(source_path: str \| Path)` | `Document` | 完整解析 PPTX → Document。提取 Run 级字体/颜色/位置/版式/备注/图片/图表 |
+| `convert` | `(source_path: str \| Path)` | `Document` | 完整解析 PPTX → Document。提取 Run 级字体/颜色/位置/版式/母版/备注/图片/图表、继承字体/字号、真实项目符号、Group 绝对坐标、图片 alt/像素尺寸、图表标题/图例 |
 
 ### `DocxConverter` `src/converters/docx_converter.py`
 
@@ -65,6 +65,7 @@
 | `_check_figure_numbering` | `(doc: Document)` | STR-002 | 图表编号连续性 + 重复 + 倒退检测 |
 | `_check_required_sections` | `(doc: Document)` | CON-002 | 必须包含指定章节 |
 | `_check_slide_structure_consistency` | `(doc: Document)` | STR-008 | 幻灯片版式多样性检查 |
+| `_check_master_consistency` | `(doc: Document)` | STR-MASTER | 多母版检测 |
 | `_check_every_slide_has_conclusion` | `(doc: Document)` | CON-004 | 每页须有关键要点 (仅 PPTX 适用) |
 | `_check_title_length` | `(doc: Document)` | STR-004 | 标题长度限制 (英文词数/中文字数) |
 | `_check_title_trailing_punctuation` | `(page: Page, doc: Document)` | STR-006 | 标题末尾标点检测 |
@@ -75,12 +76,18 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,40), `body_size_range`(12,22), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,44), `body_size_range`(12,32), `alignment_tolerance`(5.0), `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `enabled_rule_ids`(rules.md 声明驱动, 2026-10-28), `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (西文 latin 与中文 eastAsia 分别判定，按页+字体+作用域聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |
 | `_check_font_size` | `(page: Page)` | FMT-002 | 标题/正文字号范围检查 |
-| `_check_alignment` | `(page: Page)` | — | 同列文本框垂直对齐 |
+| `_check_alignment` | `(page: Page)` | FMT-ALIGN | 同页文本框行/列对齐 (标题与正文不互比) |
+| `_check_element_overlap` | `(page: Page, doc: Document)` | FMT-OVERLAP | 元素重叠 (25% 阈值；排除嵌套/空占位/全屏背景) |
+| `_check_safe_margin` | `(page: Page, doc: Document)` | FMT-SAFE-MARGIN | 元素贴边检查 (默认 1% 安全边距) |
+| `_check_text_overflow` | `(page: Page, doc: Document)` | FMT-TEXT-OVERFLOW | 文本框内容溢出估算 (非像素级) |
+| `_check_footer_consistency` | `(doc: Document)` | FMT-FOOTER | 页脚/页码/日期占位符部分缺失 |
+| `_check_image_quality` | `(page: Page, doc: Document)` | FMT-IMAGE | 图片宽高比/DPI/alt text |
+| `_check_chart_labeling` | `(page: Page, doc: Document)` | FMT-CHART | 图表标题缺失 |
 | `_check_layout_consistency` | `(doc: Document)` | — | PPTX 版式使用合理性 |
 | `_check_paragraph_length` | `(page: Page)` | FMT-004 | 单段不超过3行 (中文/英文/显式换行) |
 | `_check_element_overflow` | `(page: Page, doc: Document)` | FMT-005 | 元素不超出幻灯片边界 (容差 5pt) |
@@ -96,7 +103,10 @@
 |------|------|---------|------|
 | `__init__` | `(config: dict \| None)` | — | `languagetool_url`, `glossary_dir`, `vocab_dir` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
-| `_check_text` | `(text, page_index, page_label)` | PY-SPELL, PY-ZH-GRAMMAR | LanguageTool 拼写/语法 (三层降级) |
+| `_check_text` | `(text, page_index, page_label)` | PY-SPELL | LanguageTool 拼写/语法 (三层降级) |
+| `_check_builtin_chinese_patterns` | `(text, page_index, page_label)` | PY-ZH-GRAMMAR | 中文基础语法/标点模式，始终执行 |
+| `_check_punctuation` | `(text, page_index, page_label)` | PUNCT-001~007 | 重复/冲突标点、全半角、配对、省略号/破折号 |
+| `_check_redundancy` | `(text, page_index, page_label)` | TXT-REDUNDANT | 高精度中文冗余表达 |
 | `_check_mixed_formatting` | `(text, page_index, page_label)` | FMT-MIXED-001~003 | CJK-Latin 间距 + 标点 |
 | `_check_rejected_vocab` | `(text, page_index, page_label)` | — | reject.txt 禁用词匹配 |
 | `_segment_by_language` | `(text)` | — | → `list[(text, "zh"\|"en")]` 语言分段 |
@@ -105,9 +115,9 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `_skip_checks` |
+| `__init__` | `(config: dict \| None)` | — | `vocab_dir`(领域缩写白名单), `_skip_checks` |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
-| `_check_numeric_consistency` | `(doc: Document)` | CON-001 | 数值跨页一致性 (上下文聚类) |
+| `_check_numeric_consistency` | `(doc: Document)` | CON-001 | 数值跨页一致性 (上下文聚类；年份/季度/节点为限定词) |
 | `_check_abbreviation_first_defined` | `(doc: Document)` | CON-003 | 缩写首次出现未定义 |
 | `_check_abbreviation_defined_never_used` | `(doc: Document)` | CON-003-A | 定义后未再次使用 |
 | `_check_abbreviation_multiply_defined` | `(doc: Document)` | CON-003-B | 同一缩写重复定义 |
@@ -118,7 +128,7 @@
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `__init__` | `(config: dict \| None)` | `rules_path` |
+| `__init__` | `(config: dict \| None)` | `rules_path`, `vocab_dir`(TERM-* 白名单) |
 | `load_rules` | `(rules_path: str \| Path)` | 加载 rules.md |
 | `set_delegate_auditors` | `(sa, fa, fca)` | 注入主流水线审计器实例 |
 | `audit` | `(doc: Document)` | → `list[AuditFinding]` 执行所有 check 规则 |
@@ -201,6 +211,12 @@
 | `check` | `(text: str, language: str = "auto", mother_tongue: str \| None = None)` | `list[dict]` | 语法拼写检查 (Docker→Java→Python) |
 | `reset` | `()` | — | 清除缓存并重新探测后端 (有测试覆盖; 供外部手动重启探测) |
 
+模块级函数（同文件）:
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `check_chinese_patterns` | `(text: str)` | `list[dict]` | 中文基础语法/标点模式；始终执行，不依赖 LanguageTool 后端 |
+
 ### `AutoFixer` `src/engines/autofix.py`
 
 | 方法 | 签名 | 返回 | 说明 |
@@ -241,6 +257,10 @@
 | `bold` / `italic` / `underline` | `bool \| None` | 加粗/斜体/下划线 |
 | `color` | `str \| None` | 字体色 hex RGB (e.g. "FF0000") |
 | `strikethrough` | `bool \| None` | 删除线 |
+| `effective_font_name` | `str \| None` | 继承解析后的有效西文字体 (theme/master/layout/style) |
+| `effective_font_name_east_asia` | `str \| None` | 继承解析后的有效中文字体 |
+| `effective_font_size` | `float \| None` | 继承解析后的有效字号 (pt) |
+| `font_size_inherited` | `bool` | 字号是否来自继承而非 run 显式设置 |
 
 ### Document `src/models/document.py`
 
@@ -258,7 +278,7 @@
 | 类 | 字段 | 说明 |
 |------|------|------|
 | `Run` | `text` / `font_name` / `font_name_east_asia` / `font_size` / `bold` / `italic` / `underline` / `color` / `strikethrough` | 最小文本单元 — 一段连续格式属性的文本 |
-| `Paragraph` | `text` / `runs` / `level` / `alignment` / `space_before` / `space_after` / `line_spacing` | 段落 — 一组 Run 组成一个逻辑段落 |
+| `Paragraph` | `text` / `runs` / `level` / `alignment` / `space_before` / `space_after` / `line_spacing` / `bullet_type` / `bullet_char` | 段落 — 一组 Run 组成一个逻辑段落；`bullet_type`: `char`/`number`/`none`/None |
 
 ### `Page` `src/models/document.py`
 
@@ -267,6 +287,7 @@
 | `index` | `int` | 页索引 (0-based) |
 | `elements` | `list[PageElement]` | 页内元素列表 |
 | `layout_name` | `str \| None` | PPTX 版式名称 |
+| `master_name` | `str \| None` | PPTX 母版名称/partname (多母版检测) |
 | `slide_number` | `int \| None` | 幻灯片编号 (1-indexed) |
 | `notes` | `str \| None` | 演讲者备注 |
 | `flattened_elements` (属性) | `list[PageElement]` | 递归展开 Group 子元素 (缓存) |
@@ -289,6 +310,14 @@
 | `is_title` | `bool` | 是否为标题占位符 |
 | `is_body` | `bool` | 是否为正文占位符 |
 | `is_placeholder` | `bool` | 是否为占位符 |
+| `placeholder_type` | `str \| None` | `title`/`body`/`subtitle`/`slide_number`/`footer`/`date`/`header`/`other` |
+| `auto_size` | `str \| None` | 文本框自动缩放模式 |
+| `word_wrap` | `bool \| None` | 是否自动换行 |
+| `margin_left/top/right/bottom` | `float \| None` | 文本框内边距 (pt) |
+| `vertical_anchor` | `str \| None` | 垂直锚点 |
+| `image_alt_text` | `str \| None` | 图片替代文本 |
+| `image_px_width/height` | `int \| None` | 图片原始像素尺寸 |
+| `chart_has_title/title/has_legend` | `bool/str/bool \| None` | 图表标题/图例元数据 (不加载内嵌数据) |
 | `image_ext` | `str \| None` | 图片扩展名 ("png" \| "jpg" \| "emf"；图片二进制不载入模型，见 P1-5) |
 | `chart_type` | `str \| None` | 图表类型 python-pptx 枚举名 (如 "COLUMN_CLUSTERED (51)")；内嵌 Excel 数据不装载 |
 | `iter_flat()` | 生成器 | 递归展开自身 + 所有子孙 |
@@ -320,6 +349,7 @@
 | `metadata` | `dict` | 额外元数据 |
 | `id` | `str` | 自动生成 12 位 hex UUID |
 | `dedup_key` (属性) | `str` | 去重键: `"{type}\|{rule_id}\|{page}\|{context 前 120 字符的 md5 哈希}"` |
+| `exemption_key` (属性) | `str` | 稳定豁免键: dedup_key + message + location 的 md5；跨多次审查可复用 |
 | `to_dict()` | `dict` | 序列化 |
 | `from_dict(data)` (classmethod) | `AuditFinding` | 反序列化 |
 | `deduplicate(findings)` (static) | `list[AuditFinding]` | 去重 (保留最高严重度) |
@@ -356,4 +386,4 @@
 
 ---
 
-<!-- last_updated: 2026-08-19 -->
+<!-- last_updated: 2026-10-28 -->

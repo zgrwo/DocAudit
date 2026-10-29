@@ -5,10 +5,8 @@ category: 通用技术写作
 version: '1.0'
 
 terms:
-  # 中文技术写作规范
-  - pattern: '的的'
-    preferred: '[重复用词]'
-    context: 避免重复用词
+  # 中文重复用词由 LanguageAuditor._check_builtin_chinese_patterns 统一处理，
+  # 不在此重复定义（避免同句两条 finding）。
 
   # 英文技术写作规范
   - pattern: '(?i)utilize'
@@ -26,14 +24,5 @@ terms:
     preferred: 'μm'
     context: 使用标准微米符号
 
-  # 中英文排版规范
-  - pattern: '[a-zA-Z][一-鿿]'
-    context: 英文和中文之间应加空格
-  - pattern: '[一-鿿][a-zA-Z]'
-    context: 中文和英文之间应加空格
-
-  # 标点符号
-  - pattern: '[a-zA-Z]，'
-    context: 英文后应使用英文逗号而不是中文逗号
-  - pattern: '[a-zA-Z]。'
-    context: 英文后应使用英文句号而不是中文句号
+  # 中英文排版/标点由 FMT-MIXED-001~003 与 PUNCT-003 统一处理，
+  # 术语表不再重复定义，避免同一问题出现 TERM-通用技术写作 + FMT-MIXED 两条 finding。

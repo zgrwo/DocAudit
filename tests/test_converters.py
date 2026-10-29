@@ -59,6 +59,13 @@ class TestDocxConverter:
         assert not docx_converter.can_handle("test.pptx")
         assert not docx_converter.can_handle("test.pdf")
 
+    def test_legacy_doc_has_actionable_error(self, docx_converter, tmp_path):
+        """旧版 .doc 在解析前给出可操作提示，而不是 python-docx 的晦涩异常。"""
+        path = tmp_path / "legacy.doc"
+        path.write_bytes(b"not-a-real-doc")
+        with pytest.raises(ValueError, match="另存为 \\.docx"):
+            docx_converter.convert(str(path))
+
     def test_convert_returns_document(self, docx_converter, sample_docx):
         doc = docx_converter.convert(str(sample_docx))
         assert doc.format == "docx"
@@ -572,6 +579,83 @@ class TestPptxConverterNestedGroup:
         joined = "\n".join(t for t in texts if t.strip())
         assert "外组文本" in joined, f"一阶 group 文本应可达, got: {texts}"
         assert "嵌套组内文本" in joined, f"嵌套 group 文本应递归可达, got: {texts}"
+
+
+class TestPptxConverterBullets:
+    """2026-10-28: 真实项目符号从 a:pPr 提取，而非文本前缀。"""
+
+    def test_bullet_char_and_autonum_extracted(self, tmp_path):
+        from lxml import etree
+        from pptx import Presentation
+        from pptx.oxml.ns import qn
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(2))
+        tf = box.text_frame
+        tf.text = "项目一"
+        first = tf.paragraphs[0]
+        first._p.get_or_add_pPr()
+        bu = etree.SubElement(first._p.pPr, qn("a:buChar"))
+        bu.set("char", "•")
+
+        second = tf.add_paragraph()
+        second.text = "项目二"
+        second._p.get_or_add_pPr()
+        auto = etree.SubElement(second._p.pPr, qn("a:buAutoNum"))
+        auto.set("type", "arabicPeriod")
+
+        path = tmp_path / "bullets.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        paragraphs = [
+            para
+            for elem in doc.pages[0].elements
+            if elem.type == "text_frame"
+            for para in elem.paragraphs
+        ]
+        assert paragraphs[0].bullet_type == "char"
+        assert paragraphs[0].bullet_char == "•"
+        assert paragraphs[1].bullet_type == "number"
+
+
+class TestPptxConverterGroupCoordinates:
+    """2026-10-28: Group 子元素必须变换到幻灯片绝对坐标。"""
+
+    def test_group_child_positions_are_absolute(self, tmp_path):
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        sh1 = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(1), Inches(1)
+        )
+        sh2 = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, Inches(1.2), Inches(0), Inches(1), Inches(1)
+        )
+        group = slide.shapes.add_group_shape([sh1, sh2])
+        group.left = Inches(5)
+        group.top = Inches(2)
+
+        path = tmp_path / "group_coords.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        children = [e for e in doc.pages[0].flattened_elements if e.type == "text_frame"]
+        assert len(children) == 2
+        # 组位于 (5in,2in) = (360pt,144pt)；子形状局部坐标 0 / 86.4pt
+        assert children[0].left == 360.0
+        assert children[0].top == 144.0
+        assert children[1].left == 446.4
+        assert children[1].top == 144.0
 
 
 class TestPptxConverterTableColors:
@@ -1270,6 +1354,142 @@ class TestMarkdownTableAndHeadingFixes:
         levels = [p.level for p in doc.all_paragraphs if p.level is not None]
         assert 4 not in levels, f"4 空格缩进不应识别为标题: {levels}"
         assert "#### 代码缩进" in doc.all_text
+
+
+class TestPptxLayoutMetadata:
+    """2026-10-29: 母版/占位符/图片/图表元数据提取。"""
+
+    def test_master_and_placeholder_type(self):
+        doc = PptxConverter().convert("tests/fixtures/sample.pptx")
+        assert doc.pages[0].master_name
+        title = next(
+            e for e in doc.pages[0].flattened_elements if e.type == "text_frame" and e.is_title
+        )
+        assert title.placeholder_type == "title"
+
+    def test_text_frame_layout_fields_extracted(self, tmp_path):
+        from pptx import Presentation
+        from pptx.enum.text import MSO_AUTO_SIZE
+        from pptx.util import Inches, Pt
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(3), Inches(2))
+        box.text_frame.text = "测试"
+        box.text_frame.word_wrap = False
+        box.text_frame.auto_size = MSO_AUTO_SIZE.NONE
+        box.text_frame.margin_left = Pt(10)
+        path = tmp_path / "layout_fields.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        elem = next(e for e in doc.pages[0].elements if e.type == "text_frame")
+        assert elem.word_wrap is False
+        assert elem.margin_left == 10.0
+        assert elem.auto_size is not None
+
+    def test_image_metadata_extracted(self, tmp_path):
+        import base64
+        import io
+
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import PptxConverter
+
+        # 1×1 PNG
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
+            "/x8AAusB9Y9Zl9sAAAAASUVORK5CYII="
+        )
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        slide.shapes.add_picture(io.BytesIO(png), Inches(1), Inches(1), Inches(2), Inches(1))
+        path = tmp_path / "image.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        image = next(e for e in doc.pages[0].elements if e.type == "image")
+        assert image.image_px_width == 1
+        assert image.image_px_height == 1
+        # python-pptx 默认把文件名写入 descr；这里验证读取链路，不假设为空
+        assert image.image_alt_text == "image.png"
+
+    def test_chart_metadata_extracted(self, tmp_path):
+        from pptx import Presentation
+        from pptx.chart.data import ChartData
+        from pptx.enum.chart import XL_CHART_TYPE
+        from pptx.util import Inches
+
+        from src.converters.pptx_converter import PptxConverter
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        data = ChartData()
+        data.categories = ["A", "B"]
+        data.add_series("系列1", (1, 2))
+        slide.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_CLUSTERED,
+            Inches(1),
+            Inches(1),
+            Inches(4),
+            Inches(3),
+            data,
+        )
+        path = tmp_path / "chart.pptx"
+        prs.save(str(path))
+
+        doc = PptxConverter().convert(str(path))
+        chart = next(e for e in doc.pages[0].elements if e.type == "chart")
+        assert chart.chart_type
+        assert chart.chart_has_title is False
+        assert chart.chart_title is None
+
+
+class TestInheritedFormatting:
+    """2026-10-28: theme/layout/master/style 继承字体/字号必须解析为 effective_*。"""
+
+    def test_pptx_inherited_title_size_resolved(self):
+        doc = PptxConverter().convert("tests/fixtures/sample.pptx")
+        titles = [
+            elem
+            for page in doc.pages
+            for elem in page.flattened_elements
+            if elem.type == "text_frame" and elem.is_title and elem.paragraphs
+        ]
+        assert titles, "sample.pptx 应有标题"
+        run = titles[0].paragraphs[0].runs[0]
+        assert run.font_size is None, "显式字号应为 None (继承自 master)"
+        assert run.effective_font_size == 44.0
+        assert run.font_size_inherited is True
+        assert run.effective_font_name == "Calibri"
+
+    def test_docx_inherited_heading_size_resolved(self):
+        doc = DocxConverter().convert("tests/fixtures/sample.docx")
+        headings = [
+            elem
+            for page in doc.pages
+            for elem in page.flattened_elements
+            if elem.type == "text_frame" and elem.is_title and elem.paragraphs
+        ]
+        assert headings, "sample.docx 应有 Heading"
+        run = headings[0].paragraphs[0].runs[0]
+        assert run.font_size is None, "Heading 1 未显式设置字号"
+        assert run.effective_font_size is not None
+        assert run.effective_font_size > 0
+        assert run.font_size_inherited is True
+
+
+class TestLegacyFormats:
+    """旧版二进制格式必须给出可操作提示，而不是晦涩的解析异常。"""
+
+    def test_legacy_ppt_has_actionable_error(self, tmp_path):
+        path = tmp_path / "legacy.ppt"
+        path.write_bytes(b"not-a-real-ppt")
+        with pytest.raises(ValueError, match="另存为 \\.pptx"):
+            PptxConverter().convert(str(path))
 
 
 class TestPdfConverterAsciiPath:

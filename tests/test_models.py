@@ -143,3 +143,22 @@ class TestAuditFinding:
         )
         result = AuditFinding.deduplicate([f1, f2])
         assert len(result) == 2  # different types, keep both
+
+    def test_exemption_key_stable_across_instances(self):
+        """豁免键必须基于 dedup_key+location，而不是随机 id (重审后仍可复用)。"""
+        kwargs = {
+            "type": FindingType.FORMAT,
+            "severity": FindingSeverity.WARNING,
+            "message": "x",
+            "rule_id": "FMT-001",
+            "page_index": 2,
+            "context": "same context",
+            "location": "第 3 页",
+        }
+        first = AuditFinding(**kwargs)
+        second = AuditFinding(**kwargs)
+        assert first.id != second.id
+        assert first.exemption_key == second.exemption_key
+        # location 不同 → 批量模式下不同文件的问题可区分
+        third = AuditFinding(**{**kwargs, "location": "[b.pptx] 第 3 页"})
+        assert third.exemption_key != first.exemption_key

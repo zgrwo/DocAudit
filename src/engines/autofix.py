@@ -21,6 +21,38 @@ _TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
 _BULLET_RE = re.compile(r"^\s*[-*]\s")
 
 
+def _is_theme_font(name: str | None) -> bool:
+    """+mj-lt/+mn-ea 等是主题字体引用，不是具体字体名，不能替换。"""
+    return bool(name and name.startswith("+"))
+
+
+def _iter_pptx_text_frames(shapes):
+    """递归遍历 PPTX 文本框/表格单元格/Group 子形状。"""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _iter_pptx_text_frames(shape.shapes)
+        elif shape.has_table:
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    yield cell.text_frame
+        elif shape.has_text_frame:
+            yield shape.text_frame
+
+
+def _iter_docx_paragraphs(doc):
+    """遍历 DOCX 正文/表格/页眉页脚段落。"""
+    yield from doc.paragraphs
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                yield from cell.paragraphs
+    for section in doc.sections:
+        for hf in (section.header, section.footer):
+            yield from hf.paragraphs
+
+
 class AutoFixer:
     """自动修复文档中的格式问题。
 
@@ -61,14 +93,16 @@ class AutoFixer:
         default_font = self.allowed_fonts[0]
 
         for slide in prs.slides:
-            for shape in slide.shapes:
-                if not shape.has_text_frame:
-                    continue
-                for para in shape.text_frame.paragraphs:
+            for text_frame in _iter_pptx_text_frames(slide.shapes):
+                for para in text_frame.paragraphs:
                     for run in para.runs:
-                        # 修复1: 非标准字体 → 默认字体
+                        # 修复1: 非标准字体 → 默认字体 (主题 token 不替换)
                         latin_replaced = False
-                        if run.font.name and run.font.name not in self.allowed_fonts:
+                        if (
+                            run.font.name
+                            and not _is_theme_font(run.font.name)
+                            and run.font.name not in self.allowed_fonts
+                        ):
                             run.font.name = default_font
                             self._fix_count += 1
                             latin_replaced = True
@@ -81,7 +115,11 @@ class AutoFixer:
                                 ea = rPr.find(qn("a:ea"))
                                 if ea is not None:
                                     ea_typeface = ea.get("typeface")
-                                    if ea_typeface and ea_typeface not in self.allowed_fonts:
+                                    if (
+                                        ea_typeface
+                                        and not _is_theme_font(ea_typeface)
+                                        and ea_typeface not in self.allowed_fonts
+                                    ):
                                         ea.set("typeface", default_font)
                                         self._fix_count += 1
                                 elif latin_replaced:
@@ -99,7 +137,7 @@ class AutoFixer:
                             pass  # bare-handler-ok — PPTX eastAsia 修复降级，不影响 latin/字号修复
 
                         # 修复2: 字号过小 → 12pt
-                        if run.font.size and run.font.size < 12 * 12700:  # EMU
+                        if run.font.size is not None and run.font.size < 12 * 12700:  # EMU
                             run.font.size = Pt(12)
                             self._fix_count += 1
 
@@ -136,10 +174,14 @@ class AutoFixer:
         self._fix_count = 0
         default_font = self.allowed_fonts[0]
 
-        for para in doc.paragraphs:
+        for para in _iter_docx_paragraphs(doc):
             for run in para.runs:
                 latin_replaced = False
-                if run.font.name and run.font.name not in self.allowed_fonts:
+                if (
+                    run.font.name
+                    and not _is_theme_font(run.font.name)
+                    and run.font.name not in self.allowed_fonts
+                ):
                     run.font.name = default_font
                     self._fix_count += 1
                     latin_replaced = True
@@ -148,7 +190,7 @@ class AutoFixer:
                     rPr = run._element.rPr
                     if rPr is not None and rPr.rFonts is not None:
                         ea = rPr.rFonts.get(qn("w:eastAsia"))
-                        if ea and ea not in self.allowed_fonts:
+                        if ea and not _is_theme_font(ea) and ea not in self.allowed_fonts:
                             rPr.rFonts.set(qn("w:eastAsia"), default_font)
                             self._fix_count += 1
                         elif not ea and latin_replaced:
@@ -163,7 +205,7 @@ class AutoFixer:
                         self._fix_count += 1
                 except Exception:
                     pass  # bare-handler-ok — DOCX eastAsia 修复降级，不影响 latin/字号修复
-                if run.font.size and run.font.size < Pt(12):
+                if run.font.size is not None and run.font.size < Pt(12):
                     run.font.size = Pt(12)
                     self._fix_count += 1
 
@@ -215,10 +257,8 @@ class AutoFixer:
                 shutil.copy2(source, tmp_path)
                 prs = Presentation(str(tmp_path))
                 for slide in prs.slides:
-                    for shape in slide.shapes:
-                        if not shape.has_text_frame:
-                            continue
-                        for para in shape.text_frame.paragraphs:
+                    for text_frame in _iter_pptx_text_frames(slide.shapes):
+                        for para in text_frame.paragraphs:
                             for run in para.runs:
                                 old = run.text
                                 new = CJK_LATIN_BOUNDARY.sub(r"\1 \2", old)
@@ -233,7 +273,7 @@ class AutoFixer:
 
                 shutil.copy2(source, tmp_path)
                 doc = Document(str(tmp_path))
-                for para in doc.paragraphs:
+                for para in _iter_docx_paragraphs(doc):
                     for run in para.runs:
                         old = run.text
                         new = CJK_LATIN_BOUNDARY.sub(r"\1 \2", old)
@@ -410,11 +450,21 @@ class AutoFixer:
             shutil.copy2(source, tmp_path)
             prs = Presentation(str(tmp_path))
 
+            from pptx.oxml.ns import qn
+
             for slide in prs.slides:
-                for shape in slide.shapes:
-                    if not shape.has_text_frame:
-                        continue
-                    for para in shape.text_frame.paragraphs:
+                for text_frame in _iter_pptx_text_frames(slide.shapes):
+                    for para in text_frame.paragraphs:
+                        # 真实项目符号: 修改 a:buChar 的 char，而不是文本前缀
+                        try:
+                            p_pr = para._p.find(qn("a:pPr"))
+                            if p_pr is not None:
+                                for bu in p_pr.findall(qn("a:buChar")):
+                                    if bu.get("char") != preferred:
+                                        bu.set("char", preferred)
+                                        self._fix_count += 1
+                        except Exception:
+                            pass  # bare-handler-ok — 异常 XML 结构，回退到文本前缀修复
                         for run in para.runs:
                             old = run.text
                             new = _BULLET_RE.sub(f"{preferred} ", old)

@@ -4,7 +4,7 @@ import logging
 import re
 
 from src.auditors.base import BaseAuditor
-from src.engines.languagetool import LanguageToolClient
+from src.engines.languagetool import LanguageToolClient, check_chinese_patterns
 from src.engines.terminology import TerminologyChecker
 from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
@@ -19,6 +19,110 @@ from src.text_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ── 标点/冗余检查 (2026-10-28) ────────────────────────────────
+# 说明: 这些检查必须与 LanguageTool 后端无关，始终执行；旧实现把中文模式
+# 只放在 Tier-3 Python 降级里，Docker/Java 可用时反而检查更少。
+
+_MASK_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+_MASK_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
+_MASK_FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
+_MASK_CODE_RE = re.compile(r"`[^`]*`")
+
+_PUNCT_REPEAT_RE = re.compile(r"([；：！？])\1+")
+_PUNCT_ADJACENT_RE = re.compile(r"([，。、；：])\s*([，。、；：])")
+_CJK_ASCII_PUNCT_RE = re.compile(rf"({CJK_RE.pattern})([,.;:!?])")
+_FULLWIDTH_ALNUM_RE = re.compile(r"[Ａ-Ｚａ-ｚ０-９]+")
+_ELLIPSIS_RE = re.compile(r"\.{3,}")
+_DOUBLE_HYPHEN_RE = re.compile(r"(?<!—)--(?!—)")
+
+_PUNCT_PAIRS = {
+    "（": "）",
+    "(": ")",
+    "【": "】",
+    "[": "]",
+    "《": "》",
+    "“": "”",
+    "‘": "’",
+}
+
+# 高精度中文冗余表达；约/大约/大概/超过/至少...左右/以上 已由
+# LanguageTool 中文基础模式覆盖，此处不重复，避免同一句两条 finding。
+_REDUNDANT_PATTERNS = [
+    (
+        re.compile(r"原因[^，。；\n]{0,20}造成"),
+        "语义重复: '原因是……造成的'",
+        "改为“原因是……”或“……造成的”",
+    ),
+    (
+        re.compile(r"通过[^，。；\n]{0,20}使得"),
+        "句式冗余: '通过……使得……'",
+        "改为“通过……实现……”或“……使得……”",
+    ),
+    (
+        re.compile(r"进行了?[^，。；\n]{0,10}工作"),
+        "冗余表达: '进行了……工作'",
+        "直接使用具体动词，如“完成了……”“开展了……”",
+    ),
+    (
+        re.compile(r"再次重申"),
+        "语义重复: '再次重申'",
+        "改为“重申”或“再次说明”",
+    ),
+    (
+        re.compile(r"目前现状"),
+        "语义重复: '目前现状'",
+        "改为“目前情况”或“现状”",
+    ),
+    (
+        re.compile(r"共同一起"),
+        "语义重复: '共同一起'",
+        "改为“共同”或“一起”",
+    ),
+    (
+        re.compile(r"互相彼此"),
+        "语义重复: '互相彼此'",
+        "改为“互相”或“彼此”",
+    ),
+    (
+        re.compile(r"更加越来越"),
+        "语义重复: '更加越来越'",
+        "改为“越来越”或“更加”",
+    ),
+    (
+        re.compile(r"唯一一个"),
+        "语义重复: '唯一一个'",
+        "改为“唯一”",
+    ),
+]
+
+
+def _mask_prose_noise(text: str) -> str:
+    """用等长空格掩码 URL/邮箱/行内代码，避免把其中的 . , : 当标点错误。"""
+    masked = text
+    for regex in (_MASK_FENCED_CODE_RE, _MASK_URL_RE, _MASK_EMAIL_RE, _MASK_CODE_RE):
+        masked = regex.sub(lambda m: " " * len(m.group(0)), masked)
+    return masked
+
+
+def _unmatched_pairs(text: str) -> list[str]:
+    """返回未配对的括号/引号字符列表（栈式配对）。"""
+    stack: list[str] = []
+    unmatched: list[str] = []
+    for ch in text:
+        if ch in _PUNCT_PAIRS:
+            stack.append(ch)
+        elif ch in _PUNCT_PAIRS.values():
+            if not stack:
+                unmatched.append(ch)
+                continue
+            opener = stack.pop()
+            if _PUNCT_PAIRS.get(opener) != ch:
+                unmatched.append(opener)
+                unmatched.append(ch)
+    unmatched.extend(stack)
+    return unmatched
 
 
 class LanguageAuditor(BaseAuditor):
@@ -76,6 +180,13 @@ class LanguageAuditor(BaseAuditor):
             # 3. 中英文混排规范
             findings.extend(self._check_mixed_formatting(page_text, page.index, page_label))
 
+            # 3b. 中文基础语法/标点：始终执行，不依赖 LanguageTool 后端
+            findings.extend(self._check_builtin_chinese_patterns(page_text, page.index, page_label))
+
+            # 3c. 标点冗余/冲突/配对 + 高精度冗余表达
+            findings.extend(self._check_punctuation(page_text, page.index, page_label))
+            findings.extend(self._check_redundancy(page_text, page.index, page_label))
+
             # 4. 禁用词汇检查 (reject.txt)
             findings.extend(self._check_rejected_vocab(page_text, page.index, page_label))
 
@@ -127,6 +238,10 @@ class LanguageAuditor(BaseAuditor):
 
                 # 过滤掉一些噪音规则
                 if rule.get("category", {}).get("id") in ("TYPOGRAPHY",):
+                    continue
+                # 中文基础模式已由 _check_builtin_chinese_patterns 始终执行；
+                # Python 降级后端也会返回同一批 PY-ZH-GRAMMAR，跳过避免重复。
+                if rule.get("id") == "PY-ZH-GRAMMAR":
                     continue
 
                 # 过滤 accept.txt 白名单术语 (如 FinFET, TSV 等半导体专业术语)
@@ -293,6 +408,190 @@ class LanguageAuditor(BaseAuditor):
                 )
             )
 
+        return findings
+
+    def _check_builtin_chinese_patterns(
+        self, text: str, page_index: int, page_label: str
+    ) -> list[AuditFinding]:
+        """始终执行的中文基础语法/标点模式 (不依赖 LanguageTool 后端)。"""
+        findings: list[AuditFinding] = []
+        for match in check_chinese_patterns(text):
+            ctx = match.get("context") or {}
+            context_text = ctx.get("text", "") if isinstance(ctx, dict) else ""
+            findings.append(
+                AuditFinding(
+                    type=FindingType.LANGUAGE,
+                    severity=FindingSeverity.WARNING,
+                    message=match.get("message", "中文语法/标点问题"),
+                    rule_id="PY-ZH-GRAMMAR",
+                    page_index=page_index,
+                    location=page_label,
+                    context=context_text[:120] if context_text else None,
+                    suggestion="请根据提示检查该处中文表达或标点",
+                    metadata={"offset": match.get("offset", 0)},
+                )
+            )
+        return findings
+
+    @staticmethod
+    def _consolidated(
+        findings: list[AuditFinding],
+        *,
+        rule_id: str,
+        message: str,
+        severity: FindingSeverity,
+        matches: list,
+        text: str,
+        page_index: int,
+        page_label: str,
+        suggestion: str,
+    ) -> None:
+        """把同类标点问题聚合成一条 finding，避免逐字符刷屏。"""
+        if not matches:
+            return
+        examples = []
+        for m in matches[:3]:
+            examples.append(text[max(0, m.start() - 10) : m.end() + 10].replace("\n", " "))
+        findings.append(
+            AuditFinding(
+                type=FindingType.LANGUAGE,
+                severity=severity,
+                message=f"{message} ({len(matches)} 处)",
+                rule_id=rule_id,
+                page_index=page_index,
+                location=page_label,
+                context=" | ".join(examples)[:150],
+                suggestion=suggestion,
+                metadata={"match_count": len(matches), "rule": rule_id},
+            )
+        )
+
+    def _check_punctuation(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
+        """标点冗余/冲突/全半角/配对检查 (2026-10-28)。
+
+        - 重复 ; : ! ?（，，/。。/、、 已由 PY-ZH-GRAMMAR 覆盖）
+        - 相邻冲突标点（，。 / 。， / 、， 等）
+        - 中文后使用英文标点
+        - 全角字母/数字
+        - 括号/引号不配对
+        - 中文语境下的 ... / -- 格式
+        """
+        findings: list[AuditFinding] = []
+        masked = _mask_prose_noise(text)
+
+        repeat_matches = list(_PUNCT_REPEAT_RE.finditer(masked))
+        self._consolidated(
+            findings,
+            rule_id="PUNCT-001",
+            message="检测到重复标点",
+            severity=FindingSeverity.WARNING,
+            matches=repeat_matches,
+            text=text,
+            page_index=page_index,
+            page_label=page_label,
+            suggestion="删除多余的重复标点",
+        )
+
+        adjacent = [m for m in _PUNCT_ADJACENT_RE.finditer(masked) if m.group(1) != m.group(2)]
+        self._consolidated(
+            findings,
+            rule_id="PUNCT-002",
+            message="检测到相邻冲突标点",
+            severity=FindingSeverity.WARNING,
+            matches=adjacent,
+            text=text,
+            page_index=page_index,
+            page_label=page_label,
+            suggestion="保留一个符合语义的标点，删除其余冲突标点",
+        )
+
+        cjk_ascii = list(_CJK_ASCII_PUNCT_RE.finditer(masked))
+        self._consolidated(
+            findings,
+            rule_id="PUNCT-003",
+            message="中文后使用了英文标点",
+            severity=FindingSeverity.WARNING,
+            matches=cjk_ascii,
+            text=text,
+            page_index=page_index,
+            page_label=page_label,
+            suggestion="中文语句请使用全角标点（，。；：！？）",
+        )
+
+        fullwidth = list(_FULLWIDTH_ALNUM_RE.finditer(masked))
+        self._consolidated(
+            findings,
+            rule_id="PUNCT-004",
+            message="检测到全角字母/数字",
+            severity=FindingSeverity.INFO,
+            matches=fullwidth,
+            text=text,
+            page_index=page_index,
+            page_label=page_label,
+            suggestion="技术文档中的英文/数字建议使用半角字符",
+        )
+
+        unmatched = _unmatched_pairs(masked)
+        if unmatched:
+            findings.append(
+                AuditFinding(
+                    type=FindingType.LANGUAGE,
+                    severity=FindingSeverity.WARNING,
+                    message=f"括号/引号不配对 ({len(unmatched)} 个)",
+                    rule_id="PUNCT-005",
+                    page_index=page_index,
+                    location=page_label,
+                    context="".join(unmatched)[:120],
+                    suggestion="检查中文括号/引号是否成对出现",
+                    metadata={"unmatched": unmatched[:20]},
+                )
+            )
+
+        if CJK_RE.search(text):
+            ellipsis = list(_ELLIPSIS_RE.finditer(masked))
+            self._consolidated(
+                findings,
+                rule_id="PUNCT-006",
+                message="中文语境使用了英文省略号",
+                severity=FindingSeverity.INFO,
+                matches=ellipsis,
+                text=text,
+                page_index=page_index,
+                page_label=page_label,
+                suggestion="中文省略号建议使用“……”",
+            )
+            double_hyphen = list(_DOUBLE_HYPHEN_RE.finditer(masked))
+            self._consolidated(
+                findings,
+                rule_id="PUNCT-007",
+                message="中文语境使用了英文双连字符破折号",
+                severity=FindingSeverity.INFO,
+                matches=double_hyphen,
+                text=text,
+                page_index=page_index,
+                page_label=page_label,
+                suggestion="中文破折号建议使用“——”",
+            )
+
+        return findings
+
+    def _check_redundancy(self, text: str, page_index: int, page_label: str) -> list[AuditFinding]:
+        """高精度中文冗余表达检查 (2026-10-28)。"""
+        findings: list[AuditFinding] = []
+        masked = _mask_prose_noise(text)
+        for pattern, message, suggestion in _REDUNDANT_PATTERNS:
+            matches = list(pattern.finditer(masked))
+            self._consolidated(
+                findings,
+                rule_id="TXT-REDUNDANT",
+                message=message,
+                severity=FindingSeverity.INFO,
+                matches=matches,
+                text=text,
+                page_index=page_index,
+                page_label=page_label,
+                suggestion=suggestion,
+            )
         return findings
 
     def _check_rejected_vocab(

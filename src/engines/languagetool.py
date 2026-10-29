@@ -64,6 +64,37 @@ _ZH_PATTERNS = [
 ]
 
 
+def check_chinese_patterns(text: str) -> list[dict[str, Any]]:
+    """中文基础语法/标点正则检查（与 LanguageTool 后端无关，可始终执行）。
+
+    2026-10-28: 原实现只在 Tier-3 Python 降级路径执行；当 Docker/Java
+    LanguageTool 可用时，这些中文模式完全消失。现抽成公共函数，由
+    LanguageAuditor 无条件调用，避免"后端越好、检查越少"。
+    """
+    results: list[dict[str, Any]] = []
+    for pattern, msg in _ZH_PATTERNS:
+        for m in pattern.finditer(text):
+            results.append(
+                {
+                    "message": msg,
+                    "offset": m.start(),
+                    "length": m.end() - m.start(),
+                    "rule": {
+                        "id": "PY-ZH-GRAMMAR",
+                        "category": {"id": "GRAMMAR"},
+                        "issueType": "grammar",
+                    },
+                    "replacements": [],
+                    "context": {
+                        "text": text[max(0, m.start() - 10) : m.end() + 10],
+                        "offset": m.start() - max(0, m.start() - 10),
+                        "length": m.end() - m.start(),
+                    },
+                }
+            )
+    return results
+
+
 class LanguageToolClient:
     """LanguageTool 客户端，自动选择最优后端。"""
 
@@ -370,29 +401,8 @@ class LanguageToolClient:
         return results
 
     def _check_chinese_patterns(self, text: str) -> list[dict[str, Any]]:
-        """中文基础语法正则检查"""
-        results: list[dict[str, Any]] = []
-        for pattern, msg in _ZH_PATTERNS:
-            for m in pattern.finditer(text):
-                results.append(
-                    {
-                        "message": msg,
-                        "offset": m.start(),
-                        "length": m.end() - m.start(),
-                        "rule": {
-                            "id": "PY-ZH-GRAMMAR",
-                            "category": {"id": "GRAMMAR"},
-                            "issueType": "grammar",
-                        },
-                        "replacements": [],
-                        "context": {
-                            "text": text[max(0, m.start() - 10) : m.end() + 10],
-                            "offset": m.start() - max(0, m.start() - 10),
-                            "length": m.end() - m.start(),
-                        },
-                    }
-                )
-        return results
+        """中文基础语法正则检查（兼容旧调用点）。"""
+        return check_chinese_patterns(text)
 
     # ── Reset ────────────────────────────────────────────────
 

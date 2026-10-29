@@ -102,6 +102,106 @@ class TestStructureAuditor:
         sa = StructureAuditor(config={"required_sections": ["概述"]})
         assert sa.required_sections_severity == FindingSeverity.ERROR
 
+    def test_con004_content_layout_not_exempt(self):
+        """CON-004: "Title and Content" 是内容版式，不得因含 "Title" 被豁免。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            layout_name="Title and Content",
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[Paragraph(text="关键参数", runs=[])],
+                ),
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text="普通正文，只有数据", runs=[])],
+                ),
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = StructureAuditor(
+            config={"required_sections": []}
+        )._check_every_slide_has_conclusion(doc)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "CON-004"
+
+    def test_con004_title_keyword_not_counted_as_conclusion(self):
+        """CON-004: 标题 "关键参数" 的 "关键" 不能作为正文结论证据。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            layout_name="标题和内容",
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[Paragraph(text="关键参数", runs=[])],
+                ),
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text="普通正文，只有数据", runs=[])],
+                ),
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = StructureAuditor(
+            config={"required_sections": []}
+        )._check_every_slide_has_conclusion(doc)
+        assert len(findings) == 1
+
+    def test_con004_notes_not_counted_as_conclusion(self):
+        """CON-004: 演讲者备注不是观众可见结论，不能单独豁免页面。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            layout_name="标题和内容",
+            notes="结论：这里只是备注",
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[Paragraph(text="参数", runs=[])],
+                ),
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text="普通正文", runs=[])],
+                ),
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = StructureAuditor(
+            config={"required_sections": []}
+        )._check_every_slide_has_conclusion(doc)
+        assert len(findings) == 1
+
+    def test_con004_cover_layout_still_exempt(self):
+        """CON-004: 明确的封面版式仍应豁免。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            layout_name="Title Slide",
+            elements=[
+                PageElement(type="text_frame", paragraphs=[Paragraph(text="副标题", runs=[])])
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        assert (
+            StructureAuditor(config={"required_sections": []})._check_every_slide_has_conclusion(
+                doc
+            )
+            == []
+        )
+
     def test_every_slide_conclusion_non_pptx_no_findings(self):
         """CON-004: 非 PPTX (MD) 不执行每页结论检查 (修复: 曾对 DOCX/PDF/MD 每页误报 error)"""
         doc = _text_doc("这是第一段普通正文，第二段补充说明，第三段技术描述。")
@@ -327,6 +427,72 @@ class TestFormatAuditor:
         # 有 check_type 的规则不进该通道 (严重度由 custom_rules dispatch 覆盖)
         assert "FMT-003" not in rs
 
+    def test_enabled_rule_ids_disables_undeclared_format_rules(self):
+        """FMT-001/002/004 未出现在 rules.md 时不得用默认值继续执行。"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="测" * 200,
+                            runs=[Run(text="测" * 200, font_name="宋体", font_size=10)],
+                        )
+                    ],
+                )
+            ],
+        )
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = FormatAuditor(config={"enabled_rule_ids": set()}).audit(doc)
+        rule_ids = {f.rule_id for f in findings}
+        assert "FMT-001" not in rule_ids
+        assert "FMT-002" not in rule_ids
+        assert "FMT-004" not in rule_ids
+
+    def test_ppt_only_checks_not_applied_to_docx(self):
+        """FMT-001/002/003 是幻灯片语义，DOCX 不套用（16pt 标题/300 字页不误报）。"""
+        from src.models.document import Run
+
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[
+                        Paragraph(
+                            text="概述",
+                            runs=[Run(text="概述", font_name="宋体", font_size=16)],
+                        )
+                    ],
+                ),
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[
+                        Paragraph(
+                            text="测" * 300,
+                            runs=[Run(text="测" * 300, font_name="宋体", font_size=10)],
+                        )
+                    ],
+                ),
+            ],
+        )
+        doc = Document(
+            format="docx", source_path="x.docx", metadata=DocumentMetadata(), pages=[page]
+        )
+        findings = FormatAuditor().audit(doc)
+        rule_ids = {f.rule_id for f in findings}
+        assert "FMT-001" not in rule_ids
+        assert "FMT-002" not in rule_ids
+        assert "FMT-003" not in rule_ids
+
     def test_font_consistency_east_asia_flagged(self):
         """FMT-001: 非允许的 eastAsia 中文字体应触发告警 (font_scope=east_asia)"""
         from src.models.document import Run
@@ -529,6 +695,56 @@ class TestFactualAuditor:
         assert 3.0 not in values, f"截断值 3 (来自 3.3Vs) 不得进入, got: {values}"
         assert 1.0 not in values, f"截断值 1 (来自 1.5Ah/1,000) 不得进入, got: {values}"
 
+    def test_numeric_qualifiers_not_treated_as_metric_values(self):
+        """CON-001: 年份/季度/工艺节点是指标限定词，不得报数值不一致。"""
+        fa = FactualAuditor()
+        scenarios = [
+            ("2025年良率95%", "2026年良率96%", "年份"),
+            ("第1季度良率95%", "第2季度良率96%", "季度"),
+            ("5nm节点良率95%", "7nm节点良率92%", "工艺节点"),
+            ("5nm Node Yield: 95.3% (Q1 2026)", "5nm Node Yield: 87.1% (Q2 2026)", "节点+季度"),
+        ]
+        for first, second, label in scenarios:
+            pages = [
+                Page(
+                    index=i,
+                    slide_number=i + 1,
+                    elements=[
+                        PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
+                    ],
+                )
+                for i, text in enumerate((first, second))
+            ]
+            doc = Document(
+                format="md",
+                source_path="x",
+                metadata=DocumentMetadata(),
+                pages=pages,
+            )
+            findings = fa._check_numeric_consistency(doc)
+            assert findings == [], f"{label}不应报 CON-001, got: {findings}"
+
+    def test_numeric_same_metric_different_value_still_flagged(self):
+        """CON-001: 同一指标不同数值仍必须报错（降噪不能牺牲真阳性）。"""
+        fa = FactualAuditor()
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                elements=[
+                    PageElement(
+                        type="text_frame",
+                        paragraphs=[Paragraph(text=text, runs=[])],
+                    )
+                ],
+            )
+            for i, text in enumerate(("成品良率 95.3%", "成品良率 95.4%"))
+        ]
+        doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=pages)
+        findings = fa._check_numeric_consistency(doc)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "CON-001"
+
     def test_numeric_consistency_figure_subnumber_not_flagged(self):
         """CON-001: 章节式图表编号子号跨页同句式引用不得误报 (2026-09-06 四轮审查 N-1)
 
@@ -632,6 +848,14 @@ class TestFactualAuditor:
                         f"Common word '{word}' should not be flagged as undefined abbreviation"
                     )
 
+    def test_abbreviation_accept_whitelist_skipped(self):
+        """CON-003: vocab/accept.txt 中的领域缩写 (WLP/FOWLP/RDL) 不应报未定义。"""
+        vocab_dir = str(Path(__file__).resolve().parent.parent / "vocab")
+        fa = FactualAuditor(config={"vocab_dir": vocab_dir})
+        doc = _text_doc("WLP 与 FOWLP、RDL 工艺用于先进封装。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        assert findings == [], f"白名单缩写不应报 CON-003, got: {findings}"
+
     def test_abbreviation_reuse_after_definition_not_double_defined(self):
         """CON-003-B: 定义后再次使用 (复用) 不得误计为重复定义 (修复: is_full_before 120 字符窗口假阳性)"""
         fa = FactualAuditor()
@@ -685,3 +909,223 @@ class TestFactualAuditor:
         findings_doc2 = fa._check_abbreviation_first_defined(doc2)
         # doc2 的 TSV 首次出现即带全称定义 → 不应报"首次未定义"
         assert len(findings_doc2) == 0, f"doc2 不应复用车 doc1 的扫描结果: {findings_doc2}"
+
+
+class TestAlignment:
+    """2026-10-28 回归: 对齐检查必须区分标题/正文，避免上下堆叠误报。"""
+
+    @staticmethod
+    def _frame(text: str, *, left: float, top: float, width: float, height: float, title=False):
+        return PageElement(
+            type="text_frame",
+            is_title=title,
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            paragraphs=[Paragraph(text=text, runs=[])],
+        )
+
+    def test_title_body_stacked_not_flagged(self):
+        """标题 top=22 / 正文 top=126 同左边界同宽 → 不应报未对齐。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("标题", left=36, top=22, width=648, height=90, title=True),
+                self._frame("正文", left=36, top=126, width=648, height=356),
+            ],
+        )
+        assert FormatAuditor()._check_alignment(page) == []
+
+    def test_side_by_side_vertical_misalignment_flagged(self):
+        """同一行两个正文框 top 相差 20pt 且垂直重叠 → 报垂直不一致。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("左栏", left=0, top=100, width=100, height=50),
+                self._frame("右栏", left=150, top=120, width=100, height=50),
+            ],
+        )
+        findings = FormatAuditor()._check_alignment(page)
+        assert len(findings) == 1
+        assert "垂直位置不一致" in findings[0].message
+
+    def test_nested_textbox_overlay_not_flagged(self):
+        """文本框覆盖在内容占位符上（水平大幅重叠）→ 不报同一行未对齐。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("正文", left=36, top=126, width=648, height=356),
+                self._frame("覆盖文本框", left=58, top=108, width=600, height=50),
+            ],
+        )
+        assert FormatAuditor()._check_alignment(page) == []
+
+    def test_same_column_width_mismatch_flagged(self):
+        """同列两个正文框宽度不一致 → 报宽度/右边界不一致。"""
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("上", left=36, top=22, width=648, height=90),
+                self._frame("下", left=36, top=140, width=500, height=200),
+            ],
+        )
+        findings = FormatAuditor()._check_alignment(page)
+        assert len(findings) == 1
+        assert "宽度或右边界" in findings[0].message
+
+
+class TestLayoutChecks:
+    """2026-10-28: 元素重叠 / 安全边距。"""
+
+    @staticmethod
+    def _doc(page: Page) -> Document:
+        return Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=[page]
+        )
+
+    @staticmethod
+    def _frame(text, *, left, top, width, height):
+        return PageElement(
+            type="text_frame",
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            paragraphs=[Paragraph(text=text, runs=[])],
+        )
+
+    def test_overlap_flagged(self):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("A", left=0, top=0, width=100, height=50),
+                self._frame("B", left=50, top=25, width=100, height=50),
+            ],
+        )
+        findings = FormatAuditor()._check_element_overlap(page, self._doc(page))
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-OVERLAP"
+
+    def test_nested_textbox_not_flagged(self):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[
+                self._frame("外", left=0, top=0, width=100, height=100),
+                self._frame("内", left=10, top=10, width=20, height=20),
+            ],
+        )
+        assert FormatAuditor()._check_element_overlap(page, self._doc(page)) == []
+
+    def test_safe_margin_flagged(self):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[self._frame("贴边", left=1, top=1, width=100, height=50)],
+        )
+        findings = FormatAuditor()._check_safe_margin(page, self._doc(page))
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-SAFE-MARGIN"
+
+    def test_safe_margin_clean_not_flagged(self):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[self._frame("正常", left=50, top=50, width=100, height=50)],
+        )
+        assert FormatAuditor()._check_safe_margin(page, self._doc(page)) == []
+
+    def test_text_overflow_estimated(self):
+        from src.models.document import Run
+
+        elem = PageElement(
+            type="text_frame",
+            left=50,
+            top=50,
+            width=80,
+            height=40,
+            paragraphs=[
+                Paragraph(
+                    text="测" * 20,
+                    runs=[Run(text="测" * 20, effective_font_size=12.0)],
+                )
+            ],
+        )
+        page = Page(index=0, slide_number=1, elements=[elem])
+        findings = FormatAuditor()._check_text_overflow(page, self._doc(page))
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-TEXT-OVERFLOW"
+
+    def test_text_overflow_wide_box_not_flagged(self):
+        from src.models.document import Run
+
+        elem = PageElement(
+            type="text_frame",
+            left=50,
+            top=50,
+            width=500,
+            height=120,
+            paragraphs=[
+                Paragraph(
+                    text="测" * 20,
+                    runs=[Run(text="测" * 20, effective_font_size=12.0)],
+                )
+            ],
+        )
+        page = Page(index=0, slide_number=1, elements=[elem])
+        assert FormatAuditor()._check_text_overflow(page, self._doc(page)) == []
+
+    def test_footer_partial_missing_flagged(self):
+        with_footer = PageElement(
+            type="text_frame", placeholder_type="footer", paragraphs=[Paragraph(text="页脚")]
+        )
+        pages = [
+            Page(index=0, slide_number=1, elements=[]),
+            Page(index=1, slide_number=2, elements=[with_footer]),
+            Page(index=2, slide_number=3, elements=[]),
+        ]
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=pages
+        )
+        findings = FormatAuditor()._check_footer_consistency(doc)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-FOOTER"
+
+    def test_image_quality_flagged(self):
+        elem = PageElement(
+            type="image",
+            width=200,
+            height=50,
+            image_px_width=100,
+            image_px_height=100,
+            image_alt_text=None,
+        )
+        page = Page(index=0, slide_number=1, elements=[elem])
+        findings = FormatAuditor()._check_image_quality(page, self._doc(page))
+        assert any(f.rule_id == "FMT-IMAGE" and "宽高比" in f.message for f in findings)
+        assert any(f.rule_id == "FMT-IMAGE" and "替代文本" in f.message for f in findings)
+
+    def test_chart_missing_title_flagged(self):
+        elem = PageElement(type="chart", chart_has_title=False)
+        page = Page(index=0, slide_number=1, elements=[elem])
+        findings = FormatAuditor()._check_chart_labeling(page, self._doc(page))
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-CHART"
+
+    def test_master_consistency_flagged(self):
+        pages = [
+            Page(index=0, slide_number=1, master_name="A"),
+            Page(index=1, slide_number=2, master_name="B"),
+        ]
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=pages
+        )
+        findings = StructureAuditor(config={"required_sections": []})._check_master_consistency(doc)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "STR-MASTER"

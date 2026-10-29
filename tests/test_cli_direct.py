@@ -15,7 +15,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.cli import audit_file, main, print_summary  # noqa: E402
+from src.cli import audit_file, doctor_check, main, print_summary  # noqa: E402
 from src.models.document import Document  # noqa: E402
 from src.models.finding import AuditFinding, FindingSeverity, FindingType  # noqa: E402
 
@@ -80,6 +80,31 @@ class TestPrintSummary:
         assert "[ERROR] 2" in out
         assert "[WARN]  1" in out
         assert "[INFO]  1" in out
+
+
+class TestDoctor:
+    """doctor: 可选依赖/服务缺失不应让 core-only 环境整体失败。"""
+
+    def test_optional_failures_do_not_fail_doctor(self, monkeypatch, capsys):
+        import importlib
+
+        import requests
+
+        real_import = importlib.import_module
+
+        def fake_import(name, *args, **kwargs):
+            if name in ("docling", "pandas"):
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        def fake_get(*args, **kwargs):
+            raise RuntimeError("LanguageTool not running")
+
+        monkeypatch.setattr(importlib, "import_module", fake_import)
+        monkeypatch.setattr(requests, "get", fake_get)
+        assert doctor_check() == 0
+        out = capsys.readouterr().out
+        assert "optional unavailable" in out
 
 
 class TestMainFixChain:

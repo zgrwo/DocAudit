@@ -132,12 +132,27 @@ def generate_html_report(
 
 
 def _render_findings(findings: list[AuditFinding], doc: Document) -> str:
-    """将 findings 渲染为 HTML 片段"""
+    """将 findings 渲染为 HTML 片段。
+
+    2026-10-29: 按严重度 → 页码 → 规则 ID 排序，避免报告按审计器执行顺序
+    混杂，用户打开报告先看到 error。
+    """
     if not findings:
         return ""
 
+    severity_order = {"error": 0, "warning": 1, "info": 2}
+    ordered = sorted(
+        findings,
+        key=lambda f: (
+            severity_order.get(f.severity.value, 3),
+            f.page_index if f.page_index is not None else -1,
+            f.rule_id or "",
+            f.message or "",
+        ),
+    )
+
     parts: list[str] = []
-    for f in findings:
+    for f in ordered:
         sev_class = f.severity.value
         sev_label = {"error": "严重", "warning": "警告", "info": "提示"}.get(sev_class, sev_class)
 

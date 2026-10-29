@@ -115,6 +115,8 @@ class StructureAuditor(BaseAuditor):
         # 幻灯片结构一致性 (PPTX)
         if doc.format == "pptx" and "slide_structure_consistency" not in skip:
             findings.extend(self._check_slide_structure_consistency(doc))
+        if doc.format == "pptx":
+            findings.extend(self._check_master_consistency(doc))
 
         # 每页须有结论
         if "every_slide_conclusion" not in skip:
@@ -435,14 +437,99 @@ class StructureAuditor(BaseAuditor):
 
         return findings
 
+    def _check_master_consistency(self, doc: Document) -> list[AuditFinding]:
+        """检查 PPTX 是否混用多个母版 (2026-10-29)。
+
+        多母版本身不一定是错误（集团模板可能有意合并），但会导致字体/
+        版式/页脚风格漂移，因此以 INFO 提示人工确认。
+        """
+        findings: list[AuditFinding] = []
+        masters = sorted({p.master_name for p in doc.pages if p.master_name})
+        if len(masters) <= 1:
+            return findings
+        findings.append(
+            AuditFinding(
+                type=FindingType.STRUCTURE,
+                severity=FindingSeverity.INFO,
+                message=f"检测到 {len(masters)} 个幻灯片母版，可能造成版式不一致",
+                rule_id="STR-MASTER",
+                location="全文",
+                context="、".join(masters[:6])[:150],
+                suggestion="确认是否确实需要多母版；否则统一为一个母版并复用版式",
+                metadata={"masters": masters},
+            )
+        )
+        return findings
+
+    def _is_exempt_layout(self, layout_name: str | None) -> bool:
+        """判断版式是否为标题/封面页。
+
+        2026-10-28 修复：旧实现用 ``pattern in layout`` 做子串匹配，
+        ``exempt_layouts`` 中的通用词 "Title" 会把 "Title and Content"
+        等所有内容页一起豁免，导致 CON-004 在英文模板中完全失效。
+        现改为：
+        - 精确匹配（大小写不敏感）；
+        - 仅对明确的封面短语允许前缀/包含匹配（"Title Slide"、"封面" 等），
+          不允许通用词 "Title"/"标题" 单独做子串匹配。
+        """
+        if not layout_name:
+            return False
+        layout = layout_name.strip().casefold()
+        if not layout:
+            return False
+
+        # 允许做前缀/包含匹配的封面专用短语；通用词不在此列。
+        cover_phrases = {
+            "title slide",
+            "标题幻灯片",
+            "封面",
+            "封面页",
+            "titelfolie",
+            "タイトル",
+            "cover",
+            "cover page",
+        }
+
+        for pattern in self.exempt_layouts:
+            candidate = str(pattern).strip().casefold()
+            if not candidate:
+                continue
+            if layout == candidate:
+                return True
+            # 只对明确的封面短语允许前缀/包含，避免 "Title" 误伤内容页。
+            if candidate in cover_phrases and (layout.startswith(candidate) or candidate in layout):
+                return True
+        return False
+
+    def _page_content_text(self, page: Page) -> str:
+        """返回页面的非标题正文（含表格），用于结论关键词判断。
+
+        2026-10-28 修复：旧实现把标题也纳入关键词匹配，标题 "关键参数"
+        会因包含 "关键" 而被误判为有结论。结论证据只应来自正文/表格。
+        """
+        texts: list[str] = []
+        for elem in page.flattened_elements:
+            if elem.type == "text_frame":
+                if elem.is_title:
+                    continue
+                texts.extend(para.text.strip() for para in elem.paragraphs if para.text.strip())
+            elif elem.type == "table":
+                for row in elem.tables:
+                    texts.extend(cell.text.strip() for cell in row if cell.text.strip())
+        return "\n".join(texts)
+
     def _check_every_slide_has_conclusion(self, doc: Document) -> list[AuditFinding]:
         """检查每页是否有结论或关键要点。
 
         判断标准（满足任一即认为有结论）：
-        1. 包含结论关键词
+        1. 正文/表格中包含结论关键词（标题不计入）
         2. 除标题外有 >= 3 个有内容的段落（确保足够实质性内容）
-        3. 演讲者备注中有文字
-        标题页和目录页自动豁免。
+        标题页和封面页自动豁免。
+
+        2026-10-28 修复：
+        - 版式豁免不再用通用子串 "Title"/"标题"；
+        - 结论关键词只扫描非标题正文，避免 "关键参数" 等标题误通过；
+        - 演讲者备注不再单独作为"页面有结论"的证据（备注不是观众可见内容）。
 
         仅 PPTX 适用 (修复 2026-08: DOCX/PDF/MD 每页误报 error —
         "每页结论" 是幻灯片语义，非分页文档无意义)。
@@ -455,22 +542,15 @@ class StructureAuditor(BaseAuditor):
         for page in doc.pages:
             page_label = f"第 {page.slide_number or page.index + 1} 页"
 
-            # 标题页豁免：精确匹配 + 子串匹配（子串从 exempt_layouts 导出）
-            if page.layout_name:
-                layout = page.layout_name.strip()
-                exempt_list = self.exempt_layouts
-                # 精确匹配
-                if layout in exempt_list:
-                    continue
-                # 子串匹配：layout 名包含 exempt 中的任一模式
-                if any(pattern.lower() in layout.lower() for pattern in exempt_list):
-                    continue
+            # 标题/封面页豁免：精确匹配 + 封面专用短语匹配
+            if self._is_exempt_layout(page.layout_name):
+                continue
 
             has_conclusion = False
 
-            # 判断1: 包含结论关键词
-            page_text = page.all_text.lower()
-            if any(kw.lower() in page_text for kw in keywords):
+            # 判断1: 正文/表格中包含结论关键词（标题不计入）
+            content_text = self._page_content_text(page).lower()
+            if any(kw.lower() in content_text for kw in keywords):
                 has_conclusion = True
 
             # 判断2: 除标题外有 >= 3 个有内容的段落（确保足够实质性内容）
@@ -482,10 +562,6 @@ class StructureAuditor(BaseAuditor):
                 )
                 if content_para_count >= 3:
                     has_conclusion = True
-
-            # 判断3: 有演讲者备注
-            if not has_conclusion and page.notes and page.notes.strip():
-                has_conclusion = True
 
             if not has_conclusion:
                 findings.append(

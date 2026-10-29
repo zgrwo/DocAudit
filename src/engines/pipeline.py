@@ -57,6 +57,9 @@ def build_auditors(
     """
     rules = parse_rules_md(rules_path)
     config = extract_auditor_config(rules)
+    # rules.md 是格式规则启用状态的唯一入口: FMT-001/002/004 无 check_type,
+    # 必须显式告知 FormatAuditor 哪些规则仍存在 (2026-10-28 修复删除规则仍执行)。
+    enabled_rule_ids = {rule.rule_id for rule in rules}
     if vocab_dir is None:
         # vocab/ is sibling to glossary/ in the project directory
         glossary_path = Path(glossary_dir).resolve()
@@ -112,8 +115,8 @@ def build_auditors(
             "allowed_fonts": config.get(
                 "allowed_fonts", ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
             ),
-            "title_size_range": config.get("title_size_range", (28, 40)),
-            "body_size_range": config.get("body_size_range", (12, 22)),
+            "title_size_range": config.get("title_size_range", (28, 44)),
+            "body_size_range": config.get("body_size_range", (12, 32)),
             "max_chinese_chars": config.get("max_chinese_chars", 150),
             "max_english_chars": config.get("max_english_chars", 300),
             "max_explicit_newlines": config.get("max_explicit_newlines", 3),
@@ -124,6 +127,7 @@ def build_auditors(
             # 无 check_type 的 format 规则 (FMT-001/002/004) 严重度以 rules.md 为准
             # (2026-09-06 审查 C-1); dispatch 型规则仍由 custom_rules 覆盖, 不经此处
             "rule_severities": config.get("rule_severities", {}),
+            "enabled_rule_ids": enabled_rule_ids,
             "_skip_checks": [
                 "element_overflow",
                 "per_page_char_limit",
@@ -145,6 +149,7 @@ def build_auditors(
     language_auditor = LanguageAuditor(config=_language_cfg)
     factual_auditor = FactualAuditor(
         config={
+            "vocab_dir": vocab_dir,
             "_skip_checks": [
                 "numeric_consistency",
                 "abbreviation_first_defined",
@@ -154,7 +159,9 @@ def build_auditors(
             ],
         }
     )
-    custom_rules_auditor = CustomRulesAuditor(config={"rules_path": rules_path})
+    custom_rules_auditor = CustomRulesAuditor(
+        config={"rules_path": rules_path, "vocab_dir": vocab_dir}
+    )
 
     # 将主流水线审计器注入 CustomRulesAuditor，消除重复创建和重复执行
     custom_rules_auditor.set_delegate_auditors(

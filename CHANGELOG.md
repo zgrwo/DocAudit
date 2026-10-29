@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **质量复核整改批次**（2026-10-28，`logs/reports/deep-review-quality-2026-10-28.md` R-01~R-24）：
+  - **误报控制**：CON-004 版式豁免改为精确匹配 + 封面专用短语（`Title and Content` 不再被 `Title` 子串豁免）；结论关键词只扫非标题正文、备注不再单独作为结论；对齐检查改为角色感知，标题/正文不再互比；TERM-003 收紧为全大写技术缩写并支持 `排除白名单`/`仅首次出现`；CON-003 接入 `vocab/accept.txt`；CON-001 将年份/季度/工艺节点作为限定词保留，不再误报跨年/跨季度/跨节点数值
+  - **继承格式**：PPTX 解析 theme/master/layout/txStyles，DOCX 解析 style/based-on/docDefaults；模型增加 `effective_font_name*` / `effective_font_size` / `font_size_inherited`，FMT-001/002 不再因继承字号 None 静默漏检
+  - **格式作用域**：FMT-001/002/003/005 收敛为 PPTX 专属，DOCX 16pt 标题、300 字页、宋体正文不再误报；`_DISPATCH` 同步 `pptx_only`
+  - **PPT 版面**：新增元素重叠（FMT-OVERLAP，25% 阈值、排除嵌套/空占位/全屏背景）与安全边距（FMT-SAFE-MARGIN，1%）；Group 子元素按 `off/ext/chOff/chExt` 递归变换为绝对坐标；真实项目符号从 `a:buChar`/`a:buAutoNum` 提取，FMT-007 与 AutoFixer 不再依赖文本前缀
+  - **文字规范**：新增 PUNCT-001~007（重复/冲突标点、中英标点混用、全半角、括号配对、省略号/破折号）与 TXT-REDUNDANT；中文基础模式改为始终执行，不再只存在于 LanguageTool Tier-3；移除 `general_tech.yaml` 中与 FMT-MIXED/PUNCT 重复的模式
+  - **可见性/工作流**：干净文档（findings=[]）也渲染 0 问题摘要与报告下载；稳定豁免键 `exemption_key` 替代随机 id；批量页面豁免按 `(文件, 页码)`；批量 finding 增加 `metadata["source_file"]`；无效正则转 `SYS-ERROR`；doctor 可选依赖缺失不再 exit 1；旧版 `.ppt/.doc` 给出“另存为”提示
+  - **AutoFix**：支持 Group/表格/页眉页脚遍历，跳过 `+mj-lt`/`+mn-lt` 主题字体，真实 `a:buChar` 走 XML 修复
+  - **2026-10-29 续修**：FMT-002 默认上限调整为标题 28-44pt / 正文 12-32pt（对齐 Office 默认主题 44/32）；新增 FMT-TEXT-OVERFLOW（估算）、FMT-FOOTER、FMT-IMAGE（宽高比/DPI/alt text）、FMT-CHART（标题）、STR-MASTER（多母版）；Converter 增加 `master_name`/`placeholder_type`/`auto_size`/`word_wrap`/文本框边距/图片像素尺寸/图表标题图例元数据
+  - 测试用例 369→427（白名单文档已同步）
+
 - **五轮审查整改批次**（2026-09-06，r5 报告 F-01~F-11 全数处理）：
   - `scripts/install.sh` 安装目标修复（F-01）：曾 `pip install "$SCRIPT_DIR[all]"`
     指向 scripts/ 自身（无 pyproject，macOS/Linux 手动安装必失败）；派生

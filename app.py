@@ -46,11 +46,19 @@ def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFindin
 
     # 页面豁免
     excluded_page_labels = ss.get("excluded_pages", [])
-    excluded_page_nums = set()
+    # 批量模式: 标签可带 "[文件] 第 N 页"；单文件模式保持 "第 N 页"。
+    excluded_page_keys: set[tuple[str | None, int]] = set()
     for label in excluded_page_labels:
-        m = re.search(r"\d+", label)
-        if m:
-            excluded_page_nums.add(int(m.group()))
+        m = re.search(r"第\s*(\d+)\s*页", str(label))
+        if not m:
+            m = re.search(r"\d+", str(label))
+        if not m:
+            continue
+        page_no = int(m.group(1) if m.lastindex else m.group(0))
+        source = None
+        if str(label).startswith("[") and "]" in str(label):
+            source = str(label)[1 : str(label).index("]")]
+        excluded_page_keys.add((source, page_no))
 
     # 单条豁免
     exempted_ids = ss.get("exempted_finding_ids", set())
@@ -64,8 +72,15 @@ def _apply_filters(findings: list[AuditFinding], state=None) -> list[AuditFindin
         if f.severity in severity_active
         and (not type_filter or f.type.value in type_filter)
         and (f.rule_id not in excluded_rules)
-        and ((f.page_index is None) or (f.page_index + 1) not in excluded_page_nums)
-        and (f.id not in exempted_ids)
+        and not (
+            f.page_index is not None
+            and any(
+                page_no == f.page_index + 1
+                and (source is None or source == (f.metadata or {}).get("source_file"))
+                for source, page_no in excluded_page_keys
+            )
+        )
+        and (f.exemption_key not in exempted_ids)
     ]
 
 
@@ -86,6 +101,9 @@ if "findings" not in st.session_state:
     st.session_state.findings = []
 if "audit_run" not in st.session_state:
     st.session_state.audit_run = False
+if "audit_completed" not in st.session_state:
+    # 与 audit_run 分离: 审查完成后即使 findings=[] (干净文档) 也必须渲染结果页。
+    st.session_state.audit_completed = False
 if "audit_progress" not in st.session_state:
     st.session_state.audit_progress = {}
 if "exempted_finding_ids" not in st.session_state:
@@ -158,6 +176,7 @@ def _reset_batch_state() -> None:
     """重置审查状态和过滤器（新文件上传时调用）。"""
     st.session_state.findings = []
     st.session_state.doc = None
+    st.session_state.audit_completed = False
     st.session_state.audit_progress = {}
     st.session_state.exempted_finding_ids = set()
     st.session_state.batch_docs = []
@@ -277,9 +296,13 @@ def _run_batch_audit(files: list) -> None:
     for fkey, findings in all_findings_dict.items():
         for fd in findings:
             new_location = f"[{fkey}] {fd.location}" if fd.location else f"[{fkey}]"
-            combined.append(_dc_replace(fd, location=new_location))
+            new_metadata = dict(fd.metadata or {})
+            new_metadata["source_file"] = fkey
+            combined.append(_dc_replace(fd, location=new_location, metadata=new_metadata))
     st.session_state.findings = combined
     st.session_state.doc = docs[0] if docs else None
+    # 批量审查完成标记: docs 为空 (全部失败) 时不进入结果页, 由调用方提示错误。
+    st.session_state.audit_completed = bool(docs)
 
 
 # ── 审查执行 ────────────────────────────────────────────────
@@ -394,7 +417,7 @@ with st.sidebar:
 
     st.divider()
 
-    if st.session_state.findings:
+    if st.session_state.get("audit_completed") and st.session_state.get("doc") is not None:
         st.subheader("📊 审查结果")
         errors = sum(1 for f in st.session_state.findings if f.severity == FindingSeverity.ERROR)
         warnings = sum(
@@ -425,11 +448,19 @@ with st.sidebar:
         st.caption("选择后点击「应用」生效，避免反复刷新")
 
         all_rule_ids = sorted(set(f.rule_id for f in st.session_state.findings if f.rule_id))
-        all_page_nums = sorted(
-            set((f.page_index + 1) for f in st.session_state.findings if f.page_index is not None)
-        )
         all_types = sorted(set(f.type.value for f in st.session_state.findings))
-        page_labels = [f"第 {p} 页" for p in all_page_nums]
+        # 批量模式按 (文件, 页码) 生成标签，避免"排除第 2 页"误伤所有文件。
+        page_labels = sorted(
+            {
+                (
+                    f"[{(f.metadata or {}).get('source_file')}] 第 {f.page_index + 1} 页"
+                    if (f.metadata or {}).get("source_file")
+                    else f"第 {f.page_index + 1} 页"
+                )
+                for f in st.session_state.findings
+                if f.page_index is not None
+            }
+        )
 
         if "excluded_rules" not in st.session_state:
             st.session_state.excluded_rules = []
@@ -554,7 +585,7 @@ if not _has_upload:
             - ✅ 标题层级链路 (H1→H2→H3)
             - ✅ 图表编号连续性
             - ✅ 必含章节检查
-            - ✅ 母版使用一致性
+            - ✅ 版式多样性检查
             """)
         with col_b:
             st.markdown("""
@@ -563,7 +594,7 @@ if not _has_upload:
             - ✅ 字号范围校验
             - ✅ 文本框对齐
             - ✅ 中英文混排空格
-            - ✅ 母版/版式合规
+            - ✅ 版式使用合理性
             """)
 
         col_c, col_d = st.columns(2)
@@ -579,20 +610,27 @@ if not _has_upload:
             st.markdown("""
             ### 事实精准
             - ✅ 数值跨页一致性
-            - ✅ 名称/缩写一致性
-            - ✅ 缩写首次定义检查
+            - ✅ 缩写首次定义 / 重复定义 / 先用后定义
+            - ✅ 缩写定义后未再使用
             - ✅ rules.md 自定义规则引擎
             """)
 
 # ── 首次加载后执行审查 ──
-if st.session_state.audit_run and st.session_state.doc and not st.session_state.findings:
+if (
+    st.session_state.audit_run
+    and st.session_state.doc
+    and not st.session_state.get("audit_completed")
+):
     with st.spinner("正在执行审查..."):
         st.session_state.findings = run_audit(st.session_state.doc)
+    st.session_state.audit_completed = True
     st.session_state.audit_run = False
     st.rerun()
 
 # ── 显示结果 ──
-if st.session_state.doc and st.session_state.findings:
+# 注意: 不能用 findings 真值判断 — 干净文档 findings=[] 时也必须展示
+# 0 问题摘要、过滤器和报告下载，否则用户会误以为审查没有执行。
+if st.session_state.doc and st.session_state.get("audit_completed"):
     doc = st.session_state.doc
 
     # ── 过滤逻辑 (结果由 sidebar 计算并存入 session_state，P5 修复) ──
@@ -697,11 +735,14 @@ if st.session_state.doc and st.session_state.findings:
     st.subheader(f"🔍 审查发现 ({len(filtered)} 项)")
 
     if not filtered:
-        st.success("🎉 未发现任何问题！文档质量良好。")
+        if st.session_state.findings:
+            st.info("当前筛选/豁免条件下没有问题可显示；可调整左侧过滤器查看其余发现。")
+        else:
+            st.success("🎉 未发现任何问题！文档质量良好。")
     else:
         # ── 批量豁免按钮 ───────────────────────────────────
-        info_ids = [f.id for f in filtered if f.severity == FindingSeverity.INFO]
-        warning_ids = [f.id for f in filtered if f.severity == FindingSeverity.WARNING]
+        info_ids = [f.exemption_key for f in filtered if f.severity == FindingSeverity.INFO]
+        warning_ids = [f.exemption_key for f in filtered if f.severity == FindingSeverity.WARNING]
 
         bc1, bc2, bc3, bc4 = st.columns(4)
         with bc1:
@@ -717,7 +758,7 @@ if st.session_state.doc and st.session_state.findings:
                 _exempt_ids(warning_ids)
                 st.rerun()
         with bc3:
-            all_visible = [f.id for f in filtered]
+            all_visible = [f.exemption_key for f in filtered]
             if all_visible and st.button(
                 f"📋 豁免全部可见 ({len(all_visible)})", use_container_width=True
             ):
@@ -727,7 +768,7 @@ if st.session_state.doc and st.session_state.findings:
             # 按类型批量豁免
             type_ids: dict[str, list[str]] = {}
             for f in filtered:
-                type_ids.setdefault(f.type.value, []).append(f.id)
+                type_ids.setdefault(f.type.value, []).append(f.exemption_key)
             # 使用 key 避免 selectbox 值在 rerun 后残留导致无限循环
             n_exempted = len(st.session_state.get("exempted_finding_ids", set()))
             type_choice = st.selectbox(
@@ -747,7 +788,7 @@ if st.session_state.doc and st.session_state.findings:
         sev_order = {FindingSeverity.ERROR: 0, FindingSeverity.WARNING: 1, FindingSeverity.INFO: 2}
         sorted_findings = sorted(filtered, key=lambda f: sev_order.get(f.severity, 3))
 
-        for finding in sorted_findings:
+        for _idx, finding in enumerate(sorted_findings, 1):
             sev_icon = {"error": "🔴", "warning": "🟡", "info": "🔵"}.get(
                 finding.severity.value, "⚪"
             )
@@ -781,15 +822,19 @@ if st.session_state.doc and st.session_state.findings:
                     st.caption(f"类型: {type_label}")
                     st.caption(f"严重度: {finding.severity.value}")
                     # 单条豁免按钮
-                    if st.button("🚫 豁免", key=f"exempt_{finding.id}", help="从结果中隐藏此问题"):
-                        _exempt_ids([finding.id])
+                    if st.button(
+                        "🚫 豁免",
+                        key=f"exempt_{finding.exemption_key}_{_idx}",
+                        help="从结果中隐藏此问题",
+                    ):
+                        _exempt_ids([finding.exemption_key])
                         st.rerun()
 
         # 豁免计数（循环外统一显示一次）
         exempted_from_display = sum(
             1
             for f in st.session_state.findings
-            if f.id in st.session_state.get("exempted_finding_ids", set())
+            if f.exemption_key in st.session_state.get("exempted_finding_ids", set())
         )
         if exempted_from_display > 0:
             st.caption(

@@ -21,6 +21,13 @@ class Run:
     underline: bool | None = None
     color: str | None = None  # hex RGB (e.g. "FF0000")
     strikethrough: bool | None = None
+    # 继承后的有效格式 (theme/master/layout/style 解析结果)。
+    # font_name/font_size 仍表示 run 上的显式值；审计器优先使用 effective_*，
+    # 避免"继承字号 = None → 规则跳过"的静默漏检。
+    effective_font_name: str | None = None
+    effective_font_name_east_asia: str | None = None
+    effective_font_size: float | None = None
+    font_size_inherited: bool = False
 
 
 @dataclass
@@ -36,6 +43,10 @@ class Paragraph:
     space_before: float | None = None  # 段前间距 (pt)
     space_after: float | None = None  # 段后间距 (pt)
     line_spacing: float | None = None  # 行距倍数
+    # PPTX 项目符号来自 XML 格式 (a:buChar / a:buAutoNum)，不是文本前缀。
+    # bullet_type: "char"（符号）| "number"（自动编号）| "none"（显式无符号）| None（未提取/继承）
+    bullet_type: str | None = None
+    bullet_char: str | None = None
 
 
 @dataclass
@@ -62,6 +73,17 @@ class PageElement:
     tables: list[list[TableCell]] = field(default_factory=list)  # 按行分组
     children: list["PageElement"] = field(default_factory=list)  # Group 子元素 (PageElement 列表)
 
+    # 占位符语义 (title/body/subtitle/slide_number/footer/date/other)
+    placeholder_type: str | None = None
+    # 文本框排版属性
+    auto_size: str | None = None
+    word_wrap: bool | None = None
+    margin_left: float | None = None
+    margin_top: float | None = None
+    margin_right: float | None = None
+    margin_bottom: float | None = None
+    vertical_anchor: str | None = None
+
     # 位置与尺寸 (pt — 所有 Converter 已统一转换)
     left: float | None = None
     top: float | None = None
@@ -78,8 +100,16 @@ class PageElement:
     # 图片特有 (不载入二进制数据 — P1-5 内存红线: 图片内容不进入统一模型)
     image_ext: str | None = None  # "png" | "jpg" | "emf"
 
-    # 图表特有 (仅类型名，内嵌 Excel 数据不装载 — P1-5)
+    # 图片特有 (仅元数据，不载入二进制)
+    image_alt_text: str | None = None
+    image_px_width: int | None = None
+    image_px_height: int | None = None
+
+    # 图表特有 (仅元数据，内嵌 Excel 数据不装载 — P1-5)
     chart_type: str | None = None  # python-pptx 枚举名, 如 "COLUMN_CLUSTERED (51)"
+    chart_has_title: bool | None = None
+    chart_title: str | None = None
+    chart_has_legend: bool | None = None
 
     def iter_flat(self):
         """递归展开：yield 自身 + group 内所有子孙元素"""
@@ -94,7 +124,8 @@ class Page:
 
     index: int
     elements: list[PageElement] = field(default_factory=list)
-    layout_name: str | None = None  # PPTX 母版/版式名称
+    layout_name: str | None = None  # PPTX 版式名称
+    master_name: str | None = None  # PPTX 母版名称 (多母版检测)
     slide_number: int | None = None  # 幻灯片编号 (1-indexed)
     notes: str | None = None  # 演讲者备注 (PPTX)
 

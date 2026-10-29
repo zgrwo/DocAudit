@@ -7,6 +7,7 @@ from typing import Any
 
 from src.auditors.base import BaseAuditor
 from src.engines.rule_parser import AuditRule, parse_rules_md
+from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
@@ -56,10 +57,12 @@ class CustomRulesAuditor(BaseAuditor):
         "duplicate_title": ("sa", "_check_duplicate_title", False, False),
         "title_trailing_punctuation": ("sa", "_check_title_trailing_punctuation", True, False),
         "figure_caption_format": ("sa", "_check_figure_caption_format", False, False),
-        "element_overflow": ("fa", "_check_element_overflow", True, False),
+        # element_overflow / per_page_char_limit 是幻灯片版面语义 (位置/单页字数),
+        # DOCX/MD/PDF 的"页"是逻辑章节或真实分页, 不适用 — 2026-10-28 收敛为 PPTX only。
+        "element_overflow": ("fa", "_check_element_overflow", True, True),
         "empty_placeholder": ("fa", "_check_empty_placeholders", True, True),
         "bullet_consistency": ("fa", "_check_bullet_consistency", True, False),
-        "per_page_char_limit": ("fa", "_check_per_page_char_limit", True, False),
+        "per_page_char_limit": ("fa", "_check_per_page_char_limit", True, True),
         "table_contrast": ("fa", "_check_table_contrast", True, False),
         "slide_structure_consistency": ("sa", "_check_slide_structure_consistency", False, True),
         "title_length": ("sa", "_check_title_length", False, False),
@@ -105,6 +108,10 @@ class CustomRulesAuditor(BaseAuditor):
     def __init__(self, config: dict | None = None):
         super().__init__(config)
         self.rules_path = config.get("rules_path", "rules.md") if config else "rules.md"
+        # 可选: TERM-* regex 规则可复用 vocab/accept.txt 白名单。
+        # 未传 vocab_dir 时保持旧行为（不加载白名单），兼容独立使用。
+        self.vocab_dir = config.get("vocab_dir") if config else None
+        self._vocabulary = Vocabulary(self.vocab_dir) if self.vocab_dir else None
         self.rules: list[AuditRule] = []
         self._loaded = False
         # 委托审计器实例 — 由 pipeline 注入，避免重复创建
@@ -207,8 +214,28 @@ class CustomRulesAuditor(BaseAuditor):
             else:
                 compiled = re.compile(pattern_str, re.IGNORECASE)
         except re.error as e:
-            logger.warning("规则 %s 的正则无效: %s", rule.rule_id, e)
+            # 与"失败可见性"哲学一致: 无效正则不能只 warning 后静默返回空，
+            # 否则用户改坏 rules.md 后报告仍显示"干净"。生成 SYS-ERROR 保证 UI 可见。
+            logger.warning("规则 %s 的正则无效: %s", rule.rule_id, e, exc_info=True)
+            findings.append(
+                AuditFinding(
+                    type=FindingType.SYSTEM,
+                    severity=FindingSeverity.ERROR,
+                    message=f"规则 '{rule.rule_id}' 的正则表达式无效: {e}",
+                    rule_id="SYS-ERROR",
+                    location="系统",
+                    context=f"rule={rule.rule_id} pattern={pattern_str[:80]}"[:120],
+                    suggestion="请检查 rules.md 中该规则的 '模式' 是否为合法正则",
+                    metadata={"rule_id": rule.rule_id, "error": str(e)},
+                )
+            )
             return findings
+
+        # 仅首次出现: 同一匹配文本只报告第一次；用于 TERM-003 避免每页重复。
+        # 白名单: 复用 vocab/accept.txt，避免已认可技术缩写被当作"未翻译"。
+        first_only = str(rule.params.get("仅首次出现", "")).lower() in ("true", "1", "yes")
+        use_whitelist = str(rule.params.get("排除白名单", "")).lower() in ("true", "1", "yes")
+        seen_terms: set[str] = set()
 
         for page in doc.pages:
             text = page.all_text
@@ -234,8 +261,30 @@ class CustomRulesAuditor(BaseAuditor):
             matches = list(compiled.finditer(text))
             if matches:
                 for match in matches:
+                    matched_term = match.group(0)
+                    # 定义场景: 命中位于括号对内 (如 "全称 (TSV)"), 跳过。
+                    # 仅首次出现模式下也标记为已见，后续重复不再报告。
                     if any(match.start() >= lo and match.end() <= hi for lo, hi in paren_ranges):
-                        continue  # 命中位于括号对内 (定义场景), 跳过
+                        if first_only:
+                            seen_terms.add(matched_term)
+                        continue
+                    # 英文 (中文) 定义格式: 缩写后紧跟括号内容 → 视为已附翻译。
+                    # 仅首次出现模式需要标记已见，避免后续使用再次报告。
+                    if first_only and re.match(
+                        r"\s*[（(][^）)]*[）)]",
+                        text[match.end() : match.end() + 80],
+                    ):
+                        seen_terms.add(matched_term)
+                        continue
+                    if use_whitelist and self._vocabulary is not None:
+                        if self._vocabulary.is_accepted(matched_term):
+                            if first_only:
+                                seen_terms.add(matched_term)
+                            continue
+                    if first_only:
+                        if matched_term in seen_terms:
+                            continue
+                        seen_terms.add(matched_term)
                     suggestions = rule.params.get("suggestion", "")
                     findings.append(
                         AuditFinding(
@@ -245,7 +294,7 @@ class CustomRulesAuditor(BaseAuditor):
                             rule_id=rule.rule_id,
                             page_index=page.index,
                             location=f"第 {page.slide_number or page.index + 1} 页",
-                            context=match.group(0)[:100],
+                            context=matched_term[:100],
                             suggestion=suggestions,
                         )
                     )
@@ -366,6 +415,7 @@ class CustomRulesAuditor(BaseAuditor):
                     "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
                     "large_text_threshold": cfg.get("large_text_threshold", 18),
                     "rule_severities": cfg.get("rule_severities", {}),
+                    "enabled_rule_ids": {r.rule_id for r in self.rules},
                 }
             )
         elif key == "fca":

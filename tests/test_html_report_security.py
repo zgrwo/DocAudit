@@ -45,6 +45,26 @@ def _finding(
     )
 
 
+def test_report_sorted_by_severity_then_page():
+    """2026-10-29: 报告按 error → warning → info 排序，不按审计器执行顺序。"""
+    info = AuditFinding(
+        type=FindingType.FORMAT,
+        severity=FindingSeverity.INFO,
+        message="INFO_ITEM",
+        rule_id="X-INFO",
+        page_index=0,
+    )
+    error = AuditFinding(
+        type=FindingType.FORMAT,
+        severity=FindingSeverity.ERROR,
+        message="ERROR_ITEM",
+        rule_id="X-ERROR",
+        page_index=5,
+    )
+    html = generate_html_report(_doc(), [info, error])
+    assert html.index("ERROR_ITEM") < html.index("INFO_ITEM")
+
+
 class TestPayloadEscaping:
     """核心红线: message/context/suggestion/location/source_path 全部转义。"""
 

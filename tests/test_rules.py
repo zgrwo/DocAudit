@@ -43,6 +43,9 @@ class TestRuleParser:
         assert "conclusion_keywords" in config
         assert isinstance(config["body_size_range"], tuple)
         assert config["body_size_range"][0] >= 10  # min 字号
+        # 2026-10-29: 默认上限对齐 Office 主题 (标题 44 / 正文 32)
+        assert config["title_size_range"] == (28, 44)
+        assert config["body_size_range"] == (12, 32)
 
     def test_rule_ids_unique(self):
         rules = parse_rules_md(RULES_MD)
@@ -234,6 +237,45 @@ class TestRuleParser:
         finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
         assert len(finds) == 0, f"已附翻译不应报 TERM-003, got: {finds}"
 
+    def test_term003_ordinary_capitalized_words_not_flagged(self):
+        """TERM-003: 普通首字母大写英文词 (Yield/Node/Analysis) 不是技术缩写。"""
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        doc = _md_doc("Yield Analysis 与 Node Comparison 数据。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"普通英文词不应报 TERM-003, got: {finds}"
+
+    def test_term003_definition_suppresses_later_use(self):
+        """TERM-003: 首次出现已附中文定义，后续复用不应再报未翻译。"""
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        doc = _md_doc("TSV (硅通孔) 工艺。TSV 用于先进封装。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert finds == [], f"已定义缩写的后续复用不应报 TERM-003, got: {finds}"
+
+    def test_term003_reports_only_first_occurrence(self):
+        """TERM-003: 同一缩写全文档只报首次出现，避免每页重复。"""
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        doc = _md_doc("TSV 工艺用于先进封装。TSV 设备也需要检查。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 1, f"同一缩写应只报一次, got: {finds}"
+
+    def test_term003_accept_whitelist_skipped(self):
+        """TERM-003: vocab/accept.txt 已认可缩写 (FOWLP) 不再报未翻译。"""
+        from pathlib import Path as _Path
+
+        auditor = CustomRulesAuditor(
+            config={
+                "rules_path": RULES_MD,
+                "vocab_dir": str(_Path(RULES_MD).parent / "vocab"),
+            }
+        )
+        auditor.load_rules()
+        doc = _md_doc("FOWLP 工艺用于先进封装。")
+        finds = [f for f in auditor.audit(doc) if f.rule_id == "TERM-003"]
+        assert len(finds) == 0, f"白名单缩写不应报 TERM-003, got: {finds}"
+
     def test_term003_lowercase_function_words_skipped(self):
         """TERM-003: 中英混排页中的全小写功能词不标记 (仅术语特征)"""
         auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
@@ -276,6 +318,44 @@ class TestRuleParser:
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
         assert len(sys_errors) == 1, f"未知 check_type 应产生 SYS-ERROR, got: {findings}"
         assert "table_contras" in sys_errors[0].message
+
+    def test_invalid_regex_becomes_sys_error(self):
+        """回归: 无效正则不再静默返回空, 转 SYS-ERROR 保证配置错误可见。"""
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="TERM-999",
+            category="terminology",
+            severity="warning",
+            description="测试非法正则",
+            check_type="regex",
+            params={"pattern": "["},
+        )
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        findings = auditor._execute_rule(rule, _md_doc("测试"))
+        sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
+        assert len(sys_errors) == 1, f"无效正则应产生 SYS-ERROR, got: {findings}"
+        assert "TERM-999" in sys_errors[0].message
+
+    def test_pptx_only_dispatch_skips_docx_page_char_limit(self):
+        """FMT-003 是幻灯片语义；DOCX 经 dispatch 也必须跳过。"""
+        from src.engines.rule_parser import AuditRule
+
+        rule = AuditRule(
+            rule_id="FMT-003",
+            category="format",
+            severity="warning",
+            description="每页文本量",
+            check_type="per_page_char_limit",
+            params={},
+        )
+        doc = _md_doc("测" * 300)
+        doc.format = "docx"
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        findings = auditor._execute_rule(rule, doc)
+        assert [f for f in findings if f.rule_id == "FMT-003"] == []
 
     def test_heading_levels_dispatch_skipped_for_pptx(self):
         """STR-003: PPTX 文档不报标题层级跳级 (para.level 是缩进级别, 方法内守卫早退)"""

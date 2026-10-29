@@ -328,7 +328,11 @@ class TestFmt005ElementOverflow:
         """FMT-005 经完整流水线 (build_auditors → run_auditors, dispatch 模式) 必须触发。"""
         from src.engines.pipeline import build_auditors, run_auditors
 
-        d = _doc([_page([_text_frame([], left=1000.0, top=100.0, width=100.0, height=50.0)])])
+        # FMT-005 是 PPTX 版面语义 (2026-10-28 收敛为 pptx_only)。
+        d = _doc(
+            [_page([_text_frame([], left=1000.0, top=100.0, width=100.0, height=50.0)])],
+            fmt="pptx",
+        )
         auditors = build_auditors(
             str(PROJECT_ROOT / "rules.md"),
             str(PROJECT_ROOT / "glossary"),
@@ -377,3 +381,26 @@ class TestFmt007BulletConsistency:
         fa = FormatAuditor()
         d = _doc([_page([_text_frame([_para("• 第一项"), _para("• 第二项")])])])
         assert fa._check_bullet_consistency(d.pages[0], d) == []
+
+    def test_real_bullet_format_mixed_flagged(self):
+        """真实 a:buChar + a:buAutoNum 混用 → FMT-007 触发（非文本前缀）。"""
+        fa = FormatAuditor()
+        d = _doc(
+            [
+                _page(
+                    [
+                        _text_frame(
+                            [
+                                Paragraph(
+                                    text="项目一", runs=[], bullet_type="char", bullet_char="•"
+                                ),
+                                Paragraph(text="项目二", runs=[], bullet_type="number"),
+                            ]
+                        )
+                    ]
+                )
+            ]
+        )
+        findings = fa._check_bullet_consistency(d.pages[0], d)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "FMT-007"

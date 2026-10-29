@@ -51,20 +51,20 @@ language: "zh-CN"
 
 # 格式规则
 
-## FMT-001: 正文字体统一
+## FMT-001: 正文字体统一（仅 PPTX）
 - 严重度: warning
-- 说明: 正文文本必须使用指定字体之一
+- 说明: 幻灯片正文文本必须使用指定字体之一（DOCX/PDF/MD 不套用 PPT 品牌字体表）
 - 字体: [微软雅黑, Arial, Noto Sans SC, Calibri]
 
-## FMT-002: 标题字号范围
+## FMT-002: 标题字号范围（仅 PPTX）
 - 严重度: warning
-- 说明: 标题字号 28-40pt, 正文 12-22pt
-- 标题: {min: 28, max: 40}
-- 正文: {min: 12, max: 22}
+- 说明: 幻灯片标题字号 28-44pt, 正文 12-32pt（DOCX/PDF/MD 不套用幻灯片字号）
+- 标题: {min: 28, max: 44}
+- 正文: {min: 12, max: 32}
 
-## FMT-003: 每页文本量限制
+## FMT-003: 每页文本量限制（仅 PPTX）
 - 严重度: warning
-- 说明: 单页文本不应过于密集
+- 说明: 单张幻灯片文本不应过于密集（DOCX/PDF/MD 的页/章节不适用）
 - 检查: per_page_char_limit
 - 最大字数: 200
 
@@ -75,7 +75,7 @@ language: "zh-CN"
 - 英文上限: 300
 - 最大显式换行: 3
 
-## FMT-005: 元素不超出页面边界
+## FMT-005: 元素不超出页面边界（仅 PPTX）
 - 严重度: error
 - 说明: 文本框/图片/表格等元素不得超出幻灯片边界
 - 检查: element_overflow
@@ -112,13 +112,15 @@ language: "zh-CN"
 - 建议: "首次出现应标注缩写: TSV (Through Silicon Via)"
 - 严重度: warning
 
-## TERM-003: 中英文混用规范
+## TERM-003: 技术缩写首次出现应附中文翻译
 - 检查: regex
-- 模式: "(?<![A-Za-z0-9])(?:[A-Z]{2,8}(?![A-Za-z0-9])|[A-Z][a-z]{2,}(?![A-Za-z0-9]))(?!\s*[（(][^）)]*[）)])"
-- 说明: "英文术语（全大写缩写或首字母大写词）首次出现应附带中文翻译，格式: 英文 (中文)"
+- 模式: "(?<![A-Za-z0-9])[A-Z]{2,8}(?![A-Za-z0-9])"
+- 说明: "技术缩写（全大写，如 TSV/FOWLP）首次出现应附带中文翻译，格式: 英文 (中文)"
 - 仅中文页面: true
 - 大小写敏感: true
 - 排除括号内: true
+- 排除白名单: true
+- 仅首次出现: true
 - 严重度: info
 
 # 内容规则
@@ -170,9 +172,25 @@ language: "zh-CN"
 | FMT-MIXED-001 | 英文与中文之间建议加空格 | `src/auditors/language.py` → `_check_mixed_formatting` |
 | FMT-MIXED-002 | 中文与英文之间建议加空格 | `src/auditors/language.py` → `_check_mixed_formatting` |
 | FMT-MIXED-003 | 英文后不应使用中文标点 | `src/auditors/language.py` → `_check_mixed_formatting` |
+| FMT-ALIGN | 同页文本框行/列对齐提示 (标题与正文不互比) | `src/auditors/format.py` → `_check_alignment` |
+| FMT-OVERLAP | 元素重叠提示 (保守阈值 25%，排除嵌套/全屏背景) | `src/auditors/format.py` → `_check_element_overlap` |
+| FMT-SAFE-MARGIN | 元素贴边提示 (默认页面 1% 安全边距) | `src/auditors/format.py` → `_check_safe_margin` |
+| FMT-TEXT-OVERFLOW | 文本框内容溢出估算 (CJK=2 半角单位，行高≈1.2em) | `src/auditors/format.py` → `_check_text_overflow` |
+| FMT-FOOTER | 页脚/页码/日期占位符部分页面缺失 | `src/auditors/format.py` → `_check_footer_consistency` |
+| FMT-IMAGE | 图片宽高比失真/低 DPI/缺 alt text | `src/auditors/format.py` → `_check_image_quality` |
+| FMT-CHART | 图表缺少标题 | `src/auditors/format.py` → `_check_chart_labeling` |
+| STR-MASTER | 检测到多个幻灯片母版 | `src/auditors/structure.py` → `_check_master_consistency` |
+| PUNCT-001 | 重复标点 (`；；`/`：：`/`！！`/`？？`) | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-002 | 相邻冲突标点 (`，。`/`。，`/`、，` 等) | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-003 | 中文后使用英文标点 | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-004 | 全角字母/数字 | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-005 | 括号/引号不配对 | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-006 | 中文语境使用英文省略号 | `src/auditors/language.py` → `_check_punctuation` |
+| PUNCT-007 | 中文语境使用英文双连字符破折号 | `src/auditors/language.py` → `_check_punctuation` |
+| TXT-REDUNDANT | 高精度中文冗余表达 | `src/auditors/language.py` → `_check_redundancy` |
 | VOCAB-REJECT | 禁用词汇检查 (reject.txt) | `src/auditors/language.py` → `_check_rejected_vocab`；引擎 `src/engines/vocabulary.py` |
 | PY-SPELL | 纯 Python 拼写检查 (tier-3 降级) | `src/engines/languagetool.py` → `_check_python` |
-| PY-ZH-GRAMMAR | 中文基础语法正则检查 | `src/engines/languagetool.py` → `_check_chinese_patterns` |
+| PY-ZH-GRAMMAR | 中文基础语法/标点模式 (始终执行，不依赖 LanguageTool 后端) | `src/auditors/language.py` → `_check_builtin_chinese_patterns`；`src/engines/languagetool.py` → `check_chinese_patterns` |
 | SYS-ERROR | 规则/审计器执行失败的系统错误 (UI 可见) | `src/auditors/custom_rules.py` → `audit`/`_execute_check_rule`；`src/engines/pipeline.py` → `run_auditors` |
 
 以下为代码内置的不可配阈值（2026-09-06 审查 C-2 补录，暂未开放配置；调整需改源码）：

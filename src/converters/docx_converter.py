@@ -34,6 +34,100 @@ ALIGNMENT_MAP = {
 HEADING_STYLE_RE = re.compile(r"^Heading\s+(\d+)$", re.IGNORECASE)
 
 
+def _rpr_font_name(rpr, attr: str) -> str | None:
+    """从 w:rPr/w:rFonts 读取 ascii/hAnsi/eastAsia 字体。"""
+    if rpr is None:
+        return None
+    rfonts = rpr.find(qn("w:rFonts"))
+    if rfonts is None:
+        return None
+    return rfonts.get(qn(attr))
+
+
+def _rpr_size_pt(rpr) -> float | None:
+    """w:sz val 为半磅 → pt。"""
+    if rpr is None:
+        return None
+    sz = rpr.find(qn("w:sz"))
+    if sz is None:
+        return None
+    try:
+        return int(sz.get(qn("w:val"))) / 2.0
+    except (TypeError, ValueError):
+        return None
+
+
+class _DocxStyleResolver:
+    """解析 DOCX 的样式继承字体/字号。
+
+    顺序：run rPr → paragraph style → based-on style → Normal → docDefaults。
+    python-docx 对继承值返回 None，旧实现导致 FMT-001/002 对 Word 文档漏检。
+    """
+
+    def __init__(self, doc):
+        self.doc = doc
+        self._defaults = self._read_doc_defaults()
+
+    def _read_doc_defaults(self) -> dict:
+        result: dict[str, object] = {"size": None, "latin": None, "ea": None}
+        try:
+            styles_el = self.doc.styles.element
+            defaults = styles_el.find(qn("w:docDefaults"))
+            if defaults is None:
+                return result
+            rpr_default = defaults.find(qn("w:rPrDefault"))
+            if rpr_default is None:
+                return result
+            rpr = rpr_default.find(qn("w:rPr"))
+            result["size"] = _rpr_size_pt(rpr)
+            result["latin"] = _rpr_font_name(rpr, "w:ascii") or _rpr_font_name(rpr, "w:hAnsi")
+            result["ea"] = _rpr_font_name(rpr, "w:eastAsia")
+        except Exception:
+            return result
+        return result
+
+    def _style_chain(self, style):
+        seen: set[int] = set()
+        current = style
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            yield current
+            try:
+                current = current.base_style
+            except Exception:
+                return
+
+    def resolve_run(self, para, run) -> tuple:
+        """返回 (effective_latin, effective_ea, effective_size, inherited_size)。"""
+        latin = run.font.name
+        try:
+            rpr = run._element.rPr
+        except Exception:
+            rpr = None
+        east_asia = _rpr_font_name(rpr, "w:eastAsia")
+        explicit_size = run.font.size.pt if run.font.size is not None else None
+        size = explicit_size
+
+        # 段落样式 → based-on 链
+        for style in self._style_chain(getattr(para, "style", None)):
+            style_font = getattr(style, "font", None)
+            if latin is None and style_font is not None and style_font.name:
+                latin = style_font.name
+            if east_asia is None:
+                east_asia = _rpr_font_name(getattr(style.element, "rPr", None), "w:eastAsia")
+            if size is None and style_font is not None and style_font.size is not None:
+                size = style_font.size.pt
+
+        if size is None:
+            size = self._defaults.get("size")
+        if latin is None:
+            latin = self._defaults.get("latin")
+        if east_asia is None:
+            east_asia = self._defaults.get("ea")
+
+        return latin, east_asia, size, explicit_size is None and size is not None
+
+
 class DocxConverter(BaseConverter):
     """将 DOCX 文件转换为统一 Document 模型。
 
@@ -53,6 +147,11 @@ class DocxConverter(BaseConverter):
         source_path = Path(source_path)
         logger.info("解析 DOCX: %s", source_path.name)
 
+        if source_path.suffix.lower() == ".doc":
+            raise ValueError(
+                "旧版二进制 .doc 不受支持，请先用 Word/LibreOffice 另存为 .docx 后重试"
+            )
+
         try:
             doc = DocxDocument(str(source_path))
         except Exception as e:
@@ -65,6 +164,7 @@ class DocxConverter(BaseConverter):
         # --- 构建元素查找表 (局部变量, 线程安全) ---
         para_map = {p._element: p for p in doc.paragraphs}
         table_map = {t._element: t for t in doc.tables}
+        style_resolver = _DocxStyleResolver(doc)
 
         # --- 遍历文档主体（保留段落和表格的交错顺序） ---
         elements: list[PageElement] = []
@@ -75,7 +175,7 @@ class DocxConverter(BaseConverter):
             if tag == "p":
                 para = para_map.get(child)
                 if para is not None:
-                    elem = self._convert_paragraph(para)
+                    elem = self._convert_paragraph(para, style_resolver)
                     if elem is not None:
                         elements.append(elem)
 
@@ -98,7 +198,7 @@ class DocxConverter(BaseConverter):
                             if item_tag == "p":
                                 para = para_map.get(item)
                                 if para is not None:
-                                    elem = self._convert_paragraph(para)
+                                    elem = self._convert_paragraph(para, style_resolver)
                                     if elem is not None:
                                         elements.append(elem)
                             elif item_tag == "tbl":
@@ -174,7 +274,9 @@ class DocxConverter(BaseConverter):
             logger.debug("元数据提取失败: %s", e, exc_info=True)
             return DocumentMetadata(word_count=word_count)
 
-    def _convert_paragraph(self, para) -> PageElement | None:
+    def _convert_paragraph(
+        self, para, style_resolver: _DocxStyleResolver | None = None
+    ) -> PageElement | None:
         """转换单个段落"""
         runs: list[Run] = []
         for r in para.runs:
@@ -197,16 +299,32 @@ class DocxConverter(BaseConverter):
                 except Exception:
                     pass  # bare-handler-ok — eastAsia 字体提取降级，失败时保留 None
 
+                effective_name = None
+                effective_ea = None
+                effective_size = None
+                inherited_size = False
+                if style_resolver is not None:
+                    (
+                        effective_name,
+                        effective_ea,
+                        effective_size,
+                        inherited_size,
+                    ) = style_resolver.resolve_run(para, r)
+
                 runs.append(
                     Run(
                         text=r.text,
                         font_name=font.name,
                         font_name_east_asia=font_name_east_asia,
-                        font_size=font.size.pt if font.size else None,
+                        font_size=font.size.pt if font.size is not None else None,
                         bold=font.bold,
                         italic=font.italic,
                         underline=font.underline,
                         color=font_color,
+                        effective_font_name=effective_name,
+                        effective_font_name_east_asia=effective_ea,
+                        effective_font_size=effective_size,
+                        font_size_inherited=inherited_size,
                     )
                 )
             except Exception as e:

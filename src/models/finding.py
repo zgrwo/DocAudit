@@ -72,6 +72,17 @@ class AuditFinding:
         )
         return f"{self.type.value}|{self.rule_id or ''}|{page_key}|{ctx_hash:08x}"
 
+    @property
+    def exemption_key(self) -> str:
+        """稳定豁免键 (可跨多次审查复用)。
+
+        旧 UI 用随机 ``id`` 作为豁免键，重新审查后 id 变化，豁免立即失效。
+        这里用 dedup_key + location 的哈希；location 在批量模式下含文件名，
+        可区分不同文件中的同页同文本问题。
+        """
+        raw = f"{self.dedup_key}|{self.message or ''}|{self.location or ''}"
+        return hashlib.md5(raw.encode()).hexdigest()[:16]
+
     @staticmethod
     def deduplicate(findings: list["AuditFinding"]) -> list["AuditFinding"]:
         """移除重复发现（保留严重度更高的版本）"""

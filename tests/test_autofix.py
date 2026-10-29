@@ -75,6 +75,25 @@ class TestFixPptx:
                             if run.font.size:
                                 assert run.font.size >= Pt(12)
 
+    def test_theme_font_token_not_replaced(self, fixer, tmp_path):
+        """+mj-lt/+mn-lt 是主题字体引用，不是具体字体名，修复不得替换。"""
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        run = box.text_frame.paragraphs[0].add_run()
+        run.text = "主题字体"
+        run.font.name = "+mj-lt"
+        src = tmp_path / "theme.pptx"
+        prs.save(str(src))
+
+        out = tmp_path / "theme_fixed.pptx"
+        fixer.fix_pptx(src, out)
+        prs2 = Presentation(str(out))
+        shape = next(
+            sh for sh in prs2.slides[0].shapes if sh.has_text_frame and sh.text_frame.text.strip()
+        )
+        assert shape.text_frame.paragraphs[0].runs[0].font.name == "+mj-lt"
+
     def test_atomic_write_no_corrupt_on_success(self, fixer, sample_pptx, tmp_path):
         """成功时目标文件存在且有效"""
         out = tmp_path / "output.pptx"
@@ -185,6 +204,34 @@ class TestFixBulletStyle:
                 for para in shape.text_frame.paragraphs:
                     for run in para.runs:
                         assert not run.text.strip().startswith("- ")
+
+    def test_real_bullet_char_updated(self, fixer, tmp_path):
+        """真实 a:buChar 的符号被改成 preferred，而不是只改文本前缀。"""
+        from lxml import etree
+        from pptx.oxml.ns import qn
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(5), Inches(2))
+        tf = box.text_frame
+        tf.text = "第一项"
+        p = tf.paragraphs[0]
+        p._p.get_or_add_pPr()
+        bu = etree.SubElement(p._p.pPr, qn("a:buChar"))
+        bu.set("char", "–")
+        src = tmp_path / "real_bullet.pptx"
+        prs.save(str(src))
+
+        out = tmp_path / "real_bullet_fixed.pptx"
+        fixer.fix_bullet_style(src, out, preferred="•")
+        prs2 = Presentation(str(out))
+        shape = next(
+            sh for sh in prs2.slides[0].shapes if sh.has_text_frame and sh.text_frame.text.strip()
+        )
+        p2 = shape.text_frame.paragraphs[0]
+        bu2 = p2._p.pPr.find(qn("a:buChar"))
+        assert bu2 is not None
+        assert bu2.get("char") == "•"
 
 
 class TestChainedFix:

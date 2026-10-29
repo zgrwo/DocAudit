@@ -216,8 +216,8 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
     """
     config: dict[str, Any] = {
         "allowed_fonts": ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"],
-        "title_size_range": (28, 40),
-        "body_size_range": (12, 22),
+        "title_size_range": (28, 44),
+        "body_size_range": (12, 32),
         "required_sections": [],
         "max_chinese_chars": 150,
         "max_english_chars": 300,

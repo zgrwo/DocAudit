@@ -80,7 +80,7 @@
 编辑 `rules.md` 中的 `FMT-001` 规则：
 
 ```markdown
-## FMT-001: 正文字体统一
+## FMT-001: 正文字体统一（仅 PPTX）
 - 严重度: warning
 - 说明: 正文文本必须使用指定字体之一
 - 字体: [Noto Sans SC, Arial Narrow, Calibri]
@@ -93,11 +93,11 @@
 编辑 `FMT-002`：
 
 ```markdown
-## FMT-002: 标题字号范围
+## FMT-002: 标题字号范围（仅 PPTX）
 - 严重度: warning
-- 说明: 标题字号 32-44pt, 正文 14-24pt
-- 标题: {min: 32, max: 44}
-- 正文: {min: 14, max: 24}
+- 说明: 标题字号 32-48pt, 正文 14-36pt
+- 标题: {min: 32, max: 48}
+- 正文: {min: 14, max: 36}
 ```
 
 ### 单页文本量上限
@@ -105,7 +105,7 @@
 编辑 `FMT-003`：
 
 ```markdown
-## FMT-003: 每页文本量限制
+## FMT-003: 每页文本量限制（仅 PPTX）
 - 严重度: warning
 - 说明: 单页文本不应过于密集
 - 检查: per_page_char_limit
@@ -309,9 +309,9 @@ python src/cli.py <path> [选项]
 | `检查` | check 类型 | `first_slide_has_title_layout` / `duplicate_title` / ... |
 | `模式` | regex 类型 | `"(?i)pattern"` (双引号内的正则表达式) |
 | `建议` | regex 类型 | `"修改建议文本"` |
-| `字体` | FMT-001 | `[微软雅黑, Arial, Calibri]` |
-| `标题/正文` | FMT-002 | `{min: 28, max: 40}` / `{min: 12, max: 22}` |
-| `最大字数` | FMT-003 | `200` |
+| `字体` | FMT-001 (PPTX) | `[微软雅黑, Arial, Calibri]` |
+| `标题/正文` | FMT-002 (PPTX) | `{min: 28, max: 44}` / `{min: 12, max: 32}` |
+| `最大字数` | FMT-003 (PPTX) | `200` |
 | `最小对比度` | FMT-008 | `4.5` (WCAG AA 正文) |
 | `大字最小对比度` | FMT-008 | `3.0` (WCAG AA 大字) |
 | `大字字号阈值` | FMT-008 | `18` (pt) |
@@ -329,7 +329,13 @@ python src/cli.py <path> [选项]
 |---------|------|------|
 | `FMT-MIXED-001~003` | 中英混排规范（CJK-Latin 间距、中文标点） | LanguageAuditor |
 | `VOCAB-REJECT` | 词汇表黑名单（`vocab/reject.txt`） | LanguageAuditor |
-| `PY-SPELL` / `PY-ZH-GRAMMAR` | 拼写与中文语法（LanguageTool 三层降级） | LanguageAuditor |
+| `FMT-ALIGN` / `FMT-OVERLAP` / `FMT-SAFE-MARGIN` | 同页对齐 / 元素重叠 / 安全边距 | FormatAuditor |
+| `FMT-TEXT-OVERFLOW` / `FMT-FOOTER` | 文本溢出估算 / 页脚页码一致性 | FormatAuditor |
+| `FMT-IMAGE` / `FMT-CHART` | 图片比例/DPI/alt text / 图表标题 | FormatAuditor |
+| `STR-MASTER` | 多母版检测 | StructureAuditor |
+| `PUNCT-001~007` | 重复/冲突标点、中英标点混用、全半角、括号配对、省略号/破折号 | LanguageAuditor |
+| `TXT-REDUNDANT` | 中文冗余表达 | LanguageAuditor |
+| `PY-SPELL` / `PY-ZH-GRAMMAR` | 拼写与中文语法/标点；`PY-ZH-GRAMMAR` 始终执行，不依赖 LanguageTool 后端 | LanguageAuditor |
 | `SYS-ERROR` | 系统级错误（审计器/规则执行失败时产生） | 流水线 |
 
 ### regex vs check 类型
@@ -386,4 +392,4 @@ PDF 转换仅提取文本和标题级别，无字体/位置元数据。如需完
 
 ---
 
-<!-- last_updated: 2026-08-18 -->
+<!-- last_updated: 2026-10-28 -->

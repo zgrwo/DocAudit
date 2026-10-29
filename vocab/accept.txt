@@ -94,6 +94,7 @@ wafer bonding
 die attach
 
 # 其他常用缩写
+IC
 HBM
 SiP
 SoC

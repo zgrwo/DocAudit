@@ -44,12 +44,17 @@ def _metadata_key(metadata) -> str:
 
 
 def _finding_key(f: AuditFinding) -> tuple:
-    """AuditFinding → 比较键 (排除随机 id / element_index)。"""
+    """AuditFinding → 比较键 (排除随机 id / element_index)。
+
+    page_index=None 的全局发现 (如 FMT-001 全文统计) 与整数页发现可能
+    拥有相同 type/rule_id；排序时 None 与 int 不可比较，统一归一化为 -1。
+    """
+    page_key = -1 if f.page_index is None else f.page_index
     return (
         f.type.value,
         f.severity.value,
         f.rule_id,
-        f.page_index,
+        page_key,
         f.message,
         f.context,
         f.suggestion,
@@ -60,11 +65,12 @@ def _finding_key(f: AuditFinding) -> tuple:
 
 def _finding_key_from_dict(d: dict) -> tuple:
     """CLI JSON 报告中的 finding dict → 比较键。"""
+    page_key = -1 if d["page_index"] is None else d["page_index"]
     return (
         d["type"],
         d["severity"],
         d["rule_id"],
-        d["page_index"],
+        page_key,
         d["message"],
         d["context"],
         d["suggestion"],

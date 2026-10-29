@@ -231,11 +231,11 @@ for f in findings:
 | 类别 | 规则 | 示例 |
 |------|------|------|
 | **结构** (8条) | STR-001~008 | 标题页、编号连续、层级递进、标题长度/重复/标点、图表格式、结构一致性 |
-| **格式** (8条) | FMT-001~008 | 字体、字号、文本密度、段落长度、溢出、占位符、项目符号、表格对比度 |
+| **格式** (8条) | FMT-001~008 | 字体、字号、文本密度、段落长度、溢出、占位符、项目符号、表格对比度（FMT-001~003/005 仅 PPTX） |
 | **术语** (3条) | TERM-001~003 | 先进封装术语、硅通孔术语、中英混排 (regex 驱动) |
 | **内容** (7条) | CON-001~004 + 子规则 | 数值一致性、必含章节、缩写定义 + 生命周期管理、每页结论 |
 
-> 所有规则定义 &#8594; [rules.md](rules.md) &nbsp;|&nbsp; 规则对应检查方法 &#8594; [API 参考](rules/api-reference.md)
+> 所有规则定义 &#8594; [rules.md](rules.md) &nbsp;|&nbsp; 规则对应检查方法 &#8594; [API 参考](docs/specification/api-reference.md)
 
 ---
 
@@ -266,14 +266,14 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 - &#128308; **完全离线**：文档不上传任何服务器，所有处理在本地完成
 - &#128308; **HTML 转义**：报告中所有用户文本必须 `html.escape()`
 - **路径限定**：文件路径限定在用户指定目录
-- **无数据上报**：代码中不存在任何网络请求
+- **无外部数据上报**：代码不会把文档内容发送到外部服务；仅使用本机 LanguageTool（可选），PDF 首次转换可能从 HuggingFace 下载 docling 模型（离线环境需预下载，见方案 C）
 - **LanguageTool 仅限本机**：语法检查服务地址可由 `rules.md` 配置，但仅允许 localhost/127.0.0.1/::1，指向外部地址会报错（防文档文本外发）
 
 ---
 
 ## 质量保证
 
-- **369 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
+- **427 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）
@@ -282,6 +282,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 已知限制
 
+- **旧版二进制格式**：仅支持 OOXML 的 `.pptx`/`.docx`；`.ppt`/`.doc` 需先另存为新格式（程序会给出明确提示）
 - **在线语法检查**：LanguageTool 需连接本地 Java 服务（不可用时可跳过）
 - **大文件处理**：>100 MB 的 PPTX/DOCX 需要较多内存
 - **PDF 格式**：仅支持文本型 PDF，扫描版需 OCR 预处理
@@ -346,4 +347,4 @@ python src/cli.py tests/fixtures/sample.pptx --rules rules.md
 
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。
 
-<!-- last_updated: 2026-08-18 -->
+<!-- last_updated: 2026-10-28 -->

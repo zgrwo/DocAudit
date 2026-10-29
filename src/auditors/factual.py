@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from src.auditors.base import BaseAuditor
+from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
@@ -112,6 +113,14 @@ _NUMERIC_VALUE_RE = re.compile(
     r"|mV|mA|kV|kW|kHz|MHz|GHz|Hz|GB|MB|KB|TB|ppm|mL|ml|V|A|W|g|m|L|s)?)(?![a-zA-Z])"
 )
 
+# CON-001 限定词识别: 年份/季度/工艺节点是"指标限定词"，不是待比较的指标值。
+# 2026-10-28 修复: 旧 key 把所有数字替换为 N，导致 2025 vs 2026、Q1 vs Q2、
+# 5nm vs 7nm 被误判为同一指标数值不一致。
+_YEAR_TOKEN_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_QUARTER_TOKEN_RE = re.compile(r"(?i)(?:Q[1-4]|第[1-4一二三四]季度)")
+_NODE_TOKEN_RE = re.compile(r"(?i)\d+(?:\.\d+)?\s*(?:nm|μm|um|mm|cm)(?![a-zA-Z])")
+_LENGTH_UNITS = frozenset({"nm", "μm", "um", "mm", "cm", "m"})
+
 # 数值提取后剥离非数字字符 — 比固定单位列表更通用，无需与 _NUMERIC_VALUE_RE 同步
 
 # 技术缩写提取正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每次扫描重复编译)
@@ -159,6 +168,10 @@ class FactualAuditor(BaseAuditor):
         cfg = config or {}
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
+        # 领域白名单: vocab/accept.txt 中认可的缩写 (WLP/FOWLP/RDL/TSV...)
+        # 不参与 CON-003 未定义检查 — 否则半导体文档会被大量误报。
+        vocab_dir = cfg.get("vocab_dir")
+        self._vocabulary = Vocabulary(vocab_dir) if vocab_dir else None
         # 缩写扫描缓存 — 每次 audit() 调用时重置；独立模式 (dispatch 直调) 下
         # 以 (id(doc), result) 绑定文档身份，防止跨文档串档
         self._abbr_scan_cache: tuple | None = None
@@ -187,24 +200,25 @@ class FactualAuditor(BaseAuditor):
         """检查相同数值型指标在不同位置是否一致"""
         findings: list[AuditFinding] = []
 
-        # 提取所有带上下文的数值
-        numeric_entries: list[dict] = self._extract_numeric_values(doc)
+        # 提取所有带上下文的数值；年份/季度/节点等限定词不参与指标一致性比较。
+        numeric_entries: list[dict] = [
+            entry
+            for entry in self._extract_numeric_values(doc)
+            if not self._is_qualifier_numeric_entry(entry)
+        ]
 
-        # 按相似上下文聚类
+        # 按相似上下文聚类。key 保留年份/季度/节点等限定词，
+        # 避免把"2025 年 vs 2026 年"、"Q1 vs Q2"、"5nm vs 7nm"当成同一指标。
         context_groups: dict[str, list[dict]] = defaultdict(list)
         for entry in numeric_entries:
-            # 用上下文窗口作为聚类 key
-            key = entry["context"].lower().strip()
-            # 归一化: 去掉数字
-            normalized = re.sub(r"\d+", "N", key)
-            context_groups[normalized].append(entry)
+            context_groups[self._numeric_context_key(entry)].append(entry)
 
         for norm_key, entries in context_groups.items():
             if len(entries) < 2:
                 continue
 
-            # 检查数值是否一致
-            values = set(e["value"] for e in entries)
+            # 检查数值是否一致（浮点容差，避免 95.30 与 95.3 误报）
+            values = {round(e["value"], 9) for e in entries}
             if len(values) > 1:
                 # 发现不一致
                 entries_sorted = sorted(entries, key=lambda e: e["page_index"])
@@ -232,6 +246,60 @@ class FactualAuditor(BaseAuditor):
                 )
 
         return findings
+
+    @staticmethod
+    def _numeric_qualifiers(*texts: str) -> set[str]:
+        """提取上下文中的年份/季度/工艺节点限定词（小写、去重）。"""
+        qualifiers: set[str] = set()
+        for text in texts:
+            if not text:
+                continue
+            for regex in (_YEAR_TOKEN_RE, _QUARTER_TOKEN_RE, _NODE_TOKEN_RE):
+                qualifiers.update(m.group(0).lower().replace(" ", "") for m in regex.finditer(text))
+        return qualifiers
+
+    def _numeric_context_key(self, entry: dict) -> str:
+        """构造数值聚类 key：上下文数字归一化为 N，但保留限定词。"""
+        context = entry.get("context", "").lower().strip()
+        normalized = re.sub(r"\d+(?:\.\d+)?", "N", context)
+        qualifiers = self._numeric_qualifiers(
+            entry.get("prefix", ""),
+            entry.get("suffix", ""),
+            entry.get("match_text", ""),
+        )
+        return normalized + "|" + ",".join(sorted(qualifiers))
+
+    @staticmethod
+    def _is_qualifier_numeric_entry(entry: dict) -> bool:
+        """判断数值是否只是年份/季度/工艺节点等限定词，而非指标值。
+
+        例：
+        - 2025年良率 95% → 2025 是年份，不参与比较；95% 参与。
+        - 第1季度良率 95% → 1 是季度序号，不参与比较；95% 参与。
+        - 5nm 节点良率 95% → 5nm 是工艺节点，不参与比较；95% 参与。
+        """
+        unit = str(entry.get("unit", "")).lower()
+        if unit in _LENGTH_UNITS:
+            return True
+
+        prefix = str(entry.get("prefix", ""))
+        suffix = str(entry.get("suffix", ""))
+        nearby = prefix + suffix
+        value = entry.get("value")
+
+        # 4 位年份 + 年/年度/财年/日期语境
+        if (
+            isinstance(value, (int, float))
+            and 1900 <= value <= 2100
+            and (re.search(r"(?:年|年度|财年|月|日)", nearby) or _QUARTER_TOKEN_RE.search(nearby))
+        ):
+            return True
+
+        # "第 1 季度" / "Q1" 中的序号
+        if re.search(r"(?i)(?:Q|第)\s*$", prefix) and re.match(r"(?i)\s*(?:季度|季)", suffix):
+            return True
+
+        return False
 
     def _extract_numeric_values(self, doc: Document) -> list[dict]:
         """提取文档中所有数值及其上下文 (过滤页码/图表编号等模板数字)"""
@@ -298,8 +366,11 @@ class FactualAuditor(BaseAuditor):
                         "page_index": page.index,
                         "page_number": page.slide_number or page.index + 1,
                         "context": context.strip(),
+                        "prefix": prefix,
+                        "suffix": suffix,
                         "value": value_float,
                         "match_text": value_str,
+                        "unit": re.sub(r"[\d.\s]", "", value_str).strip(),
                     }
                 )
 
@@ -340,6 +411,10 @@ class FactualAuditor(BaseAuditor):
 
                 # 跳过常见英语单词
                 if abbr in _COMMON_UPPERCASE_WORDS:
+                    continue
+
+                # 跳过项目白名单中的领域缩写 (WLP/FOWLP/RDL/TSV/IC...)。
+                if self._vocabulary is not None and self._vocabulary.is_accepted(abbr):
                     continue
 
                 pos = m.start()
