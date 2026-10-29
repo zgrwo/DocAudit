@@ -193,3 +193,78 @@ def test_shell_scripts_use_project_root_semantics():
         assert not re.search(r"^\s*source \.venv", code, re.MULTILINE), (
             f"{name}: 不得 source 相对路径 venv（执行行须用 $VENV_DIR）"
         )
+
+
+# ── benchmark.py（性能基线脚本）────────────────────────────────
+
+
+def test_benchmark_generates_and_measures():
+    import benchmark
+
+    results = benchmark.run_benchmark(sizes=[2], formats=("docx",), with_html=False)
+    assert len(results) == 1
+    row = results[0]
+    assert row["format"] == "docx"
+    assert row["pages"] == 2
+    assert row["convert_s"] >= 0.0
+    assert row["findings"] >= 0
+    assert row["bytes"] > 0
+
+
+def test_benchmark_main_writes_json(tmp_path, capsys):
+    import json
+
+    import benchmark
+
+    out = tmp_path / "bench.json"
+    code = benchmark.main(["--sizes", "2", "--format", "docx", "--json", str(out), "--no-html"])
+    assert code == 0
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data and data[0]["format"] == "docx"
+    assert "[BENCH] JSON 已写入" in capsys.readouterr().out
+
+
+def test_benchmark_invalid_sizes_exits_2(capsys):
+    import benchmark
+
+    assert benchmark.main(["--sizes", "a,b"]) == 2
+
+
+# ── .pre-commit-config.yaml 契约 ───────────────────────────────
+
+
+def _pre_commit_config() -> dict:
+    import yaml
+
+    path = SCRIPTS.parent / ".pre-commit-config.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_pre_commit_hooks_present():
+    config = _pre_commit_config()
+    hook_ids = [h["id"] for repo in config["repos"] for h in repo["hooks"]]
+    assert "ruff-check" in hook_ids
+    assert "ruff-format" in hook_ids
+    assert "docaudit-rules-validate" in hook_ids
+    assert "docaudit-fast-tests" in hook_ids
+
+
+def test_pre_commit_fast_tests_on_pre_push():
+    """快测 ~40s：放 pre-push，避免每次 commit 都等；commit 只做 lint + 配置校验。"""
+    config = _pre_commit_config()
+    hooks = {h["id"]: h for repo in config["repos"] for h in repo["hooks"]}
+    assert hooks["docaudit-fast-tests"]["stages"] == ["pre-push"]
+    assert "stages" not in hooks["docaudit-rules-validate"]
+
+
+def test_pre_commit_ruff_version_matches_pyproject():
+    """pre-commit 的 ruff rev 必须与 pyproject 钉版一致，避免 format 漂移。"""
+    from pathlib import Path
+
+    config = _pre_commit_config()
+    revs = [repo.get("rev") for repo in config["repos"] if "ruff" in repo.get("repo", "")]
+    assert revs and all(r == "v0.16.3" for r in revs), revs
+    pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "ruff==0.16.3" in pyproject or "ruff== 0.16.3" in pyproject

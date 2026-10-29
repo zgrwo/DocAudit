@@ -29,9 +29,9 @@ jobs:
 
       - name: Run tests with coverage
         # M14: 合并重复运行 (删除冗余 -v 步骤，-q 已够定位失败)
-        # 覆盖率门槛: 2026-10-29 实测 TOTAL 82% (5069 语句)，取 75% 留环境差异余量；
+        # 覆盖率门槛: 2026-10-29 实测 TOTAL 87% (5118 语句)，取 82% 留环境差异余量；
         # cli.py 48% — 由 test_cli_direct.py / test_cli_exit_codes.py subprocess 测试共同覆盖
-        run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=75
+        run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=82
 
       - name: Validate DISPATCH integrity
         run: |

@@ -12,6 +12,8 @@ from src.models.document import (
 )
 from src.models.finding import FindingSeverity, FindingType
 
+pytestmark = pytest.mark.slow  # 含 LanguageTool 探测/语言引擎集成：快测跳过
+
 
 def _make_doc(text: str, fmt: str = "pptx") -> Document:
     """构造单页测试文档"""

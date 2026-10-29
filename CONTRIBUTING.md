@@ -22,6 +22,18 @@ pytest tests/ -v
 
 ---
 
+## 开发环境（pre-commit）
+
+```bash
+pip install pre-commit
+pre-commit install                 # commit: ruff + rules validate
+pre-commit install --hook-type pre-push   # push: 快测子集 (~40s)
+pre-commit run --all-files         # 手动全量
+```
+
+快测用 `pytest tests/ -q -m "not slow"`（跳过子进程/AppTest/真实 docling 用例）；
+全量测试与覆盖率仍由 CI 执行。性能改动请跑 `python scripts/benchmark.py` 并对比 README 基线表。
+
 ## 新增审查规则流程
 
 新增一个 `check_type` 只需 **两步注册**（`_DISPATCH` 与 `_skip_checks` 由注册表自动派生）：

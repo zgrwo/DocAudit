@@ -303,6 +303,7 @@ python src/cli.py <path> [选项]
 | `--thumbnails` / `--no-thumbnails` | flag | 开启 | HTML 报告是否内嵌页面 SVG 线框缩略图 |
 | `--exempt-file` | `str` | `None` | 豁免文件路径（如 `.docauditignore`），命中项不计入报告与退出码 |
 | `--fail-on` | choice | `error` | 达到该严重度即退出码 1: `error` / `warning` / `info` / `none` |
+| `--sarif-base` | `str` | `None` | SARIF artifact 基准目录（CI 传仓库根 `.`，输出仓库相对路径供 Code Scanning 关联文件） |
 | `--fix` | flag | `False` | 自动修复格式问题 |
 | `--fix-type` | choice | `all` | 修复类型: `all` / `font` / `spacing` / `overflow` / `title_punct` / `bullet` |
 
@@ -321,6 +322,36 @@ python src/cli.py <path> [选项]
 # CI 示例：警告及以上即失败，并输出 SARIF 供 Code Scanning
 python src/cli.py docs/ --rules rules.md --fail-on warning -o audit.sarif
 ```
+
+### GitHub Code Scanning 集成
+
+```yaml
+# .github/workflows/docs-audit.yml
+name: Docs Audit
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write      # 上传 SARIF 必需
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install .
+      - name: Audit docs
+        run: >-
+          python src/cli.py docs/ --rules rules.md --fail-on error
+          --sarif-base . -o docaudit.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: docaudit.sarif }
+```
+
+> `--sarif-base .` 让 artifact 路径变成仓库相对路径（如 `docs/report.pptx`），
+> Code Scanning 才能把结果关联到具体文档；不加时输出 `file://` 绝对路径（本地查看用）。
+> 私有仓库需要在仓库设置中启用 GitHub Advanced Security。
 
 ---
 

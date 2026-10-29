@@ -24,15 +24,21 @@ _LEVEL_BY_SEVERITY = {
 }
 
 
-def _artifact_uri(path: str | None) -> str:
+def _artifact_uri(path: str | None, base: str | Path | None = None) -> str:
     """将文件路径转为 SARIF artifactLocation.uri。
 
-    绝对路径 → file:// URI (Windows 盘符不会污染 scheme)；
-    相对路径/异常路径 → posix 形式原样返回。
+    传入 base (如仓库根) 时优先输出**相对路径**——GitHub Code Scanning 需要
+    仓库相对 URI 才能把结果关联到文件；不在 base 下的路径回退 file:// URI
+    （本地 SARIF Viewer 可直接打开）。相对路径/异常路径原样返回 posix 形式。
     """
     if not path:
         return "unknown"
     p = Path(path)
+    if base is not None:
+        try:
+            return p.resolve().relative_to(Path(base).resolve()).as_posix()
+        except (OSError, ValueError):
+            pass  # 不在基准目录下或路径无效 → 回退 file URI
     try:
         return p.resolve().as_uri()
     except (OSError, ValueError):
@@ -43,6 +49,7 @@ def generate_sarif_report(
     doc: Document,
     findings: list[AuditFinding],
     output_path: str | Path | None = None,
+    uri_base: str | Path | None = None,
 ) -> str:
     """生成 SARIF v2.1.0 报告 (JSON 文本)。
 
@@ -50,6 +57,8 @@ def generate_sarif_report(
         doc: 统一文档模型 (提供默认 artifact 路径与工具元数据)
         findings: 审查发现列表；批量 finding 优先用 metadata["source_file"]
         output_path: 可选输出文件路径
+        uri_base: 可选 artifact 路径基准目录；提供时输出相对路径
+            （CI 传仓库根，如 "."），用于 GitHub Code Scanning 关联文件
     """
     ordered = _sort_findings(findings)
 
@@ -88,7 +97,8 @@ def generate_sarif_report(
                     "physicalLocation": {
                         "artifactLocation": {
                             "uri": _artifact_uri(
-                                (f.metadata or {}).get("source_file") or doc.source_path
+                                (f.metadata or {}).get("source_file") or doc.source_path,
+                                uri_base,
                             )
                         }
                     }

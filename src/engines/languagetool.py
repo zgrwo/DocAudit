@@ -100,10 +100,18 @@ class LanguageToolClient:
 
     DEFAULT_URL = "http://localhost:8010/v2"
     DEFAULT_PORT = 8011  # Java subprocess uses different port to avoid conflict
+    # 探活超时（秒）：本地服务毫秒级响应；Windows 上 localhost 的 IPv6 尝试会
+    # 白等约 2s，旧实现用 3s 导致每次审查额外 4s（2026-10-29 实测）。
+    PROBE_TIMEOUT = 1.0
+    # Tier-1 探活结果进程级缓存（url → (过期时刻, 是否可用)）
+    _PROBE_TTL = 30.0
+    _connect_cache: dict[str, tuple[float, bool]] = {}
 
     # 类级别弱引用集合，避免多实例重复注册 atexit
     _instances: weakref.WeakSet = weakref.WeakSet()
     _atexit_registered: bool = False
+    # 类级共享拼写词典（只读；加载约 1~2s，多实例复用）
+    _shared_spell_checker = None
 
     @classmethod
     def _cleanup_all(cls):
@@ -113,7 +121,9 @@ class LanguageToolClient:
 
     def __init__(self, base_url: str = DEFAULT_URL, timeout: int = 30, auto_start: bool = True):
         self._validate_base_url(base_url)
-        self.base_url = base_url.rstrip("/")
+        # localhost → 127.0.0.1（2026-10-29）: Windows 上 localhost 先解析 IPv6
+        # (::1) 并等待连接超时，实测每次请求多 ~2s；两者在白名单内且行为等价。
+        self.base_url = base_url.rstrip("/").replace("//localhost", "//127.0.0.1")
         self._initial_base_url = self.base_url  # reset() 时还原 (Java 启动会改端口)
         self.timeout = timeout
         self.auto_start = auto_start
@@ -148,7 +158,7 @@ class LanguageToolClient:
             return self._available
 
         # Tier 1: try existing service
-        if self._try_connect(self.base_url):
+        if self._try_connect_cached(self.base_url):
             self._available = True
             self._backend = "docker"
             logger.info("LanguageTool: using existing service at %s", self.base_url)
@@ -175,10 +185,25 @@ class LanguageToolClient:
         try:
             import requests
 
-            resp = requests.get(f"{url}/languages", timeout=3)
+            resp = requests.get(f"{url}/languages", timeout=self.PROBE_TIMEOUT)
             return resp.status_code == 200
         except Exception:
             return False
+
+    def _try_connect_cached(self, url: str) -> bool:
+        """Tier-1 探活带 30s 进程级缓存（2026-10-29）。
+
+        Web UI 每次审查都会重建 Auditor → 旧实现每次都付一次 TCP 探活（离线环境
+        实测 ~1s，Windows localhost 曾达 4s）。服务中途启动的场景由 `reset()`
+        或 TTL 过期兜底（最长 30s 后重新探测）。
+        """
+        now = time.monotonic()
+        cached = LanguageToolClient._connect_cache.get(url)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+        ok = self._try_connect(url)
+        LanguageToolClient._connect_cache[url] = (now + self._PROBE_TTL, ok)
+        return ok
 
     # ── Tier 2: Java subprocess ──────────────────────────────
 
@@ -267,14 +292,19 @@ class LanguageToolClient:
     # ── Tier 3: Pure Python fallback ─────────────────────────
 
     def _init_python_fallback(self) -> bool:
-        """初始化纯 Python 拼写检查"""
+        """初始化纯 Python 拼写检查（类级共享词典，2026-10-29）。
+
+        pyspellchecker 加载词典约 1~2 秒；Web UI 每次审查都会重建 Auditor，
+        逐实例加载会让"重复审查"和测试套件明显变慢。词典只读，类级共享安全。
+        """
         try:
             from spellchecker import SpellChecker
-
-            self._spell_checker = SpellChecker()
-            return True
         except ImportError:
             return False
+        if LanguageToolClient._shared_spell_checker is None:
+            LanguageToolClient._shared_spell_checker = SpellChecker()
+        self._spell_checker = LanguageToolClient._shared_spell_checker
+        return True
 
     # ── Check ────────────────────────────────────────────────
 
@@ -414,6 +444,8 @@ class LanguageToolClient:
         # 先清理 Java 子进程，避免下次探测时端口冲突或僵尸进程
         if self._java_process is not None:
             self._cleanup_java()
+        # 清除探活缓存：用户可能在审计中途启动服务，reset 后必须立即重探
+        LanguageToolClient._connect_cache.pop(self._initial_base_url, None)
         self.base_url = self._initial_base_url
         self._available = None
         self._backend = None

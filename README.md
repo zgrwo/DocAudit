@@ -224,7 +224,14 @@ python src/cli.py report.pptx --exempt-file .docauditignore
 
 # CI 门禁：警告及以上即失败（可选 error/info/none）
 python src/cli.py docs/ --fail-on warning -o audit.sarif
+
+# GitHub Code Scanning：加 --sarif-base . 输出仓库相对路径
+python src/cli.py docs/ --fail-on error --sarif-base . -o docaudit.sarif
 ```
+
+> **GitHub Code Scanning**：`--sarif-base .` 使 artifact 为仓库相对路径，
+> 再经 `github/codeql-action/upload-sarif` 上传后，结果按文档文件关联；
+> workflow 需 `permissions: security-events: write`（完整示例见[用户手册](docs/user-manual/user-manual.md)）。
 
 > 完整参数 &#8594; [用户手册](docs/user-manual/user-manual.md)
 >
@@ -291,7 +298,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **553 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
+- **585 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）
@@ -317,6 +324,14 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解贡献流程（fork &#8594; PR &#8594; review）。
 
+建议安装 pre-commit 钩子（提交时 ruff + 配置校验，推送前快测）：
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+
 ---
 
 ## 许可证
@@ -336,7 +351,30 @@ python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(Custo
 
 # 单文件审查
 python src/cli.py tests/fixtures/sample.pptx --rules rules.md
+
+# 快测子集（~40s，pre-commit 使用）
+pytest tests/ -q -m "not slow"
 ```
+
+---
+
+## 性能基线
+
+`scripts/benchmark.py` 生成确定性合成文档，分段计时（转换 / 审查 / HTML），用于优化前后对比：
+
+```bash
+python scripts/benchmark.py                 # docx+pptx, 10/50/100 页
+python scripts/benchmark.py --sizes 20 --format docx --json bench.json
+```
+
+2026-10-29 基线（Windows / Python 3.14 / 本机 SSD，含预热；仅供参考）：
+
+| 格式 | 10 页 | 50 页 | 100 页 |
+|------|-------|-------|--------|
+| DOCX | 0.10s | 0.37s | 0.71s |
+| PPTX | 0.16s | 0.74s | 1.54s |
+
+> 100 页文档全流程约 1.5s；转换是主要耗时项（审查为页级规则，线性增长很小）。
 
 ---
 

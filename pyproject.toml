@@ -70,6 +70,9 @@ ignore = ["E501"]  # line-too-long handled by formatter
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: 端到端/子进程/真实引擎测试；pre-commit 快测用 -m 'not slow' 跳过",
+]
 
 [tool.coverage.run]
 source = ["src"]

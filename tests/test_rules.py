@@ -148,7 +148,8 @@ class TestRuleParser:
         glossary.mkdir(exist_ok=True)
         auditors = build_auditors(str(rules_file), str(glossary))
         language_auditor = next(a for n, a in auditors if n == "语言审查")
-        assert language_auditor.lt_client.base_url == "http://localhost:8011/v2"
+        # localhost 在客户端内归一为 127.0.0.1（避免 Windows IPv6 白等 ~2s，2026-10-29）
+        assert language_auditor.lt_client.base_url == "http://127.0.0.1:8011/v2"
 
     def test_languagetool_url_external_blocked_by_whitelist(self, tmp_path):
         """白名单拦截: rules 声明外部 languagetool_url → build_auditors 抛 ValueError"""

@@ -149,6 +149,7 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
 | test_cli_exit_codes.py | CLI 退出码契约（处理失败 → exit 1；`--fail-on` 阈值） |
 | test_cli_direct.py | CLI 直接单测（audit_file / print_summary / --fix 链路 / doctor） |
+| test_cli_inprocess.py | CLI main() 进程内分支（覆盖率补充；子进程用例不计入 coverage） |
 | test_golden_paths.py | 黄金测试真实三路径（CLI/WebUI/Python API） |
 | test_rule_coverage.py | 规则断言覆盖测试（STR/CON/FMT 定向补盲） |
 | test_html_report_security.py | HTML 转义红线安全测试 |
@@ -182,6 +183,18 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 - PDF：docling 后端含表格/版面，但 Windows 非 ASCII 安装路径受限；PyMuPDF 后端规避该限制但只提取文本+书签（无表格结构）
 - DOCX 页眉/页脚/脚注：仅参与语言/术语/标点类检查（无独立页面几何，不做版面检查）
 - 豁免键基于「规则+页码+文本上下文」：文档内容改动后旧豁免可能失效（预期行为）
+
+### 4.4 性能基线（2026-10-29 实测）
+
+`scripts/benchmark.py` 合成文档（10/50/100 页）分段计时；数字为本机快照，
+用于回归对比而非绝对承诺：
+
+| 格式 | 转换(100页) | 审查(100页) | 合计(10/50/100页) |
+|------|-------------|-------------|-------------------|
+| DOCX | 0.62s | 0.09s | 0.10 / 0.37 / 0.71s |
+| PPTX | 1.39s | 0.15s | 0.16 / 0.74 / 1.54s |
+
+审查阶段为页级规则 + 文档级轻量统计，随页数近似线性；转换（PPTX EMU 解析 / DOCX XML）是主要耗时。
 
 ## 5. 历史演化摘要
 

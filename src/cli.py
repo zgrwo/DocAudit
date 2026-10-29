@@ -334,6 +334,11 @@ def main():
         help="豁免文件路径 (如 .docauditignore)；命中的 exemption_key 不计入报告与退出码",
     )
     audit_parser.add_argument(
+        "--sarif-base",
+        default=None,
+        help="SARIF artifact 路径基准目录（CI 传仓库根如 .，输出仓库相对路径供 Code Scanning 关联）",
+    )
+    audit_parser.add_argument(
         "--thumbnails",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -471,6 +476,13 @@ def main():
                 exempted_total += exempted
                 if exempted:
                     print(f"[EXEMPT] {exempted} finding(s) exempted by {args.exempt_file}")
+            # 批量时给 finding 标注来源文件 (2026-10-29)：
+            # 聚合 SARIF 的 artifact 归属依赖它；否则全部指向最后一个文件。
+            if len(files) > 1:
+                for _f in findings:
+                    if _f.metadata is None:
+                        _f.metadata = {}
+                    _f.metadata["source_file"] = str(file_path)
             total_findings.extend(findings)
             print_summary(findings)
 
@@ -596,7 +608,12 @@ def main():
     if args.output and Path(args.output).suffix == ".sarif" and last_doc is not None:
         sarif_path = Path(args.output)
         try:
-            generate_sarif_report(last_doc, total_findings, output_path=sarif_path)
+            generate_sarif_report(
+                last_doc,
+                total_findings,
+                output_path=sarif_path,
+                uri_base=args.sarif_base,
+            )
             if not sarif_path.exists():
                 raise OSError(f"报告导出失败，输出文件未生成: {sarif_path}")
             print(f"\n[EXPORT] SARIF report saved: {sarif_path}")

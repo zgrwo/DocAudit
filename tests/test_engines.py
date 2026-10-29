@@ -1,6 +1,9 @@
 """测试引擎层 — TerminologyChecker, Vocabulary, LanguageAuditor"""
 
+import pytest
+
 from src.auditors.language import LanguageAuditor
+from src.engines.languagetool import LanguageToolClient
 from src.engines.terminology import (
     TermGlossary,
     TerminologyChecker,
@@ -505,18 +508,72 @@ class TestLanguageToolSecurity:
             LanguageToolClient(base_url="http://evil.example.com/v2", auto_start=False)
 
     def test_localhost_base_urls_accepted(self):
-        """localhost / 127.0.0.1 / ::1 → 正常构造"""
+        """localhost / 127.0.0.1 / ::1 → 正常构造（localhost 归一为 127.0.0.1）"""
         from src.engines.languagetool import LanguageToolClient
 
         for url in ("http://localhost:8010/v2", "http://127.0.0.1:8010/v2", "http://[::1]:8010/v2"):
             client = LanguageToolClient(base_url=url, auto_start=False)
-            assert client.base_url == url.rstrip("/")
+            assert client.base_url == url.rstrip("/").replace("//localhost", "//127.0.0.1")
 
     def test_reset_restores_initial_base_url(self):
         """reset() 还原构造时的初始 base_url（Java 启动改端口后不残留）"""
         from src.engines.languagetool import LanguageToolClient
 
         client = LanguageToolClient(base_url="http://localhost:8010/v2", auto_start=False)
-        client.base_url = "http://localhost:8011/v2"  # 模拟 _try_java 改端口
+        client.base_url = "http://127.0.0.1:8011/v2"  # 模拟 _try_java 改端口
         client.reset()
-        assert client.base_url == "http://localhost:8010/v2"
+        assert client.base_url == "http://127.0.0.1:8010/v2"
+
+
+@pytest.fixture(autouse=True)
+def _clear_connect_cache():
+    LanguageToolClient._connect_cache.clear()
+    yield
+    LanguageToolClient._connect_cache.clear()
+
+
+class TestProbeCache:
+    def test_second_probe_uses_cache(self, monkeypatch):
+        calls = []
+
+        def fake_connect(url):
+            calls.append(url)
+            return False
+
+        monkeypatch.setattr(LanguageToolClient, "_try_connect", staticmethod(fake_connect))
+        first = LanguageToolClient(auto_start=False)
+        first.is_available  # Tier1 失败后回退 Python 拼写检查（不影响探活计数）
+        assert len(calls) == 1
+
+        second = LanguageToolClient(auto_start=False)
+        second.is_available
+        assert len(calls) == 1, "同 URL 在 TTL 内不应重复探活"
+
+    def test_reset_forces_reprobe(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            LanguageToolClient,
+            "_try_connect",
+            staticmethod(lambda url: calls.append(url) or False),
+        )
+        client = LanguageToolClient(auto_start=False)
+        client.is_available
+        client.reset()
+        client.is_available
+        assert len(calls) == 2, "reset() 后必须立即重新探活"
+
+    def test_localhost_normalized_to_ipv4(self):
+        client = LanguageToolClient(base_url="http://localhost:8010/v2", auto_start=False)
+        assert client.base_url == "http://127.0.0.1:8010/v2"
+
+    def test_cache_key_is_per_url(self, monkeypatch):
+        calls = []
+
+        def fake_connect(url):
+            calls.append(url)
+            return False
+
+        monkeypatch.setattr(LanguageToolClient, "_try_connect", staticmethod(fake_connect))
+        LanguageToolClient(base_url="http://127.0.0.1:8010/v2", auto_start=False).is_available
+        LanguageToolClient(base_url="http://127.0.0.1:8012/v2", auto_start=False).is_available
+        assert len(calls) == 2

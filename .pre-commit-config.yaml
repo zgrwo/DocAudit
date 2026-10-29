@@ -1,0 +1,36 @@
+# DocAudit pre-commit 配置 (2026-10-29)
+#
+# 安装（一次性）:
+#   pip install pre-commit
+#   pre-commit install            # 提交时：ruff + 配置校验 + 快测
+#   pre-commit run --all-files    # 手动全量检查
+#
+# 说明:
+# - ruff 版本与 pyproject/CI 一致 (0.16.3)，避免 format 漂移
+# - 快测用 -m "not slow"：跳过子进程/AppTest/真实 docling 等端到端用例
+# - 全量测试仍由 CI 执行（pytest tests/ -q），pre-commit 只做快速反馈
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: docaudit-rules-validate
+        name: docaudit rules validate (rules.md / glossary / vocab)
+        entry: python src/cli.py rules validate
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: docaudit-fast-tests
+        name: docaudit fast tests (pytest -m "not slow")
+        entry: python -m pytest tests/ -q -m "not slow"
+        language: system
+        pass_filenames: false
+        always_run: true
+        # 快测 ~40s：放 pre-push；commit 阶段只做 lint + 配置校验（毫秒级）
+        stages: [pre-push]

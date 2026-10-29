@@ -214,6 +214,10 @@ pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`Chec
 
 ### `LanguageToolClient` `src/engines/languagetool.py`
 
+> 本地探活：`localhost` 在构造时归一为 `127.0.0.1`（Windows IPv6 白等 ~2s）；
+> Tier-1 探活结果进程级缓存 30s（`_PROBE_TTL`），同一进程重复审查不再重复探测；
+> `reset()` 清除该 URL 的缓存并立即重探。
+
 | 方法 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `__init__` | `(base_url: str = DEFAULT_URL, timeout: int = 30, auto_start: bool = True)` | — | 初始化三层降级 |
@@ -419,7 +423,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_sarif_report` | `(doc: Document, findings: list[AuditFinding], output_path: str \| Path \| None = None)` | `str` | 生成 SARIF v2.1.0 文本（可对接 GitHub Code Scanning / VS Code SARIF Viewer）；severity → level: error/warning/note；`partialFingerprints` 用稳定 `exemption_key`；artifact 优先 `metadata["source_file"]` |
+| `generate_sarif_report` | `(doc: Document, findings: list[AuditFinding], output_path: str \| Path \| None = None, uri_base: str \| Path \| None = None)` | `str` | 生成 SARIF v2.1.0 文本（可对接 GitHub Code Scanning / VS Code SARIF Viewer）；severity → level: error/warning/note；`partialFingerprints` 用稳定 `exemption_key`；artifact 优先 `metadata["source_file"]`；`uri_base` 提供时输出仓库相对 URI（Code Scanning 关联文件所需），不在基准目录下回退 `file://` URI |
 
 > 排序 SSOT：`src/reporters/ordering.py` 的 `_sort_findings`（error → warning → info → 页码 → rule_id → message）被 HTML/CSV/SARIF 共用；`_group_by_source` 供 HTML 按文件分组。
 
@@ -456,7 +460,8 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 审计参数（`audit`）：`--fail-on {error,warning,info,none}` 控制退出码阈值（默认 `error`，
 与历史行为一致）；`--exempt-file PATH` 应用 `.docauditignore` 豁免基线；
-`-o` 支持 `.html` / `.json` / `.csv` / `.sarif`（批量时 SARIF 聚合为单文件）。
+`-o` 支持 `.html` / `.json` / `.csv` / `.sarif`（批量时 SARIF 聚合为单文件）；
+`--sarif-base PATH` 让 SARIF artifact 输出相对路径（Code Scanning 关联文件所需）。
 
 ---
 

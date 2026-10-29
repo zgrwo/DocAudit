@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.reporters.csv_reporter import generate_csv_report
@@ -185,6 +187,7 @@ class TestHtmlWorkflow:
         assert "&lt;script&gt;" in html
 
 
+@pytest.mark.slow  # 子进程 CLI 用例：pre-commit 快测跳过
 class TestCliReportExport:
     """CLI -o 契约：.csv / .sarif 导出（含批量聚合语义）。"""
 
@@ -223,6 +226,41 @@ class TestCliReportExport:
         # 批量 → 单个聚合 SARIF（不产生 _01/_02 分片）
         assert len(data["runs"]) == 1
         assert not list(tmp_path.glob("r_*.sarif"))
+
+    def test_batch_sarif_attributes_each_finding_to_its_file(self, tmp_path):
+        """回归 (2026-10-29): 聚合 SARIF 曾把所有 finding 归到最后一个文件。"""
+        for name in ("a.md", "b.md"):
+            self._write_md(tmp_path / name)
+        out = tmp_path / "r.sarif"
+        self._run_cli(str(tmp_path), "--rules", str(PROJECT_ROOT / "rules.md"), "-o", str(out))
+        data = json.loads(out.read_text(encoding="utf-8"))
+        uris = {
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in data["runs"][0]["results"]
+        }
+        assert len(uris) >= 2, f"批量 finding 应归属各自文件，实际 {uris}"
+
+    def test_batch_sarif_uri_base_relative(self, tmp_path):
+        """--sarif-base → 仓库相对 URI（Code Scanning 关联文件的前提）。"""
+        for name in ("a.md", "b.md"):
+            self._write_md(tmp_path / name)
+        out = tmp_path / "r.sarif"
+        self._run_cli(
+            str(tmp_path),
+            "--rules",
+            str(PROJECT_ROOT / "rules.md"),
+            "-o",
+            str(out),
+            "--sarif-base",
+            str(tmp_path),
+        )
+        data = json.loads(out.read_text(encoding="utf-8"))
+        uris = {
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            for r in data["runs"][0]["results"]
+        }
+        assert uris and all(not u.startswith("file://") for u in uris), uris
+        assert uris == {"a.md", "b.md"}
 
     def test_unsupported_suffix_exits_2(self, tmp_path):
         src = tmp_path / "a.md"
@@ -294,3 +332,23 @@ class TestExemptionKeyExport:
         ]
         html = generate_html_report(_doc(pages=pages), [_finding()])
         assert html.count('class="el-text_frame"') <= 3000
+
+    def test_uri_base_makes_paths_relative(self, tmp_path):
+        """2026-10-29: --sarif-base 输出仓库相对 URI（GitHub Code Scanning 需要）。"""
+        doc_path = tmp_path / "docs" / "a.pptx"
+        doc_path.parent.mkdir()
+        doc = _doc()
+        doc.source_path = str(doc_path)
+        result = json.loads(generate_sarif_report(doc, [_finding()], uri_base=tmp_path))["runs"][0][
+            "results"
+        ][0]
+        uri = result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert uri == "docs/a.pptx"
+
+    def test_uri_base_outside_falls_back_to_file_uri(self, tmp_path):
+        doc = _doc()  # source_path="deck.pptx" 相对路径解析到项目根，不在 tmp 下
+        doc.source_path = str(tmp_path.parent / "elsewhere" / "x.pptx")
+        uri = json.loads(generate_sarif_report(doc, [_finding()], uri_base=tmp_path))["runs"][0][
+            "results"
+        ][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert uri.startswith("file://")

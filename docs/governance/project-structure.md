@@ -97,6 +97,7 @@ DocAudit/
 ├── CHANGELOG.md                     # 变更日志 (keepachangelog)
 ├── CONTRIBUTING.md                  # 贡献指南 (含两步注册法)
 ├── .gitignore                       # Git 忽略规则
+├── .pre-commit-config.yaml          # 提交钩子：ruff + 配置校验（快测挂 pre-push）
 │
 ├── docs/                            # 📚 治理与规范文档中心 (SSOT)
 │   ├── README.md                    #   文档索引
@@ -135,6 +136,7 @@ DocAudit/
 │   ├── install.bat / install.sh / install.py   # 安装依赖
 │   ├── setup_offline.bat / .sh / .py           # 离线安装 (下载三步: 锁文件+构建依赖+自检)
 │   ├── gen_requirements_lock.py     #   从 packages/ 离线解析生成 requirements-*.txt
+│   ├── benchmark.py                 #   性能基线：合成 10/50/100 页文档分段计时
 │   └── packages/                    #   离线依赖缓存 (生成物，gitignore 排除)
 │
 ├── glossary/                        # 📖 半导体术语表 (YAML)
@@ -198,7 +200,7 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (553 用例)
+└── tests/                           # 🧪 测试 (585 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -220,6 +222,7 @@ DocAudit/
     ├── test_app_ui.py               #     app.py 过滤器/扫描器 + AppTest 冒烟
     ├── test_cli_exit_codes.py       #     CLI 退出码契约
     ├── test_cli_direct.py           #     CLI 直接单测 (audit_file/--fix 链路)
+    ├── test_cli_inprocess.py        #     CLI main() 进程内分支 (覆盖率)
     ├── test_autofix.py              #     AutoFixer 修复链路
     ├── test_converters.py           #     四格式转换器 (含 PDF 双后端/表格几何/辅助文本)
     ├── test_edge_cases.py           #     边界输入
@@ -281,7 +284,7 @@ DocAudit/
 | `html_reporter.py` | `generate_html_report()` | 独立 HTML 报告，所有用户文本 `html.escape()`；内联 SVG 线框缩略图（页/元素数上限）+ 批量按文件分组 + 按类型分布 |
 | `json_reporter.py` | `generate_json_report()` | 结构化 JSON，含 meta + summary + findings |
 | `csv_reporter.py` | `generate_csv_report()` | CSV（UTF-8 BOM + 防公式注入），Excel 友好 |
-| `sarif_reporter.py` | `generate_sarif_report()` | SARIF v2.1.0（GitHub Code Scanning / VS Code SARIF Viewer） |
+| `sarif_reporter.py` | `generate_sarif_report()` | SARIF v2.1.0（GitHub Code Scanning / VS Code SARIF Viewer）；`uri_base` 输出仓库相对路径 |
 
 ### UI / CLI
 

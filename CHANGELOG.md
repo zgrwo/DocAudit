@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Code Scanning / 工程化批次（2026-10-29 第四轮）**：
+  - **SARIF 对接 Code Scanning**：`generate_sarif_report()` 新增 `uri_base`；CLI `--sarif-base`
+    输出仓库相对 URI；修复**批量聚合 SARIF 把所有 finding 归到最后一个文件**的 artifact 归属 bug
+    （批量时给 finding 标注 `metadata["source_file"]`）；README/用户手册补 Code Scanning 工作流示例
+  - **pre-commit**：`.pre-commit-config.yaml`（commit: ruff + `rules validate`；pre-push: `pytest -m "not slow"` 快测 ~40s）；
+    pytest 注册 `slow` 标记（子进程/AppTest/真实 docling/LanguageTool 集成）
+  - **性能基线**：新增 `scripts/benchmark.py`（10/50/100 页 docx+pptx，分段计时/JSON，带预热）；
+    实测 100 页全流程 DOCX 0.71s / PPTX 1.54s，写入 README/specification 基线表
+  - **覆盖率补强**：新增 `tests/test_cli_inprocess.py`（18 个测试，进程内 main() 分支；subprocess 不计 coverage）
+  - **性能修复**：LanguageTool 探活 localhost→127.0.0.1（Windows IPv6 白等 ~2s）、探活超时 1s、
+    30s 进程级缓存（重复审查不再重探）、拼写词典类级共享；测试套件 4m16s → ~2m
+  - 覆盖率 82% → **87%**（cli.py 48%→86%，子进程不计 coverage 的缺口由进程内测试补上）；CI 门槛 75% → 82%
+  - 测试 553 → **585**（22 文件）
+
 - **增强迭代（2026-10-29 第三轮）** —— 实测驱动的易用性/正确性增强：
   - **DOCX 列表符号**：新增 `_DocxNumberingResolver`（`w:numPr` + `numbering.xml`，段落级与样式级回退），
     列表段落获得 `bullet_type`/`bullet_char`（Symbol/Wingdings 私有区字形归一为 `•`）；

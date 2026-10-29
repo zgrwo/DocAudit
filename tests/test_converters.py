@@ -997,6 +997,7 @@ class TestPptxConverterMemory:
         assert not hasattr(chart, "chart_data"), "chart_data 字段应已移除"
 
 
+@pytest.mark.slow  # 真实 docling 转换
 class TestPdfConverterDocling119:
     """P1-6: docling 2.119 页面结构适配 (pages 值为无内容的 PageItem 引用)"""
 
@@ -1502,6 +1503,7 @@ class TestLegacyFormats:
             PptxConverter().convert(str(path))
 
 
+@pytest.mark.slow  # 真实 docling 转换
 class TestPdfConverterAsciiPath:
     """P0-1: 非 ASCII 安装路径检测 (docling C++ 层 Windows ANSI fopen 限制)"""
 

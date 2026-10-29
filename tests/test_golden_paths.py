@@ -26,6 +26,8 @@ from src.engines.pipeline import build_auditors, find_converter, run_auditors
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
+pytestmark = pytest.mark.slow  # 端到端/子进程用例：pre-commit 快测跳过
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_PPTX = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
 
