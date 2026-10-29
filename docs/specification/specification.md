@@ -29,9 +29,9 @@
 | 维度 | Auditor | 检查内容 |
 |------|---------|----------|
 | 结构审查 | StructureAuditor | 标题页检测、标题层级递进、图表编号连续、必含章节、重复标题、每页结论 |
-| 格式审查 | FormatAuditor | 字体一致性 (Run 级)、字号范围、单页文本密度、段落长度、元素溢出、空占位符、项目符号、表格对比度 |
+| 格式审查 | FormatAuditor | 字体一致性 (Run 级)、字号范围、单页文本密度、段落长度、元素溢出、空占位符、项目符号（PPTX XML + DOCX 编号定义）、表格对比度、表格行列 fit |
 | 事实审查 | FactualAuditor | 数值跨页一致性、缩写定义管理、重复定义检测 |
-| 语言审查 | LanguageAuditor | 语法拼写（LanguageTool）、中英混排、术语一致性、禁用词汇 |
+| 语言审查 | LanguageAuditor | 语法拼写（LanguageTool）、中英混排、术语一致性、禁用词汇、标点/日期/单位/范围一致性、重复句与近似重复页、DOCX 页眉页脚脚注 |
 | 自定义规则 | CustomRulesAuditor | rules.md 配置的 26 条规则（委托模式路由，不包含检查逻辑） |
 | 内置检查 | LanguageAuditor / FormatAuditor / StructureAuditor 等 | FMT-MIXED / PUNCT-001~010 / TXT-REDUNDANT / TXT-BULLET-PUNCT / TXT-DUP-SENTENCE / TXT-NEAR-DUP / FMT-ALIGN / FMT-OVERLAP / FMT-SAFE-MARGIN / FMT-TEXT-OVERFLOW / FMT-TABLE-FIT / FMT-FOOTER / FMT-IMAGE / FMT-CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
 
@@ -147,7 +147,8 @@ Config 层 (横切：rules.md, glossary/, vocab/)
 | test_language_auditor.py | 语言审计器细节（标点/一致性/重复检测/辅助文本） |
 | test_scripts.py | scripts/ 工具（common + setup_offline + 锁文件解析） |
 | test_contrast.py | FMT-008 WCAG 对比度算法 + 表格检查 |
-| test_cli_exit_codes.py | CLI 退出码契约（处理失败 → exit 1） |
+| test_cli_exit_codes.py | CLI 退出码契约（处理失败 → exit 1；`--fail-on` 阈值） |
+| test_cli_direct.py | CLI 直接单测（audit_file / print_summary / --fix 链路 / doctor） |
 | test_golden_paths.py | 黄金测试真实三路径（CLI/WebUI/Python API） |
 | test_rule_coverage.py | 规则断言覆盖测试（STR/CON/FMT 定向补盲） |
 | test_html_report_security.py | HTML 转义红线安全测试 |

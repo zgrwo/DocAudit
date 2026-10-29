@@ -137,3 +137,11 @@ class TestCliExemptFile:
         n_plain = len(json.loads(plain.read_text(encoding="utf-8"))["findings"])
         n_exempted = len(json.loads(exempted.read_text(encoding="utf-8"))["findings"])
         assert n_exempted == n_plain - 1
+
+    def test_atomic_write_leaves_no_tmp_file(self, tmp_path):
+        """原子写: 保存后无 .tmp 残留，且文件内容可读。"""
+        path = tmp_path / ".docauditignore"
+        save_exemptions(path, {"abc"}, [_finding()])
+        assert path.exists()
+        assert not (tmp_path / ".docauditignore.tmp").exists()
+        assert load_exemptions(path) == {"abc"}

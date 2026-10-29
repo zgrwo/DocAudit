@@ -27,6 +27,18 @@ from src.reporters.sarif_reporter import generate_sarif_report
 
 REPORT_SUFFIXES = (".html", ".json", ".sarif", ".csv")
 
+# 严重度排序 (--fail-on 阈值判定用)
+_SEVERITY_RANK = {"error": 3, "warning": 2, "info": 1}
+
+
+def _findings_exit_code(findings: list[AuditFinding], fail_on: str = "error") -> int:
+    """按 --fail-on 阈值决定退出码：none → 0；否则任一 finding 达到阈值 → 1。"""
+    if fail_on == "none":
+        return 0
+    min_rank = _SEVERITY_RANK.get(fail_on, 3)
+    return 1 if any(_SEVERITY_RANK.get(f.severity.value, 0) >= min_rank for f in findings) else 0
+
+
 logging.basicConfig(
     level=logging.WARNING,
     format="%(levelname)s [%(name)s] %(message)s",
@@ -234,6 +246,28 @@ def doctor_check() -> int:
             optional=True,
         )
 
+    # 7. Configuration validation (rules/glossary/vocab, 2026-10-29)
+    if rules_path.exists():
+        try:
+            from src.engines.validation import validate_configuration
+
+            vocab_path = Path("vocab")
+            result = validate_configuration(
+                rules_path,
+                glossary_path if glossary_path.is_dir() else None,
+                vocab_path if vocab_path.is_dir() else None,
+            )
+            detail = (
+                f"{len(result.warnings)} warning(s)"
+                if result.ok
+                else f"{len(result.errors)} error(s)"
+            )
+            _check("Configuration validation", result.ok, detail)
+            for err in result.errors[:3]:
+                print(f"       - {err}")
+        except Exception as e:
+            _check("Configuration validation", False, str(e)[:80])
+
     # Summary
     print(f"\n{'=' * 40}")
     print(
@@ -253,6 +287,7 @@ def main():
   docaudit report.pptx -o report.html     导出 HTML 报告
   docaudit docs/ --rules my-rules.md      批量审查目录，使用自定义规则
   docaudit report.pptx --fix              审查并自动修复格式问题
+  docaudit report.pptx --fail-on none     从不因问题失败（仅处理失败时 exit 1）
   docaudit doctor                         环境诊断
   docaudit rules validate                 校验 rules.md / glossary / vocab 配置
         """,
@@ -262,13 +297,15 @@ def main():
     # doctor subcommand
     subparsers.add_parser("doctor", help="环境诊断：检查运行环境健康状态")
 
-    # rules subcommand (配置校验)
+    # rules subcommand (配置工具)
     rules_parser = subparsers.add_parser("rules", help="规则配置工具")
     rules_sub = rules_parser.add_subparsers(dest="rules_command")
     validate_parser = rules_sub.add_parser("validate", help="静态校验配置（退出码 1 = 有错误）")
     validate_parser.add_argument("--rules", default="rules.md", help="规则文件 (默认: rules.md)")
     validate_parser.add_argument("--glossary", default="glossary", help="术语表目录")
     validate_parser.add_argument("--vocab", default="vocab", help="词汇表目录")
+    list_parser = rules_sub.add_parser("list", help="列出 rules.md 中的规则")
+    list_parser.add_argument("--rules", default="rules.md", help="规则文件 (默认: rules.md)")
 
     # audit (default) arguments
     audit_parser = subparsers.add_parser("audit", help="审查文档")
@@ -285,6 +322,12 @@ def main():
         help="按格式过滤 (批量模式)",
     )
     audit_parser.add_argument("--fix", action="store_true", help="自动修复简单格式问题")
+    audit_parser.add_argument(
+        "--fail-on",
+        choices=["error", "warning", "info", "none"],
+        default="error",
+        help="达到该严重度即退出码 1（默认 error；none 表示从不因问题失败，仅处理失败时 1）",
+    )
     audit_parser.add_argument(
         "--exempt-file",
         default=None,
@@ -330,9 +373,24 @@ def main():
         sys.exit(doctor_check())
 
     if args.command == "rules":
-        if getattr(args, "rules_command", None) != "validate":
+        rules_command = getattr(args, "rules_command", None)
+        if rules_command == "list":
+            from src.engines.rule_parser import parse_rules_md
+
+            rules = parse_rules_md(args.rules)
+            if not rules:
+                print(f"[ERROR] 未解析到规则: {args.rules}")
+                sys.exit(1)
+            print(f"[RULES] 共 {len(rules)} 条 · {args.rules}")
+            print(f"{'规则ID':<12} {'严重度':<8} {'检查/模式':<32} 说明")
+            print("-" * 96)
+            for rule in rules:
+                kind = rule.check_type or "（内置参数）"
+                print(f"{rule.rule_id:<12} {rule.severity:<8} {kind:<32} {rule.description[:40]}")
+            sys.exit(0)
+        if rules_command != "validate":
             rules_parser.print_help()
-            print("\n[ERROR] 需要子命令: docaudit rules validate")
+            print("\n[ERROR] 需要子命令: docaudit rules validate | list")
             sys.exit(2)
         from src.engines.validation import validate_configuration
 
@@ -554,21 +612,22 @@ def main():
     if exempted_total:
         print(f"[EXEMPT] 共豁免 {exempted_total} 条 finding（来源: {args.exempt_file}）")
 
-    # ── Exit code 按严重度 (inspired by markdownlint) ──
+    # ── Exit code 按严重度阈值 (默认 error，与历史行为一致；2026-10-29 增加 --fail-on) ──
     # 处理失败的文件优先置 1 (README: 处理失败 → 退出码 1)
     if failed_files:
         print(f"\n[EXIT] {failed_files} file(s) failed to process → exit 1")
         sys.exit(1)
+    threshold = getattr(args, "fail_on", "error")
     errors = [f for f in total_findings if f.severity == FindingSeverity.ERROR]
     warnings = [f for f in total_findings if f.severity == FindingSeverity.WARNING]
-    if errors:
-        print(f"\n[EXIT] {len(errors)} error(s) found → exit 1")
-        sys.exit(1)
-    elif warnings:
-        print(f"\n[EXIT] {len(warnings)} warning(s), no errors → exit 0")
-        sys.exit(0)
-    else:
-        sys.exit(0)
+    infos = [f for f in total_findings if f.severity == FindingSeverity.INFO]
+    summary = f"{len(errors)} error(s), {len(warnings)} warning(s), {len(infos)} info"
+    code = _findings_exit_code(total_findings, threshold)
+    reached = code == 1
+    print(
+        f"\n[EXIT] {summary}; {'达到' if reached else '未达到'} --fail-on {threshold} → exit {code}"
+    )
+    sys.exit(code)
 
 
 if __name__ == "__main__":

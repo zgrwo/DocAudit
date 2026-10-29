@@ -29,13 +29,16 @@ jobs:
 
       - name: Run tests with coverage
         # M14: 合并重复运行 (删除冗余 -v 步骤，-q 已够定位失败)
-        # 覆盖率门槛: src/ 基线 84% (2026-08-19 实测，TOTAL 3263 语句)，
-        # 新测试持续提高；cli.py 54% — 由 test_cli_direct.py 直接单测 + subprocess 测试共同覆盖
-        run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=70
+        # 覆盖率门槛: 2026-10-29 实测 TOTAL 82% (5069 语句)，取 75% 留环境差异余量；
+        # cli.py 48% — 由 test_cli_direct.py / test_cli_exit_codes.py subprocess 测试共同覆盖
+        run: pytest tests/ -q --cov=src --cov-report=term --cov-fail-under=75
 
       - name: Validate DISPATCH integrity
         run: |
           python -c "from src.auditors.custom_rules import CustomRulesAuditor; errors = CustomRulesAuditor.validate_dispatch(); print(errors); assert errors == [], f'DISPATCH validation failed: {errors}'"
+
+      - name: Validate configuration (rules/glossary/vocab)
+        run: python src/cli.py rules validate
 
       - name: Verify rules.md parsing
         run: |

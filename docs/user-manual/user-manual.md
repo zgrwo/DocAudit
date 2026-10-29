@@ -32,8 +32,8 @@
 4. 点击 **🔍 开始审查**
 5. 等待 5-10 秒（30 页约 5 秒）
 6. 查看结果：
-   - 顶部显示 **错误/警告/信息** 计数卡片
-   - 下方按严重度 + 类型列出所有发现
+   - 顶部显示 **错误/警告/信息** 计数卡片与 **按类型分布**（结构/格式/语言/术语…）
+   - 下方按严重度 + 类型列出所有发现（超过 100 条时分页显示，每页 100 条）
 7. 点击每条发现展开查看：问题描述、位置、原文摘录、修改建议
 
 ### 使用 CLI
@@ -302,6 +302,7 @@ python src/cli.py <path> [选项]
 | `--format` | choice | `all` | 按格式过滤: `pptx` / `docx` / `pdf` / `md` / `all` |
 | `--thumbnails` / `--no-thumbnails` | flag | 开启 | HTML 报告是否内嵌页面 SVG 线框缩略图 |
 | `--exempt-file` | `str` | `None` | 豁免文件路径（如 `.docauditignore`），命中项不计入报告与退出码 |
+| `--fail-on` | choice | `error` | 达到该严重度即退出码 1: `error` / `warning` / `info` / `none` |
 | `--fix` | flag | `False` | 自动修复格式问题 |
 | `--fix-type` | choice | `all` | 修复类型: `all` / `font` / `spacing` / `overflow` / `title_punct` / `bullet` |
 
@@ -309,12 +310,29 @@ python src/cli.py <path> [选项]
 
 | 退出码 | 含义 |
 |--------|------|
-| 0 | 无 Error 级问题（可能有 Warning/Info） |
-| 1 | 存在 Error 级问题 |
+| 0 | 未达到 `--fail-on` 阈值（默认：无 Error；可能有 Warning/Info） |
+| 1 | 达到 `--fail-on` 阈值（默认存在 Error），或文件处理/报告导出失败 |
+| 2 | 用法错误（不支持的输出后缀、不支持的子命令等） |
+
+> CI 门禁建议：`--fail-on warning` 阻断警告及以上；历史项目过渡期可用 `--fail-on error`；
+> 仅生成报告不判失败用 `--fail-on none`。
+
+```bash
+# CI 示例：警告及以上即失败，并输出 SARIF 供 Code Scanning
+python src/cli.py docs/ --rules rules.md --fail-on warning -o audit.sarif
+```
 
 ---
 
 ## rules.md 写作指南
+
+> 改完 rules.md / 术语表 / 词汇表后，先跑配置校验再审查：
+>
+> ```bash
+> python src/cli.py rules list              # 列出解析到的规则（ID/严重度/检查/说明）
+> python src/cli.py rules validate          # exit 1 = 配置有错误（ID/严重度/正则/范围/重复项）
+> python src/cli.py doctor                  # 环境 + 依赖 + rules.md 解析 + 配置校验总览
+> ```
 
 ### 规则块格式
 

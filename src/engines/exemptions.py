@@ -25,6 +25,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -83,13 +84,20 @@ def save_exemptions(
         "exemptions": entries,
     }
     p = Path(path)
+    # 原子写 (2026-10-29): 先写临时文件再 os.replace，避免中断时留下半截 JSON
+    tmp = p.with_name(p.name + ".tmp")
     try:
-        p.write_text(
+        tmp.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        os.replace(tmp, p)
     except OSError as e:
         logger.warning("豁免文件写入失败: %s — %s", p, e)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass  # bare-handler-ok — 清理临时文件失败不影响主流程
 
 
 def apply_exemptions(

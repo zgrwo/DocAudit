@@ -183,6 +183,17 @@ def scan_folder(folder_path: str) -> list[Path]:
     return files
 
 
+def _paginate(items: list, page: int, page_size: int = 100) -> tuple[list, int, int]:
+    """分页切片 — 返回 (当前页条目, 收敛后的页码(1-based), 总页数)。
+
+    把页码收敛进有效范围 (上传新文件/豁免后条目变少时不越界)。
+    """
+    total_pages = max(1, (len(items) + page_size - 1) // page_size)
+    current = min(max(1, page), total_pages)
+    start = (current - 1) * page_size
+    return items[start : start + page_size], current, total_pages
+
+
 def _reset_batch_state() -> None:
     """重置审查状态和过滤器（新文件上传时调用）。"""
     st.session_state.findings = []
@@ -190,6 +201,7 @@ def _reset_batch_state() -> None:
     st.session_state.audit_completed = False
     st.session_state.audit_progress = {}
     st.session_state.exempted_finding_ids = set()
+    st.session_state.findings_page = 1  # 新文件从第 1 页开始
     st.session_state.batch_docs = []
     st.session_state.batch_findings = {}
     # 清除过滤器状态，避免旧规则/页面排除被应用到新文件
@@ -311,6 +323,7 @@ def _run_batch_audit(files: list) -> None:
             new_metadata["source_file"] = fkey
             combined.append(_dc_replace(fd, location=new_location, metadata=new_metadata))
     st.session_state.findings = combined
+    st.session_state.findings_page = 1  # 批量审查结果从第 1 页开始
     st.session_state.doc = docs[0] if docs else None
     # 批量审查完成标记: docs 为空 (全部失败) 时不进入结果页, 由调用方提示错误。
     st.session_state.audit_completed = bool(docs)
@@ -675,6 +688,7 @@ if (
         st.session_state.findings = run_audit(st.session_state.doc)
     st.session_state.audit_completed = True
     st.session_state.audit_run = False
+    st.session_state.findings_page = 1  # 新审查结果从第 1 页开始
     st.rerun()
 
 # ── 显示结果 ──
@@ -838,7 +852,39 @@ if st.session_state.doc and st.session_state.get("audit_completed"):
         sev_order = {FindingSeverity.ERROR: 0, FindingSeverity.WARNING: 1, FindingSeverity.INFO: 2}
         sorted_findings = sorted(filtered, key=lambda f: sev_order.get(f.severity, 3))
 
-        for _idx, finding in enumerate(sorted_findings, 1):
+        # 分页渲染 (2026-10-29): 数百条 finding 时一次渲染全部 expander 会显著拖慢页面
+        page_size = 100
+        visible_page, current_page, total_pages = _paginate(
+            sorted_findings, st.session_state.get("findings_page", 1), page_size
+        )
+        start = (current_page - 1) * page_size
+        if total_pages > 1:
+            pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+            with pcol1:
+                if st.button(
+                    "⬅️ 上一页",
+                    disabled=current_page <= 1,
+                    key="findings_prev_page",
+                    use_container_width=True,
+                ):
+                    st.session_state.findings_page = current_page - 1
+                    st.rerun()
+            with pcol2:
+                st.caption(
+                    f"第 {current_page}/{total_pages} 页 · 每页 {page_size} 条 · "
+                    f"共 {len(sorted_findings)} 条"
+                )
+            with pcol3:
+                if st.button(
+                    "下一页 ➡️",
+                    disabled=current_page >= total_pages,
+                    key="findings_next_page",
+                    use_container_width=True,
+                ):
+                    st.session_state.findings_page = current_page + 1
+                    st.rerun()
+
+        for _idx, finding in enumerate(visible_page, start + 1):
             sev_icon = {"error": "🔴", "warning": "🟡", "info": "🔵"}.get(
                 finding.severity.value, "⚪"
             )

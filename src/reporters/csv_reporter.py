@@ -24,6 +24,7 @@ CSV_FIELDS = [
     "context",
     "suggestion",
     "source_file",
+    "exemption_key",
 ]
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -62,6 +63,7 @@ def generate_csv_report(
                 _csv_safe(f.context),
                 _csv_safe(f.suggestion),
                 _csv_safe((f.metadata or {}).get("source_file")),
+                _csv_safe(f.exemption_key),
             ]
         )
     text = buffer.getvalue()

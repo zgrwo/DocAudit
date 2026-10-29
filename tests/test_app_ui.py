@@ -403,3 +403,34 @@ def test_convert_file_overwrites_source_path_with_upload_name(tmp_path):
     doc = app.convert_file(_Upload())
     assert doc is not None
     assert doc.source_path == "原始报告.pptx"
+
+
+class TestPaginate:
+    """2026-10-29: 发现列表分页（大结果集渲染保护）。"""
+
+    def test_first_page(self):
+        items = list(range(250))
+        page_items, current, total = app._paginate(items, 1, 100)
+        assert current == 1 and total == 3
+        assert page_items == items[:100]
+
+    def test_middle_and_last_page(self):
+        items = list(range(250))
+        page_items, current, total = app._paginate(items, 3, 100)
+        assert current == 3 and total == 3
+        assert page_items == items[200:250]
+
+    def test_page_clamped_to_range(self):
+        items = list(range(10))
+        page_items, current, total = app._paginate(items, 99, 100)
+        assert current == 1 and total == 1
+        assert page_items == items
+
+    def test_empty_items(self):
+        page_items, current, total = app._paginate([], 5, 100)
+        assert page_items == [] and current == 1 and total == 1
+
+    def test_exact_multiple_pages(self):
+        items = list(range(200))
+        _, current, total = app._paginate(items, 2, 100)
+        assert current == 2 and total == 2

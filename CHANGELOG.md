@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **增强迭代（2026-10-29 第三轮）** —— 实测驱动的易用性/正确性增强：
+  - **DOCX 列表符号**：新增 `_DocxNumberingResolver`（`w:numPr` + `numbering.xml`，段落级与样式级回退），
+    列表段落获得 `bullet_type`/`bullet_char`（Symbol/Wingdings 私有区字形归一为 `•`）；
+    修复 DOCX 列表对 `FMT-007`（项目符号混用）与 `TXT-BULLET-PUNCT`（末尾标点不一致）完全失明的问题
+  - **豁免基线工作流**：`AuditFinding.to_dict()` 与 CSV 报告输出稳定 `exemption_key`
+    （CSV 末列），CLI/表格用户可直接据此构造 `.docauditignore`
+  - **CLI `--fail-on`**：`error`（默认，保持历史行为）/ `warning` / `info` / `none`，
+    便于 CI 按团队标准设阈值；新增可单测的 `_findings_exit_code()`
+  - **HTML 报告**：摘要增加「按类型分布」（结构/格式/语言/术语…）；缩略图增加单页 200 /
+    总计 3000 元素上限，避免超大文档报告膨胀
+  - **Web UI**：发现列表分页（每页 100 条，上一页/下一页），数百条 finding 不再一次渲染全部卡片；
+    新审查/批量审查/新文件时自动回到第 1 页
+  - **doctor**：新增「Configuration validation」检查（rules/glossary/vocab schema），
+    配置错误在环境诊断中直接暴露
+  - **`rules list`**：`docaudit rules list` 打印解析到的规则表（ID/严重度/检查/说明）；
+    `.docauditignore` 改为原子写（临时文件 + `os.replace`），中断不再留下半截 JSON
+  - **CI**：新增 `docaudit rules validate` 步骤；覆盖率门槛 70% → 75%（实测 82%）
+  - 测试 529 → **553**（新增 DOCX 编号、fail-on、exemption_key、HTML 统计/上限、分页、rules list 用例）
+
 - **第二批收尾（2026-10-29）** —— 完成 handoff §5 全部建议项：
   - **表格 fit**：新增内置检查 `FMT-TABLE-FIT`（行高不足 / 长词超列宽 / 表格估算越界）；
     `TableCell` 增加单元格边距，`PageElement` 增加 `table_row_heights` / `table_col_widths`，

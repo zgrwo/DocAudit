@@ -128,6 +128,105 @@ class _DocxStyleResolver:
         return latin, east_asia, size, explicit_size is None and size is not None
 
 
+class _DocxNumberingResolver:
+    """解析 DOCX 项目符号/编号 (w:numPr + numbering.xml) — 2026-10-29。
+
+    列表段落的符号不存在于文本里：Word 用 numPr(numId, ilvl) 引用 numbering.xml
+    的抽象编号定义。不解析时 DOCX 的 FMT-007（符号样式一致性）、
+    TXT-BULLET-PUNCT（末尾标点）对列表完全失明。
+
+    解析顺序：段落 numPr → 段落样式 numPr（python-docx 的 List Bullet/Number
+    样式把 numPr 写在样式定义里）。
+    """
+
+    # Symbol/Wingdings 私有使用区码位 → 统一为通用圆点（审计器按类型而非字形判定）
+    _PRIVATE_USE_BULLET = "•"
+
+    def __init__(self, doc):
+        self._levels: dict[tuple[str, str], str] = {}
+        self._chars: dict[tuple[str, str], str | None] = {}
+        try:
+            self._parse_numbering(doc)
+        except Exception as e:
+            logger.debug("DOCX numbering 解析失败，列表符号降级为空: %s", e)
+
+    def _parse_numbering(self, doc) -> None:
+        try:
+            numbering = doc.part.numbering_part.element
+        except Exception:
+            return  # 无 numbering 部件（无列表文档）
+        namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        abstract = {
+            a.get(f"{{{namespaces['w']}}}abstractNumId"): a
+            for a in numbering.findall("w:abstractNum", namespaces)
+        }
+        for num in numbering.findall("w:num", namespaces):
+            num_id = num.get(f"{{{namespaces['w']}}}numId")
+            abs_ref = num.find("w:abstractNumId", namespaces)
+            abs_id = abs_ref.get(f"{{{namespaces['w']}}}val") if abs_ref is not None else None
+            absnum = abstract.get(abs_id)
+            if num_id is None or absnum is None:
+                continue
+            for lvl in absnum.findall("w:lvl", namespaces):
+                ilvl = lvl.get(f"{{{namespaces['w']}}}ilvl", "0")
+                fmt = lvl.find("w:numFmt", namespaces)
+                text_el = lvl.find("w:lvlText", namespaces)
+                fmt_val = fmt.get(f"{{{namespaces['w']}}}val") if fmt is not None else None
+                raw_text = text_el.get(f"{{{namespaces['w']}}}val") if text_el is not None else None
+                key = (str(num_id), str(ilvl))
+                if fmt_val == "bullet":
+                    self._levels[key] = "char"
+                    self._chars[key] = self._normalize_bullet_char(raw_text)
+                elif fmt_val == "none":
+                    self._levels[key] = "none"
+                elif fmt_val:
+                    self._levels[key] = "number"
+
+    @classmethod
+    def _normalize_bullet_char(cls, raw: str | None) -> str | None:
+        if not raw:
+            return None
+        ch = raw[0]
+        if 0xF000 <= ord(ch) <= 0xF0FF:  # Symbol/Wingdings 私有区
+            return cls._PRIVATE_USE_BULLET
+        return ch
+
+    @staticmethod
+    def _paragraph_num_pr(para):
+        """取段落 numPr；段落级缺失时回退到样式级。"""
+        num_pr = None
+        try:
+            pPr = para._element.pPr
+            if pPr is not None:
+                num_pr = pPr.numPr
+        except Exception:
+            num_pr = None
+        if num_pr is not None:
+            return num_pr
+        try:
+            style_pPr = para.style._element.pPr
+            if style_pPr is not None:
+                return style_pPr.numPr
+        except Exception:
+            return None
+        return None
+
+    def resolve(self, para) -> tuple[str | None, str | None]:
+        """返回 (bullet_type, bullet_char)；非列表段落返回 (None, None)。"""
+        num_pr = self._paragraph_num_pr(para)
+        if num_pr is None:
+            return (None, None)
+        try:
+            num_id = num_pr.numId.val if num_pr.numId is not None else None
+            ilvl = num_pr.ilvl.val if num_pr.ilvl is not None else 0
+        except Exception:
+            return (None, None)
+        if num_id is None:
+            return (None, None)
+        key = (str(num_id), str(ilvl))
+        return self._levels.get(key), self._chars.get(key)
+
+
 class DocxConverter(BaseConverter):
     """将 DOCX 文件转换为统一 Document 模型。
 
@@ -165,6 +264,7 @@ class DocxConverter(BaseConverter):
         para_map = {p._element: p for p in doc.paragraphs}
         table_map = {t._element: t for t in doc.tables}
         style_resolver = _DocxStyleResolver(doc)
+        numbering_resolver = _DocxNumberingResolver(doc)
 
         # --- 遍历文档主体（保留段落和表格的交错顺序） ---
         elements: list[PageElement] = []
@@ -175,7 +275,7 @@ class DocxConverter(BaseConverter):
             if tag == "p":
                 para = para_map.get(child)
                 if para is not None:
-                    elem = self._convert_paragraph(para, style_resolver)
+                    elem = self._convert_paragraph(para, style_resolver, numbering_resolver)
                     if elem is not None:
                         elements.append(elem)
 
@@ -198,7 +298,9 @@ class DocxConverter(BaseConverter):
                             if item_tag == "p":
                                 para = para_map.get(item)
                                 if para is not None:
-                                    elem = self._convert_paragraph(para, style_resolver)
+                                    elem = self._convert_paragraph(
+                                        para, style_resolver, numbering_resolver
+                                    )
                                     if elem is not None:
                                         elements.append(elem)
                             elif item_tag == "tbl":
@@ -335,7 +437,10 @@ class DocxConverter(BaseConverter):
             return DocumentMetadata(word_count=word_count)
 
     def _convert_paragraph(
-        self, para, style_resolver: _DocxStyleResolver | None = None
+        self,
+        para,
+        style_resolver: _DocxStyleResolver | None = None,
+        numbering_resolver: _DocxNumberingResolver | None = None,
     ) -> PageElement | None:
         """转换单个段落"""
         runs: list[Run] = []
@@ -442,6 +547,15 @@ class DocxConverter(BaseConverter):
                 if m:
                     level = int(m.group(1)) - 1
 
+        # 项目符号/编号: 段落 numPr → 样式 numPr → numbering.xml (2026-10-29)
+        bullet_type = None
+        bullet_char = None
+        if numbering_resolver is not None:
+            try:
+                bullet_type, bullet_char = numbering_resolver.resolve(para)
+            except Exception:
+                bullet_type, bullet_char = None, None  # bare-handler-ok — 单段符号降级
+
         return PageElement(
             type="text_frame",
             paragraphs=[
@@ -449,6 +563,8 @@ class DocxConverter(BaseConverter):
                     text=full_text,
                     runs=runs,
                     level=level,
+                    bullet_type=bullet_type,
+                    bullet_char=bullet_char,
                     alignment=ALIGNMENT_MAP.get(para.alignment),
                     space_before=(
                         para.paragraph_format.space_before.pt

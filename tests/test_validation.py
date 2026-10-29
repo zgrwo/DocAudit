@@ -233,3 +233,14 @@ class TestRulesValidateCli:
     def test_missing_subcommand_exits_2(self):
         result = self._run_cli("rules")
         assert result.returncode == 2
+
+    def test_rules_list_prints_rules(self):
+        result = self._run_cli("rules", "list")
+        assert result.returncode == 0, result.stdout[-400:]
+        assert "[RULES] 共 26 条" in result.stdout
+        assert "STR-001" in result.stdout and "FMT-008" in result.stdout
+
+    def test_rules_list_missing_file_exits_1(self, tmp_path):
+        result = self._run_cli("rules", "list", "--rules", str(tmp_path / "nope.md"))
+        assert result.returncode == 1
+        assert "未解析到规则" in result.stdout

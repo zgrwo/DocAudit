@@ -219,13 +219,16 @@ python src/cli.py report.pptx --fix --fix-type font
 # 校验规则/术语表/词汇表配置（CI 可用，错误时 exit 1）
 python src/cli.py rules validate
 
-# 使用豁免基线（命中项不计入报告与退出码）
+# 用豁免基线（命中项不计入报告与退出码）
 python src/cli.py report.pptx --exempt-file .docauditignore
+
+# CI 门禁：警告及以上即失败（可选 error/info/none）
+python src/cli.py docs/ --fail-on warning -o audit.sarif
 ```
 
 > 完整参数 &#8594; [用户手册](docs/user-manual/user-manual.md)
 >
-> **退出码**（markdownlint 风格，便于 CI 集成）：发现 ERROR 级问题 → `1`；仅有 warning/info → `0`；任一文件处理失败（解析/转换异常，优先于严重度判断）→ `1`；路径不存在或目录中无支持文件 → `1`。
+> **退出码**（默认 `--fail-on error`，markdownlint 风格，便于 CI 集成）：达到 `--fail-on` 阈值（默认 ERROR）→ `1`；仅低于阈值 → `0`；任一文件处理失败（解析/转换异常，优先于严重度判断）→ `1`；路径不存在或目录中无支持文件 → `1`；用法错误（不支持的输出后缀/子命令）→ `2`。
 
 ### Python API
 
@@ -288,7 +291,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **529 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
+- **553 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）

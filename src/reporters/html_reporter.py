@@ -12,8 +12,10 @@ from src.reporters.ordering import _group_by_source, _sort_findings
 
 logger = logging.getLogger(__name__)
 
-# 缩略图最多渲染页数 (防止超大文档报告膨胀)
+# 缩略图上限 (防止超大文档报告膨胀)
 _MAX_THUMBNAIL_PAGES = 80
+_MAX_RECTS_PER_PAGE = 200
+_MAX_RECTS_TOTAL = 3000
 _THUMBNAIL_TYPES = ("text_frame", "table", "image", "chart")
 
 
@@ -57,6 +59,24 @@ def generate_html_report(
 
     # P6: page_count 覆盖总页数 (批量模式传聚合页数)，None 时保持现状取 len(doc.pages)
     total_pages = len(doc.pages) if page_count is None else page_count
+
+    # 按类型分布（2026-10-29）: 让用户一眼看出问题集中在结构/格式/语言/术语
+    _type_labels = {
+        "structure": "结构",
+        "format": "格式",
+        "language": "语言",
+        "terminology": "术语",
+        "factual": "事实",
+        "custom": "自定义",
+        "system": "系统",
+    }
+    type_stats = " · ".join(
+        f"{_type_labels.get(name, name)} {count}"
+        for name, count in sorted(type_counts.items(), key=lambda kv: -kv[1])
+    )
+    type_stats_html = (
+        f'<p class="type-stats">按类型: {escape(type_stats)}</p>' if type_stats else ""
+    )
 
     thumbnails_section = (
         f"""
@@ -106,6 +126,7 @@ def generate_html_report(
     .rule-id {{ font-size: 11px; color: #aaa; }}
     .file-group {{ margin: 24px 0 12px; font-size: 16px; }}
     .file-group .count {{ font-weight: normal; color: #888; font-size: 13px; }}
+    .type-stats {{ color: #666; font-size: 13px; margin: -12px 0 24px; }}
     .thumbs {{ display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }}
     .thumb {{ margin: 0; }}
     .thumb svg {{ width: 170px; height: auto; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }}
@@ -144,6 +165,7 @@ def generate_html_report(
             <div class="label">📋 总计</div>
         </div>
     </div>
+{type_stats_html}
 {thumbnails_section}
     <h2 style="margin-bottom:16px">审查发现</h2>
     {findings_html if findings_html else '<p style="color:#888">🎉 未发现任何问题！</p>'}
@@ -214,7 +236,8 @@ def _render_finding(f: AuditFinding) -> str:
 def _render_thumbnails(doc: Document) -> str:
     """为有几何信息的页面渲染内联 SVG 线框缩略图。
 
-    仅示意元素位置与类型 (非渲染效果)，最多 _MAX_THUMBNAIL_PAGES 页。
+    仅示意元素位置与类型 (非渲染效果)；页数/单页元素数/总元素数均有上限，
+    避免超大文档把报告撑到数十 MB。
     """
     props = (doc.metadata.custom_properties or {}) if doc.metadata else {}
     try:
@@ -226,9 +249,12 @@ def _render_thumbnails(doc: Document) -> str:
         page_w, page_h = 960.0, 540.0
 
     figures: list[str] = []
+    total_rects = 0
     for page in doc.pages[:_MAX_THUMBNAIL_PAGES]:
         rects: list[str] = []
         for elem in page.flattened_elements:
+            if len(rects) >= _MAX_RECTS_PER_PAGE:
+                break
             if elem.type not in _THUMBNAIL_TYPES:
                 continue
             if elem.left is None or elem.top is None or not elem.width or not elem.height:
@@ -246,6 +272,7 @@ def _render_thumbnails(doc: Document) -> str:
             )
         if not rects:
             continue
+        total_rects += len(rects)
         page_no = page.slide_number or page.index + 1
         figures.append(
             f'<figure class="thumb">'
@@ -255,6 +282,8 @@ def _render_thumbnails(doc: Document) -> str:
             f"{''.join(rects)}</svg>"
             f"<figcaption>第 {page_no} 页</figcaption></figure>"
         )
+        if total_rects >= _MAX_RECTS_TOTAL:
+            break
 
     if not figures:
         return ""

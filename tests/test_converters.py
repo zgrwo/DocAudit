@@ -1842,3 +1842,71 @@ class TestPdfPymupdfExtraction:
         path.write_bytes(b"%PDF-1.4 fake")
         doc = PdfConverter(backend="pymupdf").convert(str(path))
         assert doc.pages == []
+
+
+class TestDocxNumbering:
+    """2026-10-29: DOCX 列表符号从 numPr + numbering.xml 提取。
+
+    Word 列表符号不在文本里（无 "• " 前缀），不解析编号定义时
+    FMT-007 / TXT-BULLET-PUNCT 对 DOCX 列表完全失明。
+    """
+
+    def _make_docx(self, path):
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("普通段落")
+        doc.add_paragraph("符号条目一", style="List Bullet")
+        doc.add_paragraph("符号条目二", style="List Bullet")
+        doc.add_paragraph("编号条目", style="List Number")
+        doc.save(str(path))
+
+    def _paragraphs(self, result):
+        return [p for page in result.pages for e in page.elements for p in e.paragraphs]
+
+    def test_bullet_and_number_types_extracted(self, docx_converter, tmp_path):
+        path = tmp_path / "lists.docx"
+        self._make_docx(path)
+        result = docx_converter.convert(str(path))
+        paras = {p.text: p for p in self._paragraphs(result)}
+
+        assert paras["普通段落"].bullet_type is None
+        assert paras["符号条目一"].bullet_type == "char"
+        assert paras["符号条目一"].bullet_char == "•"  # Symbol 私有区字形已归一
+        assert paras["编号条目"].bullet_type == "number"
+
+    def test_style_level_numpr_resolved(self, docx_converter, tmp_path):
+        """python-docx 的 List Bullet/Number 样式把 numPr 写在样式定义里。"""
+        path = tmp_path / "lists2.docx"
+        self._make_docx(path)
+        result = docx_converter.convert(str(path))
+        bullets = [p for p in self._paragraphs(result) if p.bullet_type == "char"]
+        assert len(bullets) == 2
+
+    def test_document_without_numbering_part(self, docx_converter, tmp_path):
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("只有正文，没有列表")
+        path = tmp_path / "nono.docx"
+        doc.save(str(path))
+        result = docx_converter.convert(str(path))
+        assert all(p.bullet_type is None for p in self._paragraphs(result))
+
+    def test_bullet_trailing_punct_check_sees_docx_lists(self, docx_converter, tmp_path):
+        """转换后的 DOCX 列表能被 TXT-BULLET-PUNCT 检出（端到端）。"""
+        from docx import Document as DocxDocument
+
+        from src.auditors.language import LanguageAuditor
+
+        doc = DocxDocument()
+        doc.add_paragraph("条目一", style="List Bullet")
+        doc.add_paragraph("条目二有句号。", style="List Bullet")
+        doc.add_paragraph("条目三", style="List Bullet")
+        path = tmp_path / "bullet_punct.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        auditor = LanguageAuditor(config={"glossary_dir": None, "vocab_dir": None})
+        rule_ids = {f.rule_id for f in auditor.audit(result)}
+        assert "TXT-BULLET-PUNCT" in rule_ids

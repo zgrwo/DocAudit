@@ -58,6 +58,8 @@ class AuditFinding:
             "suggestion": self.suggestion,
             "location": self.location,
             "metadata": self.metadata,
+            # 稳定豁免键（2026-10-29）: JSON 报告带出后可直接用于构造 .docauditignore
+            "exemption_key": self.exemption_key,
         }
 
     @property

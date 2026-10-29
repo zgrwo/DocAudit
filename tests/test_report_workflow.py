@@ -28,10 +28,11 @@ def _finding(
     page=0,
     message="测试问题",
     source_file=None,
+    finding_type=FindingType.FORMAT,
 ):
     meta = {"source_file": source_file} if source_file else {}
     return AuditFinding(
-        type=FindingType.FORMAT,
+        type=finding_type,
         severity=severity,
         message=message,
         rule_id=rule_id,
@@ -228,3 +229,68 @@ class TestCliReportExport:
         self._write_md(src)
         result = self._run_cli(str(src), "-o", str(tmp_path / "r.txt"))
         assert result.returncode == 2
+
+
+class TestExemptionKeyExport:
+    """2026-10-29: 报告带出稳定 exemption_key，CLI 用户可据此构造 .docauditignore。"""
+
+    def test_csv_last_column_is_exemption_key(self):
+        f = _finding()
+        rows = list(csv.reader(io.StringIO(generate_csv_report([f]))))
+        assert rows[0][-1] == "exemption_key"
+        assert rows[1][-1] == f.exemption_key
+
+    def test_json_findings_include_exemption_key(self):
+        from src.reporters.json_reporter import generate_json_report
+
+        f = _finding()
+        report = generate_json_report(_doc(), [f])
+        assert report["findings"][0]["exemption_key"] == f.exemption_key
+
+    def test_csv_key_roundtrips_to_docauditignore(self, tmp_path):
+        """从 CSV 取 key → 写入 .docauditignore → apply 后该 finding 被过滤。"""
+        from src.engines.exemptions import apply_exemptions, load_exemptions, save_exemptions
+
+        f = _finding()
+        rows = list(csv.reader(io.StringIO(generate_csv_report([f]))))
+        key = rows[1][-1]
+        path = tmp_path / ".docauditignore"
+        save_exemptions(path, {key}, [f])
+        kept, exempted = apply_exemptions([f], load_exemptions(path))
+        assert exempted == 1
+        assert kept == []
+
+    def test_type_breakdown_rendered(self):
+        """按摘要类型分布（2026-10-29）：结构/格式等计数出现在统计行。"""
+        findings = [
+            _finding(rule_id="STR-001", finding_type=FindingType.STRUCTURE),
+            _finding(message="格式问题", rule_id="FMT-001"),
+        ]
+        html = generate_html_report(_doc(), findings, show_thumbnails=False)
+        assert 'class="type-stats"' in html
+        assert "格式 1" in html and "结构 1" in html
+
+    def test_no_type_breakdown_when_clean(self):
+        html = generate_html_report(_doc(), [], show_thumbnails=False)
+        assert 'class="type-stats"' not in html
+
+    def test_thumbnail_elements_capped_per_page(self):
+        page = Page(
+            index=0,
+            slide_number=1,
+            elements=[_frame(10 + i, 10, 20, 20) for i in range(250)],
+        )
+        html = generate_html_report(_doc(pages=[page]), [_finding()])
+        assert html.count('class="el-text_frame"') == 200
+
+    def test_thumbnail_elements_capped_in_total(self):
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                elements=[_frame(10, 10, 20, 20) for _ in range(200)],
+            )
+            for i in range(20)
+        ]
+        html = generate_html_report(_doc(pages=pages), [_finding()])
+        assert html.count('class="el-text_frame"') <= 3000

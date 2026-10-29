@@ -198,7 +198,7 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (529 用例)
+└── tests/                           # 🧪 测试 (553 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -245,7 +245,7 @@ DocAudit/
 | 文件 | 关键类 | 提取元数据 |
 |------|--------|-----------|
 | `pptx_converter.py` | `PptxConverter` | 字体/字号/颜色 (Run级)、位置 EMU→pt、版式名称、占位符类型、图片/图表数据、备注 |
-| `docx_converter.py` | `DocxConverter` | 段落样式名→shape_name、大纲级别→level、表格 (含行列几何)、SDT、页眉/页脚/脚注→`auxiliary_elements` |
+| `docx_converter.py` | `DocxConverter` | 段落样式名→shape_name、大纲级别→level、表格 (含行列几何)、SDT、页眉/页脚/脚注→`auxiliary_elements`、列表编号/项目符号 (numPr + numbering.xml) |
 | `pdf_converter.py` | `PdfConverter` | 双后端：Docling（文本+标题+表格）/ PyMuPDF（文本块+书签+bbox） |
 | `md_converter.py` | `MarkdownConverter` | 纯文本+标题级别，多编码回退 |
 
@@ -278,7 +278,7 @@ DocAudit/
 | 文件 | 关键函数 | 职责 |
 |------|---------|------|
 | `ordering.py` | `_sort_findings()`, `_group_by_source()` | 报告共用排序（严重度→页码→规则）与按文件分组 |
-| `html_reporter.py` | `generate_html_report()` | 独立 HTML 报告，所有用户文本 `html.escape()`；内联 SVG 线框缩略图 + 批量按文件分组 |
+| `html_reporter.py` | `generate_html_report()` | 独立 HTML 报告，所有用户文本 `html.escape()`；内联 SVG 线框缩略图（页/元素数上限）+ 批量按文件分组 + 按类型分布 |
 | `json_reporter.py` | `generate_json_report()` | 结构化 JSON，含 meta + summary + findings |
 | `csv_reporter.py` | `generate_csv_report()` | CSV（UTF-8 BOM + 防公式注入），Excel 友好 |
 | `sarif_reporter.py` | `generate_sarif_report()` | SARIF v2.1.0（GitHub Code Scanning / VS Code SARIF Viewer） |
@@ -287,8 +287,8 @@ DocAudit/
 
 | 文件 | 关键入口 | 职责 |
 |------|---------|------|
-| `app.py` | `main()` | Streamlit Web UI — 单文件/批量 + 过滤 + 豁免（含保存 `.docauditignore`）+ HTML/JSON/CSV/SARIF 下载 |
-| `src/cli.py` | `main()` | 命令行 — `audit`（单文件/批量 + `--fix` + 多格式导出 + `--exempt-file`）/ `doctor` / `rules validate` |
+| `app.py` | `main()` | Streamlit Web UI — 单文件/批量 + 过滤 + 豁免（含保存 `.docauditignore`）+ 发现分页 + HTML/JSON/CSV/SARIF 下载 |
+| `src/cli.py` | `main()` | 命令行 — `audit`（单文件/批量 + `--fix` + 多格式导出 + `--exempt-file` + `--fail-on`）/ `doctor`（含配置校验）/ `rules validate` |
 
 ---
 

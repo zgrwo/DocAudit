@@ -387,7 +387,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 | `id` | `str` | 自动生成 12 位 hex UUID |
 | `dedup_key` (属性) | `str` | 去重键: `"{type}\|{rule_id}\|{page}\|{context 前 120 字符的 md5 哈希}"` |
 | `exemption_key` (属性) | `str` | 稳定豁免键: dedup_key + message + location 的 md5；跨多次审查可复用 |
-| `to_dict()` | `dict` | 序列化 |
+| `to_dict()` | `dict` | 序列化（含 `exemption_key`，便于从 JSON 报告构造 `.docauditignore`） |
 | `from_dict(data)` (classmethod) | `AuditFinding` | 反序列化 |
 | `deduplicate(findings)` (static) | `list[AuditFinding]` | 去重 (保留最高严重度) |
 
@@ -401,7 +401,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None, page_count: int \| None = None, show_thumbnails: bool = True)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行；`page_count` 覆盖总页数（批量模式传聚合页数，None 保持现状）；`show_thumbnails` 控制内联 SVG 线框缩略图（批量聚合报告传 False）；批量 finding 带 `metadata["source_file"]` 时按文件分组 |
+| `generate_html_report` | `(doc: Document, findings: list[AuditFinding], title: str, output_path: str \| Path \| None, file_label: str \| None = None, page_count: int \| None = None, show_thumbnails: bool = True)` | `str` | 生成独立 HTML 报告，所有用户文本已 `html.escape()`；`file_label` 用于批量模式覆盖头部"文件:"行；`page_count` 覆盖总页数（批量模式传聚合页数，None 保持现状）；`show_thumbnails` 控制内联 SVG 线框缩略图（批量聚合报告传 False，单页 200/总计 3000 元素上限）；批量 finding 带 `metadata["source_file"]` 时按文件分组；含严重度统计与按类型分布 |
 
 ### JsonReporter `src/reporters/json_reporter.py`
 
@@ -413,7 +413,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
-| `generate_csv_report` | `(findings: list[AuditFinding], output_path: str \| Path \| None = None)` | `str` | 生成 CSV 报告（UTF-8 BOM，Excel 友好）；以 `= + - @` 开头的单元格加单引号防公式注入；列：rule_id/severity/type/page/location/message/context/suggestion/source_file |
+| `generate_csv_report` | `(findings: list[AuditFinding], output_path: str \| Path \| None = None)` | `str` | 生成 CSV 报告（UTF-8 BOM，Excel 友好）；以 `= + - @` 开头的单元格加单引号防公式注入；列：rule_id/severity/type/page/location/message/context/suggestion/source_file/exemption_key（末列可直接用于 `.docauditignore`） |
 
 ### SarifReporter `src/reporters/sarif_reporter.py`
 
@@ -451,7 +451,12 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 | `print_summary` | `(findings)` | 打印审查结果摘要 |
 | `doctor_check` | `()` → `int` | 环境诊断：检查运行环境健康状态，失败项 > 0 时返回 1 |
 
-子命令：`audit`（默认）、`doctor`、`rules validate`（配置校验，错误时 exit 1）。
+子命令：`audit`（默认）、`doctor`、`rules validate`（配置校验，错误时 exit 1）、
+`rules list`（打印解析到的规则表：ID/严重度/检查/说明）。
+
+审计参数（`audit`）：`--fail-on {error,warning,info,none}` 控制退出码阈值（默认 `error`，
+与历史行为一致）；`--exempt-file PATH` 应用 `.docauditignore` 豁免基线；
+`-o` 支持 `.html` / `.json` / `.csv` / `.sarif`（批量时 SARIF 聚合为单文件）。
 
 ---
 

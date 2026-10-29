@@ -81,7 +81,7 @@ class TestCliExitCodes:
         assert result.returncode == 1, (
             f"有 Error 应 exit 1，实际 {result.returncode}\n{result.stdout[-500:]}"
         )
-        assert "error(s) found" in result.stdout
+        assert "达到 --fail-on error" in result.stdout
 
     def test_nonexistent_path_exits_1(self):
         """路径不存在 → exit 1。"""
@@ -123,3 +123,54 @@ class TestCliOutputContract:
         md.write_text("# 概述\n\n测试内容。\n\n## 结论\n\n测试完成。\n", encoding="utf-8")
         result = _run_cli(str(md), "--rules", str(PROJECT_ROOT / "rules.md"), "--fix")
         assert "暂不支持自动修复" in result.stdout
+
+
+class TestFailOnThreshold:
+    """2026-10-29: --fail-on 阈值语义（默认 error 保持历史行为）。"""
+
+    @staticmethod
+    def _f(severity):
+        from src.models.finding import AuditFinding, FindingType
+
+        return AuditFinding(type=FindingType.FORMAT, severity=severity, message="m")
+
+    def test_default_error_only(self):
+        from src.cli import _findings_exit_code
+        from src.models.finding import FindingSeverity
+
+        assert _findings_exit_code([self._f(FindingSeverity.WARNING)], "error") == 0
+        assert _findings_exit_code([self._f(FindingSeverity.ERROR)], "error") == 1
+
+    def test_warning_threshold(self):
+        from src.cli import _findings_exit_code
+        from src.models.finding import FindingSeverity
+
+        assert _findings_exit_code([self._f(FindingSeverity.INFO)], "warning") == 0
+        assert _findings_exit_code([self._f(FindingSeverity.WARNING)], "warning") == 1
+
+    def test_info_threshold(self):
+        from src.cli import _findings_exit_code
+        from src.models.finding import FindingSeverity
+
+        assert _findings_exit_code([], "info") == 0
+        assert _findings_exit_code([self._f(FindingSeverity.INFO)], "info") == 1
+
+    def test_none_never_fails(self):
+        from src.cli import _findings_exit_code
+        from src.models.finding import FindingSeverity
+
+        assert _findings_exit_code([self._f(FindingSeverity.ERROR)], "none") == 0
+
+    def test_cli_fail_on_none_exits_0(self, tmp_path):
+        """含 error 的文档 + --fail-on none → exit 0（处理失败仍然 1）。"""
+        doc = tmp_path / "bad.md"
+        doc.write_text("# 标题\n\n正文内容。\n", encoding="utf-8")
+        result = _run_cli(
+            str(doc),
+            "--rules",
+            str(PROJECT_ROOT / "rules.md"),
+            "--fail-on",
+            "none",
+        )
+        assert result.returncode == 0, result.stdout[-400:]
+        assert "未达到 --fail-on none" in result.stdout
