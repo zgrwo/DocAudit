@@ -1,6 +1,6 @@
 # AGENTS.md — DocAudit 项目宪法
 
-> 本地离线文档审查系统：PPTX/DOCX/PDF/MD → 26 条规则 → HTML/JSON/CSV/SARIF 报告。完全离线，零数据上报。
+> 本地离线文档审查系统：PPTX/DOCX/PDF/MD → 30 条规则 → HTML/JSON/CSV/SARIF 报告。完全离线，零数据上报。
 > 本文件面向 AI 编程助手（QoderCN / Claude Code / Codex / Copilot），是项目唯一宪法文件。
 > 兼容性：本文件即 `AGENTS.md`（大写）——2026 年跨工具事实标准，多数 AI 工具可直接读取；Claude Code 按需使用 `CLAUDE.md` 副本（见「AGENTS.md 生态兼容」）。
 
@@ -75,7 +75,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `docs/` 分区：`governance/`（治理与陷阱清单）、`specification/`（规格与签名 SSOT）、`user-manual/`（用户手册）；`.venv`、`build/`、`docaudit.egg-info/`、`__pycache__/` 为生成物，扫描/审查时排除
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（627 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（735 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 配置门禁与豁免：改 rules.md/glossary/vocab 后跑 `python src/cli.py rules validate`；`.docauditignore` 是团队豁免基线（可入库），Web UI 保存、CLI `--exempt-file` 读取
 - [ ] 修改模块边界前必读 `docs/specification/api-reference.md`（签名唯一信源）
@@ -100,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 627 个用例（23 个文件，含黄金测试）
+├── tests/                            # 735 个用例（23 个文件，含黄金测试）
 ├── docs/                             # 治理与规范文档（governance / specification / user-manual）
 ├── skills/                           # Skill 定义
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
@@ -163,7 +163,7 @@ DocAudit/
 
 ## 测试
 
-627 个用例，23 个文件：
+735 个用例，23 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -200,7 +200,7 @@ DocAudit/
 | 场景 | 命令 |
 | :--- | :--- |
 | 安装 | `pip install .[all]` |
-| 运行测试 | `pytest tests/ -v`（627 用例；`-m "not slow"` 为 ~40s 快测子集） |
+| 运行测试 | `pytest tests/ -v`（735 用例；`-m "not slow"` 为 ~40s 快测子集） |
 | 启动 Web UI | `streamlit run app.py` |
 | CLI 审查 | `python src/cli.py report.pptx --rules rules.md` |
 | CI 门禁阈值 | `--fail-on {error,warning,info,none}`（默认 error） |

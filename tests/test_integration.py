@@ -5,9 +5,12 @@ import tempfile
 from pathlib import Path
 
 from src.engines.pipeline import build_auditors, find_converter, run_auditors
+from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.reporters.html_reporter import generate_html_report
 from src.reporters.json_reporter import generate_json_report
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class TestFullPipeline:
@@ -354,11 +357,11 @@ title: 测试文档
         )
         findings2 = run_auditors(doc2, auditors2)
 
-        # 断言: 两次执行结果一致
+        # 断言: 两次执行结果一致（含顺序 —— 只比 sorted() 会掩盖哈希序漂移）
         assert len(findings1) == len(findings2)
-        keys1 = sorted(f.dedup_key for f in findings1)
-        keys2 = sorted(f.dedup_key for f in findings2)
-        assert keys1 == keys2
+        assert [(f.dedup_key, f.message) for f in findings1] == [
+            (f.dedup_key, f.message) for f in findings2
+        ]
 
     def test_golden_path_markdown(self, tmp_path):
         """确定性回归: Markdown 相同参数两次执行结果一致 (真实三路径见 test_golden_paths.py)"""
@@ -388,11 +391,11 @@ title: 测试文档
         )
         findings2 = run_auditors(doc2, auditors2)
 
-        # 断言
+        # 断言: 两次执行结果一致（含顺序）
         assert len(findings1) == len(findings2)
-        keys1 = sorted(f.dedup_key for f in findings1)
-        keys2 = sorted(f.dedup_key for f in findings2)
-        assert keys1 == keys2
+        assert [(f.dedup_key, f.message) for f in findings1] == [
+            (f.dedup_key, f.message) for f in findings2
+        ]
 
 
 class TestCliArgumentParsing:
@@ -451,3 +454,133 @@ class TestCliArgumentParsing:
         )
         assert result.returncode != 2, f"CLI 用法错误: {result.stderr}"
         assert "SUMMARY" in result.stdout
+
+
+class TestScoringAndCoverage:
+    """2026-11: 质量分 + 审查覆盖/降级声明（"没问题"与"没查"可区分）。"""
+
+    @staticmethod
+    def _finding(severity=FindingSeverity.WARNING, *, type_=FindingType.FORMAT, estimated=False):
+        metadata = {"estimated": True} if estimated else {}
+        return AuditFinding(
+            type=type_,
+            severity=severity,
+            message="m",
+            rule_id="FMT-001",
+            page_index=0,
+            metadata=metadata,
+        )
+
+    def test_clean_document_scores_full(self):
+        from src.engines.scoring import compute_score
+
+        result = compute_score([], 4)
+        assert result["score"] == 100
+        assert result["grade"] == "A"
+        assert result["counts"] == {"error": 0, "warning": 0, "info": 0}
+
+    def test_errors_lower_score_more_than_info(self):
+        from src.engines.scoring import compute_score
+
+        one_error = compute_score([self._finding(FindingSeverity.ERROR)], 1)["score"]
+        one_info = compute_score([self._finding(FindingSeverity.INFO)], 1)["score"]
+        assert one_error < one_info < 100
+
+    def test_score_normalized_by_page_count(self):
+        """同样问题数：页数多 → 每页罚分低 → 分数更高（短文档不应被少量问题秒杀）。"""
+        from src.engines.scoring import compute_score
+
+        findings = [self._finding(FindingSeverity.ERROR) for _ in range(3)]
+        assert compute_score(findings, 10)["score"] > compute_score(findings, 1)["score"]
+
+    def test_system_errors_not_penalized_but_reported(self):
+        from src.engines.scoring import compute_score
+
+        sys_err = AuditFinding(
+            type=FindingType.SYSTEM,
+            severity=FindingSeverity.ERROR,
+            message="审计器失败",
+            rule_id="SYS-ERROR",
+        )
+        result = compute_score([sys_err], 2)
+        assert result["score"] == 100
+        assert result["system_errors"] == 1
+
+    def test_estimated_findings_weighted_half(self):
+        from src.engines.scoring import compute_score
+
+        exact = compute_score([self._finding(FindingSeverity.WARNING)], 1)["penalty"]
+        estimated = compute_score([self._finding(FindingSeverity.WARNING, estimated=True)], 1)[
+            "penalty"
+        ]
+        assert estimated == round(exact * 0.5, 1)
+
+    def test_dimensions_and_grades(self):
+        from src.engines.scoring import compute_score
+
+        findings = [
+            self._finding(FindingSeverity.ERROR, type_=FindingType.STRUCTURE),
+            self._finding(FindingSeverity.INFO, type_=FindingType.LANGUAGE),
+        ]
+        result = compute_score(findings, 1)
+        assert set(result["dimensions"]) == {"结构", "语言"}
+        assert result["grade"] in {"A", "B", "C", "D"}
+
+    def test_coverage_reports_degradation_and_capabilities(self):
+        from src.engines.coverage import collect_coverage
+
+        class FakeClient:
+            backend = "python"
+            is_available = True
+
+        class FakeLanguageAuditor:
+            lt_client = FakeClient()
+
+        doc = Document(
+            format="docx",
+            source_path="x.docx",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    slide_number=1,
+                    elements=[
+                        PageElement(type="text_frame", paragraphs=[Paragraph(text="正文", runs=[])])
+                    ],
+                )
+            ],
+        )
+        findings = [
+            AuditFinding(
+                type=FindingType.SYSTEM,
+                severity=FindingSeverity.ERROR,
+                message="boom",
+                rule_id="SYS-ERROR",
+                metadata={"auditor": "格式审查", "error": "boom"},
+            )
+        ]
+        coverage = collect_coverage(doc, [("语言审查", FakeLanguageAuditor())], findings)
+        assert coverage["language_backend"] == "python"
+        assert coverage["complete"] is False
+        assert coverage["geometry"] is False
+        assert coverage["font_metadata"] is False
+        # PPTX-only 检查对 DOCX 不适用
+        assert "element_overflow" in coverage["not_applicable_checks"]
+        assert any("版面" in note or "坐标" in note for note in coverage["notes"])
+        assert any("执行失败" in note for note in coverage["notes"])
+
+    def test_build_report_context_has_score_and_coverage(self):
+        from src.engines.pipeline import build_report_context
+
+        doc = find_converter("tests/fixtures/sample.pptx").convert("tests/fixtures/sample.pptx")
+        auditors = build_auditors(
+            str(PROJECT_ROOT / "rules.md"),
+            str(PROJECT_ROOT / "glossary"),
+            str(PROJECT_ROOT / "vocab"),
+        )
+        findings = run_auditors(doc, auditors)
+        ctx = build_report_context(doc, auditors, findings)
+        assert 0 <= ctx["score"]["score"] <= 100
+        assert ctx["score"]["grade"] in {"A", "B", "C", "D"}
+        assert ctx["coverage"]["pages"] == len(doc.pages)
+        assert "notes" in ctx["coverage"]

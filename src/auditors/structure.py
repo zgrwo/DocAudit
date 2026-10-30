@@ -3,10 +3,11 @@
 import re
 from collections import Counter
 
-from src.auditors.base import BaseAuditor
+from src.auditors.base import DEFAULT_COVER_LAYOUTS, BaseAuditor, is_cover_layout
 from src.models.document import Document, Page
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import is_cjk_char as _is_cjk_char
+from src.text_utils import mask_prose_noise
 
 # 标题末尾标点检测正则 (模块级预编译 — 修复 2026-08 审查 L5: 曾每页重复编译)
 _TRAILING_PUNCT_RE = re.compile(r"[。，、.!,;；：…—]+$")
@@ -29,6 +30,23 @@ _CAPTION_RE = re.compile(
 
 # 标题英文词提取 (连续字母序列，含撇号缩写如 don't)
 _TITLE_EN_WORD_RE = re.compile(r"[a-zA-Z]+(?:'[a-z]+)?")
+
+# 标题形状名: 以 "Title" 开头（"Title 1" / "Title Slide"），排除 "Subtitle 2"。
+# 2026-11 审查: 旧判断 `"title" in name.lower()` 把 Subtitle 占位符也当标题 →
+# 规范报告里副标题被报 STR-004 标题过长 / STR-006 标题末尾标点（实测误报）。
+_TITLE_SHAPE_RE = re.compile(r"(?i)^title(?:\s|_|$)")
+
+
+def _looks_like_title(elem) -> bool:
+    """元素是否应作为"标题"参与 STR-004/STR-006 检查。
+
+    优先用占位符语义 (``is_title``)，其次看 shape 名是否以 Title 开头。
+    不能用子串匹配: "Subtitle 2"、"Title and Content" 的内容框都会误命中。
+    """
+    if elem.is_title:
+        return True
+    name = str(elem.shape_name or "").strip()
+    return bool(_TITLE_SHAPE_RE.match(name))
 
 
 class StructureAuditor(BaseAuditor):
@@ -66,15 +84,12 @@ class StructureAuditor(BaseAuditor):
             ]
         # 标题页豁免版式 (默认对齐 rules.md CON-004，可配置覆盖)。
         # 用 or 而非 .get(key, default) — 显式空列表/None 不得清空内置默认。
-        self.exempt_layouts = cfg.get("exempt_layouts") or [
-            "标题幻灯片",
-            "Title Slide",
-            "Title",
-            "Titelfolie",
-            "封面",
-            "タイトル",
-            "Cover",
-        ]
+        self.exempt_layouts = cfg.get("exempt_layouts") or list(DEFAULT_COVER_LAYOUTS)
+        # CON-004 判断 2 门槛 (rules.md parameters.conclusion_min_paragraphs)
+        try:
+            self.conclusion_min_paragraphs = max(1, int(cfg.get("conclusion_min_paragraphs", 3)))
+        except (ValueError, TypeError):
+            self.conclusion_min_paragraphs = 3
         # STR-004 标题长度阈值 (从 rules.md 配置，支持动态调整)
         try:
             self.max_english_words = int(cfg.get("max_english_words", 10))
@@ -89,6 +104,19 @@ class StructureAuditor(BaseAuditor):
             self.min_title_font_size = int(cfg.get("min_title_font_size", 28))
         except (ValueError, TypeError):
             self.min_title_font_size = 28
+        # 内容级检查阈值（2026-11: CON-005/006，rules.md 规则参数）
+        try:
+            self.evidence_min_numbers = max(1, int(cfg.get("evidence_min_numbers", 1)))
+        except (ValueError, TypeError):
+            self.evidence_min_numbers = 1
+        try:
+            self.section_min_paragraphs = max(0, int(cfg.get("section_min_paragraphs", 1)))
+        except (ValueError, TypeError):
+            self.section_min_paragraphs = 1
+        try:
+            self.section_min_chars = max(0, int(cfg.get("section_min_chars", 20)))
+        except (ValueError, TypeError):
+            self.section_min_chars = 20
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查，避免双重执行
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
 
@@ -138,6 +166,14 @@ class StructureAuditor(BaseAuditor):
         # 重复标题检测 (inspired by intern)
         if "duplicate_title" not in skip:
             findings.extend(self._check_duplicate_title(doc))
+
+        # 内容级检查（2026-11）: 图表引用 / 结论量化 / 章节实体内容
+        if "figure_referenced" not in skip:
+            findings.extend(self._check_figure_referenced(doc))
+        if "conclusion_has_evidence" not in skip:
+            findings.extend(self._check_conclusion_evidence(doc))
+        if "section_has_substance" not in skip and self.required_sections:
+            findings.extend(self._check_section_substance(doc))
 
         return findings
 
@@ -230,7 +266,8 @@ class StructureAuditor(BaseAuditor):
         all_numbers: list[tuple[int, int, str]] = []  # (page_index, number, match_text)
 
         for page in doc.pages:
-            text = page.all_text
+            # 代码块/URL 里的 "图N" 是代码内容，不参与编号连续性判定
+            text = mask_prose_noise(page.all_text)
             for m in _FIG_NUMBER_RE.finditer(text):
                 num = int(m.group(1))
                 all_numbers.append((page.index, num, m.group(0)))
@@ -328,7 +365,8 @@ class StructureAuditor(BaseAuditor):
         fingerprints: dict[str, list[str]] = {}  # fingerprint → [example captions]
 
         for page in doc.pages:
-            text = page.all_text
+            # 代码块/URL 里的图表标题不参与格式一致性判定
+            text = mask_prose_noise(page.all_text)
             for m in _CAPTION_RE.finditer(text):
                 full_match = m.group(0)
                 # 生成格式指纹: 将数字替换为 N，统一标点
@@ -465,44 +503,13 @@ class StructureAuditor(BaseAuditor):
         return findings
 
     def _is_exempt_layout(self, layout_name: str | None) -> bool:
-        """判断版式是否为标题/封面页。
+        """判断版式是否为标题/封面页（委托 Auditor 层共用判定）。
 
-        2026-10-28 修复：旧实现用 ``pattern in layout`` 做子串匹配，
-        ``exempt_layouts`` 中的通用词 "Title" 会把 "Title and Content"
-        等所有内容页一起豁免，导致 CON-004 在英文模板中完全失效。
-        现改为：
-        - 精确匹配（大小写不敏感）；
-        - 仅对明确的封面短语允许前缀/包含匹配（"Title Slide"、"封面" 等），
-          不允许通用词 "Title"/"标题" 单独做子串匹配。
+        判定规则见 ``src/auditors/base.py::is_cover_layout``（精确匹配 + 封面专用
+        短语的前缀/包含匹配；通用词 "Title"/"标题" 不做子串匹配，避免误豁免
+        "Title and Content" 等内容页）。FormatAuditor 的版式复用提示共用同一判定。
         """
-        if not layout_name:
-            return False
-        layout = layout_name.strip().casefold()
-        if not layout:
-            return False
-
-        # 允许做前缀/包含匹配的封面专用短语；通用词不在此列。
-        cover_phrases = {
-            "title slide",
-            "标题幻灯片",
-            "封面",
-            "封面页",
-            "titelfolie",
-            "タイトル",
-            "cover",
-            "cover page",
-        }
-
-        for pattern in self.exempt_layouts:
-            candidate = str(pattern).strip().casefold()
-            if not candidate:
-                continue
-            if layout == candidate:
-                return True
-            # 只对明确的封面短语允许前缀/包含，避免 "Title" 误伤内容页。
-            if candidate in cover_phrases and (layout.startswith(candidate) or candidate in layout):
-                return True
-        return False
+        return is_cover_layout(layout_name, self.exempt_layouts)
 
     def _page_content_text(self, page: Page) -> str:
         """返回页面的非标题正文（含表格），用于结论关键词判断。
@@ -556,14 +563,14 @@ class StructureAuditor(BaseAuditor):
             if any(kw.lower() in content_text for kw in keywords):
                 has_conclusion = True
 
-            # 判断2: 除标题外有 >= 3 个有内容的段落（确保足够实质性内容）
+            # 判断2: 除标题外有 >= conclusion_min_paragraphs 个有内容的段落
             if not has_conclusion:
                 content_para_count = sum(
                     sum(1 for p in e.paragraphs if p.text.strip())
                     for e in page.flattened_elements
                     if e.type == "text_frame" and not e.is_title
                 )
-                if content_para_count >= 3:
+                if content_para_count >= self.conclusion_min_paragraphs:
                     has_conclusion = True
 
             if not has_conclusion:
@@ -596,9 +603,7 @@ class StructureAuditor(BaseAuditor):
         for page in doc.pages:
             page_label = f"第 {page.slide_number or page.index + 1} 页"
             for elem in page.flattened_elements:
-                if not elem.is_title and not (
-                    elem.shape_name and "title" in str(elem.shape_name).lower()
-                ):
+                if not _looks_like_title(elem):
                     continue
                 for para in elem.paragraphs:
                     title_text = para.text.strip()
@@ -637,9 +642,7 @@ class StructureAuditor(BaseAuditor):
         page_label = f"第 {page.slide_number or page.index + 1} 页"
 
         for elem in page.flattened_elements:
-            if not elem.is_title and not (
-                elem.shape_name and "title" in str(elem.shape_name).lower()
-            ):
+            if not _looks_like_title(elem):
                 continue
             for para in elem.paragraphs:
                 title_text = para.text.strip()
@@ -698,3 +701,225 @@ class StructureAuditor(BaseAuditor):
                 )
 
         return findings
+
+    # ── 内容级检查（2026-11 新增）────────────────────────────
+    #
+    # 这三项不判断"写得好不好"，只判断"有没有把该给的信息给出来"：
+    # 图表是否被正文引用、结论是否有量化支撑、必含章节是否有实体内容。
+    # 全部基于计数/正则，误报可控（默认 warning/info + rules.md 可关）。
+
+    def _check_figure_referenced(self, doc: Document) -> list[AuditFinding]:
+        """图表标题存在但正文从未引用（图N/表N 只在标题出现）。
+
+        判定：
+        - 标题行 = 行首 ``图N:`` / ``表N：`` / ``Fig.1-`` 且长度 ≤ 80 字（_CAPTION_RE）；
+        - 正文引用 = ``见图N`` / ``如图N所示`` / ``表N中`` / ``图N表明`` 等；
+        - 标题行自身含"见图/如表"等引用词时视为引用行，不计为孤立标题。
+        """
+        captions: list[tuple[int, str, str, int]] = []  # (page_index, page_label, text, number)
+        referenced: set[int] = set()
+        for page in doc.pages:
+            page_label = f"第 {page.slide_number or page.index + 1} 页"
+            text = mask_prose_noise(page.all_text)
+            for m in _CAPTION_RE.finditer(text):
+                number = int(m.group(1))
+                line_start = text.rfind("\n", 0, m.start()) + 1
+                line_end = text.find("\n", m.end())
+                line = text[line_start : line_end if line_end != -1 else len(text)].strip()
+                if len(line) > 80:
+                    continue
+                label = line[:40]
+                if _FIG_REFERENCE_RE.search(line):
+                    referenced.add(number)  # 标题行内自带引用词
+                    continue
+                captions.append((page.index, page_label, label, number))
+            for m in _FIG_REFERENCE_RE.finditer(text):
+                referenced.add(int(m.group(1) or m.group(2)))
+
+        findings: list[AuditFinding] = []
+        unreferenced = [
+            (page_index, page_label, label, number)
+            for page_index, page_label, label, number in captions
+            if number not in referenced
+        ]
+        for page_index, page_label, label, _number in unreferenced:
+            findings.append(
+                AuditFinding(
+                    type=FindingType.STRUCTURE,
+                    severity=FindingSeverity.INFO,
+                    message="图表标题存在但正文未引用",
+                    rule_id="STR-009",
+                    page_index=page_index,
+                    location=page_label,
+                    context=label,
+                    suggestion=f"在正文中补充「见{label.split(':', 1)[0].strip()}」等引用，或删除孤立图表",
+                    metadata={"caption": label},
+                )
+            )
+        return findings
+
+    def _check_conclusion_evidence(self, doc: Document) -> list[AuditFinding]:
+        """结论句缺少量化支撑（无数字/百分比/单位）。
+
+        对含结论关键词的句子检查是否包含至少 ``evidence_min_numbers`` 个数值；
+        每个页面最多报一条（避免同一页多句刷屏）。
+        """
+        keywords = self.keywords or []
+        if not keywords:
+            return []
+        findings: list[AuditFinding] = []
+        for page in doc.pages:
+            label = f"第 {page.slide_number or page.index + 1} 页"
+            offending: str | None = None
+            for elem in page.flattened_elements:
+                if elem.is_title:
+                    continue
+                for para in elem.paragraphs:
+                    text = mask_prose_noise(para.text or "").strip()
+                    if len(text) < 8:
+                        continue
+                    for sentence in re.split(r"[。；;！？!?]", text):
+                        sentence = sentence.strip()
+                        if not sentence or not any(kw in sentence for kw in keywords):
+                            continue
+                        if len(_NUMBER_TOKEN_RE.findall(sentence)) >= self.evidence_min_numbers:
+                            continue
+                        offending = sentence[:80]
+                        break
+                    if offending:
+                        break
+                if offending:
+                    break
+            if offending:
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.STRUCTURE,
+                        severity=FindingSeverity.WARNING,
+                        message="结论缺少量化支撑（未出现数字/百分比/单位）",
+                        rule_id="CON-005",
+                        page_index=page.index,
+                        location=label,
+                        context=offending,
+                        suggestion="在结论中补充关键数据（如良率 95%、周期缩短 20%），避免空泛表述",
+                    )
+                )
+        return findings
+
+    def _check_section_substance(self, doc: Document) -> list[AuditFinding]:
+        """必含章节只有标题、缺少实体内容。
+
+        PPTX: 标题含章节名的幻灯片需有正文段落/表格/图表（字数与段落门槛）。
+        DOCX/MD: 按标题层级定位章节区间，统计区间内正文段落数与字数。
+        """
+        findings: list[AuditFinding] = []
+        if doc.format == "pptx":
+            for section in self.required_sections:
+                hits = []
+                for page in doc.pages:
+                    title_text = " ".join(
+                        para.text
+                        for elem in page.flattened_elements
+                        if elem.is_title
+                        for para in elem.paragraphs
+                    )
+                    if section in title_text:
+                        hits.append(page)
+                if not hits:
+                    continue  # 缺章由 CON-002 报，避免重复
+                if any(self._page_has_substance(page) for page in hits):
+                    continue
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.STRUCTURE,
+                        severity=FindingSeverity.WARNING,
+                        message=f"章节「{section}」缺少实体内容（仅标题或一两句占位）",
+                        rule_id="CON-006",
+                        page_index=hits[0].index,
+                        location=f"第 {hits[0].slide_number or hits[0].index + 1} 页",
+                        context=section,
+                        suggestion="补充数据、结论或图表；确无内容可删除该章节并在目录中同步",
+                    )
+                )
+            return findings
+
+        # 表格/图片/图表所在页（章节只有表格也算有实体内容 — 2026-11 max 审查 F4）
+        substance_pages = {
+            page.index
+            for page in doc.pages
+            for elem in page.flattened_elements
+            if elem.type in ("table", "image", "chart")
+        }
+        entries: list[tuple[int | None, str, int]] = []  # (level, text, page_index)
+        for page in doc.pages:
+            for elem in page.flattened_elements:
+                for para in elem.paragraphs:
+                    text = (para.text or "").strip()
+                    if text:
+                        entries.append((para.level, text, page.index))
+
+        for section in self.required_sections:
+            start = next(
+                (i for i, (level, text, _pi) in enumerate(entries) if level and section in text),
+                None,
+            )
+            if start is None:
+                continue
+            section_level = entries[start][0]
+            body_chars = 0
+            body_paras = 0
+            section_pages: set[int] = {entries[start][2]}
+            for level, text, pi in entries[start + 1 :]:
+                if level is not None and level <= (section_level or 0):
+                    break
+                section_pages.add(pi)
+                if level is None:
+                    body_chars += len(text)
+                    body_paras += 1
+            if substance_pages & section_pages:
+                continue  # 章节内有表格/图/图表
+            if body_paras >= self.section_min_paragraphs and body_chars >= self.section_min_chars:
+                continue
+            findings.append(
+                AuditFinding(
+                    type=FindingType.STRUCTURE,
+                    severity=FindingSeverity.WARNING,
+                    message=f"章节「{section}」缺少实体内容（正文 {body_paras} 段 / {body_chars} 字）",
+                    rule_id="CON-006",
+                    page_index=entries[start][2],
+                    location=f"第 {entries[start][2] + 1} 页",
+                    context=entries[start][1][:60],
+                    suggestion="补充数据、结论或图表；确无内容可删除该章节",
+                    metadata={"paragraphs": body_paras, "chars": body_chars},
+                )
+            )
+        return findings
+
+    def _page_has_substance(self, page: Page) -> bool:
+        """页面是否有实体内容（表格/图表/图片，或足量的非标题正文）。"""
+        body_chars = 0
+        body_paras = 0
+        for elem in page.flattened_elements:
+            if elem.type in ("table", "image", "chart"):
+                return True
+            if elem.is_title:
+                continue
+            for para in elem.paragraphs:
+                text = (para.text or "").strip()
+                if not text:
+                    continue
+                if len(text) >= self.section_min_chars:
+                    return True
+                body_chars += len(text)
+                body_paras += 1
+        return body_paras >= self.section_min_paragraphs and body_chars >= self.section_min_chars
+
+
+# 图表引用词（正文中出现即视为已引用）— 模块级预编译
+_FIG_REFERENCE_RE = re.compile(
+    r"(?:见|如|参见|详见|参考|参照|结合)\s*(?:图|表|Fig\.?|Figure|Table|Tab\.?)\s*(\d+)"
+    r"|(?:图|表|Fig\.?|Figure|Table|Tab\.?)\s*(\d+)\s*(?:所示|中|里|表明|显示|可见|可以看出|可知)",
+    re.IGNORECASE,
+)
+
+# 结论量化判定：数字（含小数/百分比/单位）
+_NUMBER_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|％|[A-Za-zμ]+)?")

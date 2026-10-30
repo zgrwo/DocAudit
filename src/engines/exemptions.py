@@ -54,22 +54,55 @@ def _read_text_with_fallback(path: Path) -> str:
 
 
 def load_exemptions(path: str | Path = DEFAULT_EXEMPTION_FILE) -> set[str]:
-    """读取豁免键集合。缺失/损坏文件返回空集合（fail-open 到"多报"）。"""
+    """读取**未过期**的豁免键集合。缺失/损坏文件返回空集合（fail-open 到"多报"）。
+
+    2026-11: 条目可带 ``expires``（YYYY-MM-DD）。过期条目不再生效，使"临时豁免"
+    不会永久掩盖已修复/应复查的问题；过期条目由 :func:`exemption_stats` 统计。
+    """
+    return {entry["key"] for entry in load_exemption_entries(path) if not _is_expired(entry)}
+
+
+def load_exemption_entries(path: str | Path = DEFAULT_EXEMPTION_FILE) -> list[dict]:
+    """读取全部豁免条目（不做过期过滤；每项至少含 key）。"""
     p = Path(path)
     if not p.exists():
-        return set()
+        return []
     try:
         data = json.loads(_read_text_with_fallback(p))
     except (OSError, ValueError) as e:  # UnicodeDecodeError 是 ValueError 子类
         logger.warning("豁免文件读取失败，忽略其内容: %s — %s", p, e)
-        return set()
-    return _extract_keys(data)
+        return []
+    return _extract_entries(data)
+
+
+def _is_expired(entry: dict, today: str | None = None) -> bool:
+    """``expires`` 早于今天即过期；缺失/非法值视为不过期（fail-open 到保持豁免）。"""
+    expires = str(entry.get("expires") or "").strip()
+    if not expires:
+        return False
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    return expires < today
+
+
+def exemption_stats(path: str | Path = DEFAULT_EXEMPTION_FILE) -> dict:
+    """豁免条目统计：总数 / 生效 / 已过期（CLI/UI 提示"是否该复查"）。"""
+    entries = load_exemption_entries(path)
+    expired = sum(1 for entry in entries if _is_expired(entry))
+    return {
+        "total": len(entries),
+        "active": len(entries) - expired,
+        "expired": expired,
+        "path": str(path),
+    }
 
 
 def save_exemptions(
     path: str | Path,
     keys: Iterable[str],
     findings: list[AuditFinding] | None = None,
+    *,
+    reviewer: str | None = None,
+    expires: str | None = None,
 ) -> bool:
     """把豁免键写入文件 (附带 finding 元数据便于人工评审)。
 
@@ -77,22 +110,29 @@ def save_exemptions(
         path: 输出路径
         keys: 要保留的 exemption_key 集合
         findings: 可选，用于补齐 rule_id/location/message 元数据
+        reviewer: 可选，豁免评审人（写入 ``reviewer``，供审计）
+        expires: 可选，过期日期 ``YYYY-MM-DD``（过期后豁免自动失效）
 
     Returns:
         True = 写入成功；False = 写入失败（调用方必须提示用户，不能显示「已保存」）
     """
     key_set = {str(k) for k in keys}
     by_key = {f.exemption_key: f for f in (findings or [])}
+    today = datetime.now().strftime("%Y-%m-%d")
     entries = []
     for key in sorted(key_set):
         f = by_key.get(key)
-        entry = {"key": key}
+        entry = {"key": key, "created": today}
         if f is not None:
             entry["rule_id"] = f.rule_id
             entry["location"] = f.location
             entry["message"] = (f.message or "")[:200]
             if f.page_index is not None:
                 entry["page"] = f.page_index + 1
+        if reviewer:
+            entry["reviewer"] = reviewer
+        if expires:
+            entry["expires"] = expires
         entries.append(entry)
 
     payload = {
@@ -132,13 +172,20 @@ def apply_exemptions(
 
 def _extract_keys(data) -> set[str]:
     """兼容多种形态: {"exemptions": [...]} / 裸列表；元素可为 str 或 {"key": …}。"""
+    return {entry["key"] for entry in _extract_entries(data)}
+
+
+def _extract_entries(data) -> list[dict]:
+    """兼容多种形态，统一成 ``[{"key": ..., 其余元数据}]``（保序）。"""
     entries = data.get("exemptions", []) if isinstance(data, dict) else data
     if not isinstance(entries, list):
-        return set()
-    keys: set[str] = set()
+        return []
+    result: list[dict] = []
     for entry in entries:
         if isinstance(entry, str) and entry:
-            keys.add(entry)
+            result.append({"key": entry})
         elif isinstance(entry, dict) and entry.get("key"):
-            keys.add(str(entry["key"]))
-    return keys
+            normalized = dict(entry)
+            normalized["key"] = str(entry["key"])
+            result.append(normalized)
+    return result

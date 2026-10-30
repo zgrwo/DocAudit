@@ -5,6 +5,166 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-05
+
+产品能力增强版（在 0.2.2 深度审查修复之上）：把"发现列表"升级为"可解释的质量评估"，
+补 4 条内容级规则，并给批量/版本对比/配置治理加能力。**735 个测试用例（23 个文件）**；
+80 条新回归用例，全部规则经 `rules validate` / `validate_dispatch()` / 门禁校验。
+
+### Added
+
+- **质量分（`src/engines/scoring.py`）** —— `compute_score()` 输出 0-100 分 + A/B/C/D 等级 +
+  分维度子分；罚分 = Σ(严重度权重 × 条数) / 页数（满分罚分 20）；`SYS-ERROR` 不计罚分、
+  单独统计；估算类发现（溢出/表格 fit/DPI，`metadata.estimated`）半权。HTML 头部质量分卡、
+  JSON `score`、CLI `[SCORE]`、SARIF `run.properties.docAuditScore` 全链路展示。
+- **审查范围/降级声明（`src/engines/coverage.py`）** —— `collect_coverage()` 输出语言检查
+  后端层级、无版面几何/字体元数据、PPTX 专属检查未执行清单、执行失败的审计器、估算类
+  发现计数；HTML「审查范围与可信度」区块 + CLI `[COVERAGE]` + JSON `coverage`
+  + SARIF `docAuditCoverageComplete`。首次让"没问题"与"没查"可区分。
+- **4 条内容级规则（26 → 30 条）** —— STR-009 图表须被正文引用、CON-005 结论须有量化支撑、
+  CON-006 必含章节须有实体内容、CON-007 量词语境数值须带单位；`CHECK_REGISTRY` 19 → 23 条。
+  只判断"信息是否给全"，不做语义评价；默认 info/warning，可按规则关闭。
+- **全局阈值配置化** —— `rules.md` frontmatter `parameters:` 暴露 16 项原硬编码阈值
+  （对齐容差/字体种类上限/近似重复页/结论门槛/表格行高列宽与内边距/文本溢出/图片 DPI/
+  CON-001 长度单位/缩写豁免词）；`parse_rules_globals()` 解析、`rules validate` 校验未知键
+  与类型/范围，运行时非法值告警回退默认。
+- **配置装配 SSOT（`src/engines/auditor_config.py`）** —— `build_auditor_configs()` 统一
+  `pipeline.build_auditors` 与 `CustomRulesAuditor` 回退路径的配置键集，消除两份手工 dict
+  漂移（特检 #4 同族风险）。
+- **批量跨文档一致性（`src/engines/batch.py`）** —— 目录审查时比对同一缩写全称（BATCH-TERM）
+  与必含章节覆盖（BATCH-SECTION），输出 `[BATCH-CONSISTENCY]` 段并计入报告/退出码。
+- **版本对比（`src/engines/baseline.py`）** —— `--baseline old.json` 输出「已修复 / 新引入 /
+  仍存在」，按稳定 `exemption_key` 对齐（JSON 报告新增 `findings[].key`）；`--fail-on-new`
+  把新引入 error 变成 CI 阻断。
+- **规则 profile（`src/engines/profiles.py`）** —— `--profile strict|standard|relaxed`
+  预设退出码阈值与报告最低严重度（relaxed 隐藏 info），`--fail-on` 显式覆盖。
+- **豁免生命周期（`.docauditignore`）** —— 条目支持 `created` / `reviewer` / `expires`；
+  过期条目自动失效，`exemption_stats()` 统计并在 CLI 提示复查。
+- **Windows CI job** —— `.github/workflows/ci.yml` 新增 windows-latest 快测（`-m "not slow"`）
+  + 中文控制台配置校验 + 真实样例 CLI 冒烟（退出码/报告落盘），覆盖"只在 Windows 复现"的坑。
+
+### Changed
+
+- **报告器签名扩展（向后兼容）** —— `generate_html_report` / `generate_json_report` /
+  `generate_sarif_report` 新增 keyword-only `score=` / `coverage=`；不传时输出与 0.2.2 一致。
+- **CLI** —— `audit_document()` 新增（返回 context），`audit_file()` 保留为兼容包装；
+  新增 `--profile` / `--baseline` / `--fail-on-new`；`--fail-on` 默认改为"按 profile"。
+- **`extract_auditor_config(rules, globals_=None)`** —— 第二参数可选，向后兼容。
+- **规则数 26 → 30**：`rules.md` / README / AGENTS / CLAUDE / api-reference / specification /
+  ai-review-prompt / ci.yml 断言 / test_rules / test_validation 全链路同步；
+  `--profile` 与规则参数文档补入用户手册。
+
+### Fixed（同轮 max-level 审查，见 `docs/governance/ai-review-prompt.md`）
+
+- **P1 STR-009 页码越界** —— `_check_figure_referenced` 用 `doc.pages[page.index]` 反查标签，
+  页面 index 非连续时 `IndexError`（且标签可能错页）；改用遍历时的 page 对象与 `slide_number`。
+- **P2 CON-006 表格章节误报** —— 非 PPTX 路径只统计段落，章节内只有表格/图片时被判"缺少实体内容"；
+  改为把章节区间内 table/image/chart 计为实体内容。
+- **P2 BATCH-TERM 前缀误报** —— 中文全称捕获会把"本方案采用/基于"等前缀吞入全称，同一术语
+  因前缀不同被判"全称不一致"；新增归一化（剥离前缀/取"的"后本体/后缀兼容视为同一名称）。
+- **P2 BATCH-SECTION 目录误判** —— 旧实现用全文子串，目录行"目录：概述 工艺流程 结论"被当成
+  三个章节都存在（假阴性）；改为标题/heading 优先，无标题文档只认"独立成行"的章节名。
+- **P2 Coverage 后端失真** —— 语言后端未探测（`backend=None`）时被写成"纯 Python 降级"；
+  改为如实区分「尚未探测 / 不可用 / 未执行」，不再冒充 tier-3。
+- **P2 旧版报告 baseline 失效** —— 0.2.x JSON 无 `key` 字段时回退重算漏了 `context`
+  （dedup_key 含 context 哈希）→ 整份报告被误判"新引入"；回退补齐 context/location/message
+  的 None 归一化后与当前键完全对齐。
+- **P2 非法 frontmatter YAML 静默** —— `rules validate` 不检查 frontmatter 语法，`parameters:`
+  写坏时全局阈值静默回退默认值；现显式报错（`frontmatter YAML 无法解析`）。
+- **P3 `--fail-on-new` 空生效** —— 缺 `--baseline` 时静默 no-op；现输出警告。
+- **P3 profile 口径不透明** —— `relaxed` 隐藏 info 后分数/报告按可见发现计算但无提示；
+  CLI 增加 `[PROFILE]` 说明行，用户手册同步。
+- **P3 文档回归** —— `specification.md` CON-005~007 三行表格被压成一行；`release-checklist`
+  版本行被全局替换污染为"0.3.0（2026-10-30，第二轮修复版）"；api-reference「数据类」表混入常量；
+  `scoring.py` docstring 声称 `score_penalty_cap` 可配置（实际未接入）。
+- **P3 测试质量** —— `test_unknown_profile...` 的 `in (0, 1)` 零信息断言改为精确断言；
+  `test_integration` 的 `PROJECT_ROOT` 从文件尾移到顶部；批量 context 的 `complete` 反映转换失败。
+
+### 未做项（评估结论）
+
+- **包名 `src` → `docaudit` 重构**：BREAKING（所有 import、CLI 路径、文档示例、第三方
+  脚本均需改），当前无功能收益；实施需独立 PR + 兼容 shim，不建议与功能迭代混做。
+- **`src/cli.py`（807 行）/ `app.py`（1011 行）拆分**：拆分本身不改变行为，但会打断
+  `test_golden_paths` 的三路径锚点与既有覆盖率基线；建议在质量分/内容规则稳定后单独进行。
+- **本地 LLM 语义评审**：需要 GB 级模型与推理运行时，与"完全离线、零上报、轻依赖"红线
+  冲突，需产品决策；当前以"结构化内容检查"作为折中。
+
+## [0.2.2] - 2026-10-30
+
+第二轮全面深度审查修复版（P1 ×7 / P2 ×11 / P3 若干，含假阴性、假阳性、离线流程与文档漂移）。
+**655 个测试用例（23 个文件）**；27 条新回归用例锚定本轮全部代码修复，另修正 7 处空转断言。
+
+### Fixed
+
+- **P1 缩写重复定义跨页漏报（CON-003-B）** —— `definition_count` 只用页内字符偏移去重，两页在
+  同偏移各定义一次（模板句）被判为"同一定义站点" → 静默漏报。改为 `(页码, 页内偏移)` 二元组。
+- **P1 定义后未再使用漏报（CON-003-A）** —— 旧实现用 `total_count` 比去重站点数，
+  `TSV (硅通孔 TSV)` total=2 > def=1 → 永不报。改为统计"定义站点之外的出现次数"。
+- **P1 中文推荐术语被误报** —— `_already_preferred` 对含汉字的 preferred 用 `\b`（汉字属 `\w`，
+  「采用微凸块」无词边界）→ 已按推荐写法书写的文档报"术语不规范"。汉字词改子串匹配。
+- **P1 Web UI 豁免基线失效** —— `_reset_batch_state()` 把启动时从 `.docauditignore` 载入的豁免
+  置空 → 每次审查后团队基线失效，"保存豁免"还会用空基线覆写。改为重新从文件载入。
+- **P1 Markdown 围栏代码块被切断** —— 分页 `re.split(r"\n(?=(#{1,3})\s)")` 把代码块内的 `#` 注释
+  行当标题：代码块跨页、注释行变成标题元素、后半段失去掩码保护（`--flag` 被报 PUNCT-007、
+  代码标识符被报拼写错误）。分页改为围栏感知（`_split_pages_outside_fences`）。
+- **P1 离线依赖缓存位置与说明不符** —— wheel 下到 `scripts/packages/`，而 README/脚本提示"复制到
+  项目根 `packages/`"、HF 模型缓存在 `<项目根>/packages/hf_cache`。统一到项目根（旧位置自动沿用），
+  `gen_requirements_lock.py` 改用 `common.packages_dir()` 单一真相，`setup_offline.sh` 同步语义。
+- **P1 LanguageTool 段缓存跨文档泄漏** —— `_lt_segment_cache` 挂在审计器实例上，而 Web UI 用
+  `@st.cache_resource` 复用实例 → 第二份文档里与第一份相同的英文段不再送检，LanguageTool 结果
+  被静默吞掉（实测同文本第二份 0 请求）。改为 `audit()` 开始时按文档重置缓存。
+- **P2 代码/URL/结构语法参与语言检查** —— 拼写（PY-SPELL）、中英混排（FMT-MIXED-001~003）、
+  中文基础模式（PY-ZH-GRAMMAR）未掩码行内代码/围栏代码/URL。README 自审 96 条拼写命中中
+  50 条来自代码/URL。掩码逻辑收敛到 `src/text_utils.py`（等长空格、位置不变）并补 Markdown
+  分隔线 `---`、HTML 注释、行内代码；拼写/混排/中文模式统一使用。
+- **P2 "括号内即定义"启发式误判** —— `（核心依赖 + PDF + 开发工具）` 让 PDF 被当成已定义 →
+  CON-003 漏报、CON-003-A 假阳性（README 实测 19 处"定义"中 5 处误判）。括号内出现仅当缩写
+  是括号内容最后一个 token 时才算 `全称 (ABBR)` 定义；同时补上全角括号
+  `TSV（硅通孔）` 的定义识别（旧实现只认半角）。
+- **P2 文件名/路径片段被当缩写** —— `AGENTS.md`、`MANIFEST.in`、`src/CHANGELOG` 曾被报 CON-003。
+  文件名（`.md/.in/...` 扩展名）与路径片段不再进入缩写扫描。
+- **P2 代码块内容进入事实/术语/图号检查** —— CON-001 数值、CON-003 缩写、TERM 正则规则、
+  STR-002/STR-007 图号与图题原先把代码块/URL 内容当正文；现统一先掩码（位置不变）。
+- **P2 Markdown 列表块被当成一个段落** —— `_make_element` 把整个列表块塞进一个 Paragraph
+  （`\n` 连接）→ FMT-004 误报"段落过长"、FMT-007 / TXT-BULLET-PUNCT 只看得到首项。
+  列表项逐条拆 Paragraph，与 PPTX"每个项目符号一个段落"语义对齐；FMT-004 另加围栏代码块豁免。
+- **P2 版式复用检查只认中文版式** —— `_check_layout_consistency` 用 `"标题" in name` 字面判断，
+  英文模板（"Title Slide"）完全不检查。提取 `src/auditors/base.py::is_cover_layout`（CON-004 与
+  FormatAuditor 共用），`exempt_layouts` 经 `build_auditors` / `_create_auditor` 双路径注入。
+- **P2 DOCX 合并单元格重复产出** —— python-docx 对横向合并的每个网格位返回同一 `w:tc`、纵向合并
+  续行返回起始格 → 同一单元格审两次、colspan/rowspan 恒 1（FMT-TABLE-FIT 按单列宽估算合并表头
+  → 误报列宽不足）。按 `w:tc` 元素去重并统计 span；行分组改用 `range(nrows)` 与行高数组对齐（PPTX 同改）。
+- **P2 DOCX 页眉/页脚表格文本漏检** —— `header.paragraphs` 不含表格内文字，表单类页眉整块漏检；
+  现同时提取页眉/页脚表格单元格文本。
+- **P2 拼写检查顺序不确定** —— `spell.unknown()` 返回 set，直接遍历使 PY-SPELL 报告顺序随哈希
+  种子漂移；改为 `sorted()`（确定性回归此前只比集合，未发现）。
+- **P2 版式检查 finding 被去重折叠** —— `_check_layout_consistency` 的 finding 无 rule_id/页码/context
+  → `dedup_key` 碰撞，多个标题版式只剩一条。补 context（版式名 + 次数）。
+- **P2 CON-003-C 同页文案自相矛盾** —— 同页后文才定义时输出"在第 N 页使用，但在第 N 页才给出定义"，
+  改为"同页后文才给出定义"。
+- **P2 文档与代码漂移** —— glossary 45+→40（actual 19+4+17）、`general_tech` 9→4、Engine 8→9、
+  api-reference 总模块 28→29 并补 `_check_table_fit`、6 个 LanguageAuditor 检查行与
+  `BaseAuditor`/`is_cover_layout` 章节、`build_auditors` 默认参数、skills 目录树缺
+  `rules.md`/`deep-code-review.md`、tooling-pitfalls 仍引用已删除的 `tools/check_bare_handlers.py`、
+  AI 审查模板退出码说明（路径不存在 = 1）、user-manual 的 `_DISPATCH` 注册说明改为
+  `CHECK_REGISTRY`、`.ppt`/`.doc` 标注为不支持。
+- **P2 测试断言空转** —— CON-003 常见词用例读取从不写入的 `metadata["abbreviation"]`（恒真）、
+  dispatch 异常用例 `or "模拟 dispatch" in message`（恒真）、`code in (0, 1)`、
+  `isinstance(findings, list)`、`len(zh) >= 1`、确定性回归只比 `sorted()`（抹平顺序漂移）、
+  docling label 只测 str 分支（`label.value` 从未执行）。已改为有效约束并补枚举分支用例。
+- **P3 死代码/契约文案** —— `_matches_to_findings` 末尾重复 `return findings`；
+  `_try_java` 超时分支读取 `stderr=DEVNULL` 的 `stderr`（死代码）；`_check_python` 中
+  `len(word) <= 3 or isdigit()` 永假；`Paragraph.level` 注释称 MD 为 0-based（实际 1-based）；
+  内置语言检查规则 ID 表补 VOCAB-REJECT。
+
+### Changed
+
+- `vocab/accept.txt` 增补工具链/技术写作术语（docling、streamlit、pymupdf、frontmatter、noqa、
+  dedup 等 49 条），抑制 pyspellchecker 词典缺口导致的假拼写错误；这些词同样不再被
+  CON-003/TERM-003 误判。
+- 审查门禁 `test_gates.py`：`src/auditors/base.py` 纳入 API 同步检查（公开接口须在 api-reference
+  有条目 + 形参一致）。
+
 ## [0.2.1] - 2026-10-29
 
 深度审查修复版（P0 ×1 / P1 ×8，含发行红线与静默失效）。**627 个测试用例（23 个文件）**，

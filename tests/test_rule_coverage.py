@@ -94,6 +94,39 @@ class TestStr006TitleTrailingPunctuation:
         d = _doc([_page([_text_frame([_para("标题")], is_title=True)])])
         assert sa._check_title_trailing_punctuation(d.pages[0], d) == []
 
+    def test_subtitle_shape_not_treated_as_title(self):
+        """副标题占位符 (shape 名 "Subtitle 2") 不是标题 (2026-11 审查)
+
+        旧判断 `"title" in shape_name.lower()` 把 "Subtitle 2" 也当标题 →
+        规范报告的副标题句子被误报「标题末尾标点」/「标题过长」。
+        """
+        sa = StructureAuditor(config={"required_sections": []})
+        d = _doc(
+            [_page([_text_frame([_para("本报告说明良率提升工作。")], shape_name="Subtitle 2")])]
+        )
+        assert sa._check_title_trailing_punctuation(d.pages[0], d) == []
+        assert sa._check_title_length(d) == []
+        # 对照: 真正的标题形状 ("Title 1") 仍受检查
+        d2 = _doc([_page([_text_frame([_para("标题。")], shape_name="Title 1")])])
+        assert len(sa._check_title_trailing_punctuation(d2.pages[0], d2)) == 1
+
+    def test_content_placeholder_not_treated_as_title(self):
+        """内容占位符 (shape 名 "Content Placeholder 2") 不是标题。"""
+        sa = StructureAuditor(config={"required_sections": []})
+        d = _doc(
+            [
+                _page(
+                    [
+                        _text_frame(
+                            [_para("正文结尾有标点。")],
+                            shape_name="Content Placeholder 2",
+                        )
+                    ]
+                )
+            ]
+        )
+        assert sa._check_title_trailing_punctuation(d.pages[0], d) == []
+
 
 class TestStr008LayoutDiversity:
     """STR-008: 幻灯片版式多样性 (PPTX)。"""

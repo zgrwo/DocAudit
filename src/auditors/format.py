@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from itertools import combinations
 
-from src.auditors.base import BaseAuditor
+from src.auditors.base import DEFAULT_COVER_LAYOUTS, BaseAuditor, is_cover_layout
 from src.models.document import Document, Page
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.text_utils import LETTERED_BULLET_RE as _LETTERED_BULLET_RE
@@ -15,6 +15,14 @@ from src.text_utils import SYMBOL_BULLET_RE as _SYMBOL_BULLET_RE
 from src.text_utils import is_cjk_char as _is_cjk_char
 
 logger = logging.getLogger(__name__)
+
+
+def _float_cfg(cfg: dict, key: str, default: float) -> float:
+    """读取浮点配置；非法值回退默认（rules.md 参数合法性由 rules validate 报错）。"""
+    try:
+        return float(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _effective_latin_font(run) -> str | None:
@@ -143,15 +151,25 @@ def _longest_unbreakable_token_width(text: str, font_size: float) -> float:
 class FormatAuditor(BaseAuditor):
     """检查文档的格式规范"""
 
-    # 默认配置 (对齐 rules.md FMT-001/FMT-002/FMT-003/FMT-004)
+    # 默认配置 (对齐 rules.md FMT-001/FMT-002/FMT-003/FMT-004 + frontmatter 全局参数)
     DEFAULT_ALLOWED_FONTS = ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
     DEFAULT_TITLE_SIZE_RANGE = (28, 44)  # pt  (rules.md FMT-002: 标题 28-44pt)
     DEFAULT_BODY_SIZE_RANGE = (12, 32)  # pt  (rules.md FMT-002: 正文 12-32pt)
-    DEFAULT_ALIGNMENT_TOLERANCE = 5.0  # pt — 位置偏差容忍度
+    DEFAULT_ALIGNMENT_TOLERANCE = 5.0  # pt — 位置偏差容忍度 (rules.md parameters)
     # 表格 fit 估算默认字号 (单元格未写显式字号时)：PowerPoint 表格默认 18pt，
     # Word 正文默认 10.5pt。仅用于 FMT-TABLE-FIT 估算，不改写模型数据。
     DEFAULT_TABLE_FONT_SIZE_PPTX = 18.0
     DEFAULT_TABLE_FONT_SIZE_DOCX = 10.5
+    # 全局阈值默认值（rules.md frontmatter `parameters:` 可覆盖）
+    DEFAULT_TABLE_FIT_HEIGHT_RATIO = 1.15
+    DEFAULT_TABLE_FIT_MIN_EXCESS_PT = 6.0
+    DEFAULT_TABLE_FIT_COL_RATIO = 1.05
+    DEFAULT_TABLE_FIT_COL_MIN_EXCESS_PT = 2.0
+    DEFAULT_TABLE_MARGIN_PT_PPTX = 7.2
+    DEFAULT_TABLE_MARGIN_PT_DOCX = 5.4
+    DEFAULT_TEXT_OVERFLOW_HEIGHT_RATIO = 1.15
+    DEFAULT_TEXT_OVERFLOW_MIN_EXCESS_PT = 8.0
+    DEFAULT_IMAGE_MIN_DPI = 150.0
     DEFAULT_MAX_CHINESE_CHARS = 150  # 单段中文字数上限 (~3行×50字/行)
     DEFAULT_MAX_ENGLISH_CHARS = 300  # 单段英文字符上限 (~3行×100字符/行)
     DEFAULT_MAX_EXPLICIT_NEWLINES = 3  # 单段显式换行上限
@@ -166,11 +184,38 @@ class FormatAuditor(BaseAuditor):
         self.allowed_fonts = cfg.get("allowed_fonts", self.DEFAULT_ALLOWED_FONTS)
         self.title_size_range = cfg.get("title_size_range", self.DEFAULT_TITLE_SIZE_RANGE)
         self.body_size_range = cfg.get("body_size_range", self.DEFAULT_BODY_SIZE_RANGE)
-        self.alignment_tolerance = self.DEFAULT_ALIGNMENT_TOLERANCE
+        self.alignment_tolerance = _float_cfg(
+            cfg, "alignment_tolerance", self.DEFAULT_ALIGNMENT_TOLERANCE
+        )
         try:
             self.max_font_types = int(cfg.get("max_font_types", 3))
         except (ValueError, TypeError):
             self.max_font_types = 3
+        self.table_fit_height_ratio = _float_cfg(
+            cfg, "table_fit_height_ratio", self.DEFAULT_TABLE_FIT_HEIGHT_RATIO
+        )
+        self.table_fit_min_excess_pt = _float_cfg(
+            cfg, "table_fit_min_excess_pt", self.DEFAULT_TABLE_FIT_MIN_EXCESS_PT
+        )
+        self.table_fit_col_ratio = _float_cfg(
+            cfg, "table_fit_col_ratio", self.DEFAULT_TABLE_FIT_COL_RATIO
+        )
+        self.table_fit_col_min_excess_pt = _float_cfg(
+            cfg, "table_fit_col_min_excess_pt", self.DEFAULT_TABLE_FIT_COL_MIN_EXCESS_PT
+        )
+        self.table_margin_pt_pptx = _float_cfg(
+            cfg, "table_margin_pt_pptx", self.DEFAULT_TABLE_MARGIN_PT_PPTX
+        )
+        self.table_margin_pt_docx = _float_cfg(
+            cfg, "table_margin_pt_docx", self.DEFAULT_TABLE_MARGIN_PT_DOCX
+        )
+        self.text_overflow_height_ratio = _float_cfg(
+            cfg, "text_overflow_height_ratio", self.DEFAULT_TEXT_OVERFLOW_HEIGHT_RATIO
+        )
+        self.text_overflow_min_excess_pt = _float_cfg(
+            cfg, "text_overflow_min_excess_pt", self.DEFAULT_TEXT_OVERFLOW_MIN_EXCESS_PT
+        )
+        self.image_min_dpi = _float_cfg(cfg, "image_min_dpi", self.DEFAULT_IMAGE_MIN_DPI)
         self.max_chinese_chars = cfg.get("max_chinese_chars", self.DEFAULT_MAX_CHINESE_CHARS)
         self.max_english_chars = cfg.get("max_english_chars", self.DEFAULT_MAX_ENGLISH_CHARS)
         self.max_explicit_newlines = cfg.get(
@@ -195,6 +240,9 @@ class FormatAuditor(BaseAuditor):
             self.large_text_threshold = self.DEFAULT_LARGE_TEXT_THRESHOLD
         # 流水线模式: 跳过已由 CustomRulesAuditor dispatch 的检查
         self._skip_checks: set[str] = set(cfg.get("_skip_checks", []))
+        # 封面/标题版式判定口径 (与 CON-004 共用 rules.md 的「豁免版式」声明)，
+        # 供 _check_layout_consistency 识别"标题版式被内容页复用"(支持英文模板)
+        self.exempt_layouts = cfg.get("exempt_layouts") or list(DEFAULT_COVER_LAYOUTS)
         # 2026-10-28: FMT-001/002/004 没有 check_type, 旧实现无条件执行 —
         # 即使用户从 rules.md 删除规则，仍会用默认值报错，违反"rules.md 是唯一入口"。
         # enabled_rule_ids=None 表示独立使用/未注入配置，保持全部检查 (向后兼容)。
@@ -722,9 +770,9 @@ class FormatAuditor(BaseAuditor):
             inner_h = max(1.0, elem.height - margin_t - margin_b)
 
             estimated_h = _estimate_paragraphs_height(elem.paragraphs, inner_w)
-            if estimated_h is None or estimated_h <= inner_h * 1.15:
+            if estimated_h is None or estimated_h <= inner_h * self.text_overflow_height_ratio:
                 continue
-            if estimated_h - inner_h < 8.0:
+            if estimated_h - inner_h < self.text_overflow_min_excess_pt:
                 continue
 
             findings.append(
@@ -821,7 +869,7 @@ class FormatAuditor(BaseAuditor):
                 dpi_x = elem.image_px_width / (elem.width / 72.0)
                 dpi_y = elem.image_px_height / (elem.height / 72.0)
                 min_dpi = min(dpi_x, dpi_y)
-                if min_dpi < 150:
+                if min_dpi < self.image_min_dpi:
                     findings.append(
                         AuditFinding(
                             type=FindingType.FORMAT,
@@ -832,7 +880,7 @@ class FormatAuditor(BaseAuditor):
                             location=page_label,
                             context=f"{elem.shape_name or '图片'} ({elem.image_px_width}×{elem.image_px_height}px)",
                             suggestion="使用更高分辨率原图，避免投影/打印模糊",
-                            metadata={"dpi": round(min_dpi, 1)},
+                            metadata={"dpi": round(min_dpi, 1), "estimated": True},
                         )
                     )
 
@@ -885,7 +933,10 @@ class FormatAuditor(BaseAuditor):
 
         # 检查是否存在内容页使用了标题版式的情况
         # (简化: 如果标题版式被使用了多次 → 告警)
-        title_layouts = [name for name in layout_usage if "标题" in name]
+        # 版式判定与 CON-004 共用 is_cover_layout（中文/英文封面版式都识别）。
+        title_layouts = [
+            name for name in layout_usage if is_cover_layout(name, self.exempt_layouts)
+        ]
         for name in title_layouts:
             if layout_usage[name] > 1:
                 findings.append(
@@ -894,6 +945,10 @@ class FormatAuditor(BaseAuditor):
                         severity=FindingSeverity.INFO,
                         message=f"标题版式「{name}」被使用了 {layout_usage[name]} 次，建议只用于封面",
                         location="全文",
+                        # context 参与 dedup_key: 否则多个标题版式各一条 finding
+                        # 同类型/同页/同 rule_id(None) → 哈希碰撞被折叠成一条
+                        # (2026-11 审查实测: 「标题幻灯片」与「标题页」两条只剩一条)
+                        context=f"版式: {name}，使用 {layout_usage[name]} 次",
                         suggestion="内容页请使用「标题和内容」或「仅内容」版式",
                     )
                 )
@@ -919,6 +974,10 @@ class FormatAuditor(BaseAuditor):
             for para in elem.paragraphs:
                 text = para.text
                 if not text.strip():
+                    continue
+                # Markdown 围栏代码块不是散文段落：多行/长行是代码常态
+                # (2026-11 审查: README 自审 19 条 FMT-004 全部来自代码块)
+                if text.lstrip().startswith(("```", "~~~")):
                     continue
 
                 newline_count = text.count("\n")
@@ -1130,7 +1189,8 @@ class FormatAuditor(BaseAuditor):
         else:
             sh = 540
         is_pptx = doc is not None and doc.format == "pptx"
-        default_margin = 7.2 if is_pptx else 5.4  # PPTX 0.1in / Word 约 0.075in
+        # PPTX 0.1in / Word 约 0.075in（rules.md parameters 可覆盖）
+        default_margin = self.table_margin_pt_pptx if is_pptx else self.table_margin_pt_docx
         # 单元格通常不写显式字号（继承表格样式）：估算时用应用默认值，
         # 否则真实文件会整表静默跳过。values 见 rules.md「不可配阈值」表。
         default_size = (
@@ -1174,7 +1234,10 @@ class FormatAuditor(BaseAuditor):
                         _estimate_text_height(text, font_size, inner_w),
                     )
                     token_w = _longest_unbreakable_token_width(text, font_size)
-                    if token_w > inner_w * 1.05 and token_w - inner_w >= 2.0:
+                    if (
+                        token_w > inner_w * self.table_fit_col_ratio
+                        and token_w - inner_w >= self.table_fit_col_min_excess_pt
+                    ):
                         prev = narrow_cols.get(cell.col)
                         if prev is None or token_w > prev[0]:
                             narrow_cols[cell.col] = (token_w, inner_w)
@@ -1187,7 +1250,10 @@ class FormatAuditor(BaseAuditor):
                     avail_h = sum(row_heights[row_idx : row_idx + rowspan])
                 if avail_h > 0:
                     estimated_total += max(avail_h, needed_h)
-                    if needed_h > avail_h * 1.15 and needed_h - avail_h >= 6.0:
+                    if (
+                        needed_h > avail_h * self.table_fit_height_ratio
+                        and needed_h - avail_h >= self.table_fit_min_excess_pt
+                    ):
                         bad_rows.append((row_idx, needed_h, avail_h))
                 else:
                     estimated_total += needed_h

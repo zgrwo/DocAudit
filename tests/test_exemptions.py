@@ -191,3 +191,64 @@ class TestReviewRegressions:
 
     def test_save_returns_true_on_success(self, tmp_path):
         assert save_exemptions(tmp_path / ".docauditignore", {"k"}) is True
+
+
+class TestExemptionLifecycle:
+    """2026-11: 豁免生命周期（created/reviewer/expires + 过期失效）。"""
+
+    @staticmethod
+    def _write(path: Path, expires: str | None) -> None:
+        entry = {"key": "k1", "rule_id": "FMT-001"}
+        if expires:
+            entry["expires"] = expires
+        path.write_text(
+            json.dumps({"version": 1, "exemptions": [entry]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_expired_exemption_not_applied(self, tmp_path):
+        from src.engines.exemptions import load_exemptions
+
+        path = tmp_path / ".docauditignore"
+        self._write(path, "2000-01-01")
+        assert load_exemptions(path) == set()
+
+    def test_future_exemption_applied(self, tmp_path):
+        from src.engines.exemptions import load_exemptions
+
+        path = tmp_path / ".docauditignore"
+        self._write(path, "2999-12-31")
+        assert load_exemptions(path) == {"k1"}
+
+    def test_no_expires_never_expires(self, tmp_path):
+        from src.engines.exemptions import load_exemptions
+
+        path = tmp_path / ".docauditignore"
+        self._write(path, None)
+        assert load_exemptions(path) == {"k1"}
+
+    def test_stats_reports_expired(self, tmp_path):
+        from src.engines.exemptions import exemption_stats
+
+        path = tmp_path / ".docauditignore"
+        self._write(path, "2000-01-01")
+        stats = exemption_stats(path)
+        assert stats["total"] == 1 and stats["active"] == 0 and stats["expired"] == 1
+
+    def test_save_writes_reviewer_and_expiry(self, tmp_path):
+        from src.engines.exemptions import load_exemption_entries, save_exemptions
+
+        path = tmp_path / ".docauditignore"
+        assert save_exemptions(path, {"k1"}, reviewer="张三", expires="2999-12-31")
+        entry = load_exemption_entries(path)[0]
+        assert entry["reviewer"] == "张三"
+        assert entry["expires"] == "2999-12-31"
+        assert entry["created"]
+
+    def test_invalid_expires_value_keeps_exemption(self, tmp_path):
+        """非法日期不视为过期（fail-open 到保持豁免，避免静默解禁）。"""
+        from src.engines.exemptions import load_exemptions
+
+        path = tmp_path / ".docauditignore"
+        self._write(path, "not-a-date")
+        assert load_exemptions(path) == {"k1"}

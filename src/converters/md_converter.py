@@ -25,6 +25,11 @@ _LIST_MARKER_RE = re.compile(r"^(?:[\-*+]\s|\d+\.\s)")
 _HR_RE = re.compile(r"^[\-*_]{3,}\s*$")
 _SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 
+# 页面边界: H1–H3 标题行 (与 _split_into_pages 的 old regex 等价)
+_PAGE_HEADING_RE = re.compile(r"^\s{0,3}#{1,3}\s")
+# 围栏代码块标记 (``` / ~~~)：块内的 "#" 行不是标题
+_FENCE_MARKERS = ("```", "~~~")
+
 # 编码回退顺序 (UTF-8 优先，然后是常见中文编码，最后 Latin-1 兜底)
 _FALLBACK_ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "gbk", "gb2312", "shift-jis", "latin-1")
 
@@ -72,9 +77,13 @@ class MarkdownConverter(BaseConverter):
         )
 
     def _split_into_pages(self, text: str) -> list[Page]:
-        """将 Markdown 文本拆分为逻辑页"""
-        # 用 ## 或 ### 标题作为页面边界（模拟 Slide）
-        page_texts = re.split(r"\n(?=\s{0,3}#{1,3}\s)", text.strip())
+        """将 Markdown 文本拆分为逻辑页
+
+        页面边界是 H1–H3 标题，但**围栏代码块内部的标题样行不算边界**
+        （shell/Python 注释以 "#" 开头，旧实现会把代码块切断，见
+        `_split_pages_outside_fences`）。
+        """
+        page_texts = _split_pages_outside_fences(text.strip())
 
         pages: list[Page] = []
         page_no = 0  # F10: 独立连续页码计数 — 空 chunk continue 不产生 index/slide_number 空洞
@@ -232,6 +241,18 @@ class MarkdownConverter(BaseConverter):
             rows = self._parse_markdown_table(lines)
             return PageElement(type="table", tables=rows)
 
+        if elem_type == "text":
+            content_lines = [ln.strip() for ln in lines if ln.strip()]
+            # Markdown 列表块 = 多个列表项，不是一个段落：旧实现把整块塞进一个
+            # Paragraph（以 \n 连接）→ FMT-004 误报"段落过长"、FMT-007 与
+            # TXT-BULLET-PUNCT 只看得到首项（2026-11 审查）。逐项拆 Paragraph，
+            # 与 PPTX "每个项目符号一个段落" 的语义对齐。
+            if len(content_lines) > 1 and all(_LIST_MARKER_RE.match(ln) for ln in content_lines):
+                return PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text=ln, runs=[]) for ln in content_lines],
+                )
+
         # 检测该段是否为标题
         m = HEADING_RE.match(lines[0]) if lines else None
         level = len(m.group(1)) if m else None
@@ -265,6 +286,32 @@ class MarkdownConverter(BaseConverter):
                 rows.append(row_cells)
                 data_row_idx += 1
         return rows
+
+
+def _split_pages_outside_fences(text: str) -> list[str]:
+    """按 H1–H3 标题切分页面文本，但不切围栏代码块内部的 "#" 行。
+
+    旧实现用 ``re.split(r"\\n(?=\\s{0,3}#{1,3}\\s)")`` 直接切分：围栏代码块里
+    以 "#" 开头的行（shell 注释、Python 注释）会被当成标题 → 代码块被切断，
+    后半段失去围栏保护，混排/标点/拼写检查把代码内容当正文误报（2026-11 审查）。
+    """
+    chunks: list[list[str]] = [[]]
+    in_fence = False
+    fence_marker = ""
+    for line in text.split("\n"):
+        marker = line.lstrip()[:3]
+        if marker in _FENCE_MARKERS:
+            if not in_fence:
+                in_fence = True
+                fence_marker = marker
+            elif marker == fence_marker:
+                in_fence = False
+            chunks[-1].append(line)
+            continue
+        if not in_fence and _PAGE_HEADING_RE.match(line) and chunks[-1]:
+            chunks.append([])
+        chunks[-1].append(line)
+    return ["\n".join(chunk) for chunk in chunks if chunk]
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:

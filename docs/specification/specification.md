@@ -6,7 +6,7 @@
 
 ## 1. 项目概述
 
-**DocAudit** 是一个本地离线文档审查系统，支持 PPTX/DOCX/PDF/Markdown 格式，提供结构审查、格式审查、事实审查、语言审查、自定义规则审查等 5 大审查维度，26 条配置驱动规则。
+**DocAudit** 是一个本地离线文档审查系统，支持 PPTX/DOCX/PDF/Markdown 格式，提供结构审查、格式审查、事实审查、语言审查、自定义规则审查等 5 大审查维度，30 条配置驱动规则。
 
 ### 核心价值
 
@@ -14,7 +14,7 @@
 - 配置驱动：rules.md 声明规则（规则唯一入口），无需修改代码
 - 多格式支持：PPTX/DOCX/PDF/Markdown 统一审查
 - 黄金测试：CLI / Web UI / Python API 真实三路径结果一致
-- 半导体术语表：45+ 条专业术语 YAML 定义
+- 半导体术语表：40 条专业术语 YAML 定义（先进封装 19 / 通用技术写作 4 / 半导体制造 17）
 
 ### 目标用户
 
@@ -32,10 +32,10 @@
 | 格式审查 | FormatAuditor | 字体一致性 (Run 级)、字号范围、单页文本密度、段落长度、元素溢出、空占位符、项目符号（PPTX XML + DOCX 编号定义）、表格对比度、表格行列 fit |
 | 事实审查 | FactualAuditor | 数值跨页一致性、缩写定义管理、重复定义检测 |
 | 语言审查 | LanguageAuditor | 语法拼写（LanguageTool）、中英混排、术语一致性、禁用词汇、标点/日期/单位/范围一致性、重复句与近似重复页、DOCX 页眉页脚脚注 |
-| 自定义规则 | CustomRulesAuditor | rules.md 配置的 26 条规则（委托模式路由，不包含检查逻辑） |
+| 自定义规则 | CustomRulesAuditor | rules.md 配置的 30 条规则（委托模式路由，不包含检查逻辑） |
 | 内置检查 | LanguageAuditor / FormatAuditor / StructureAuditor 等 | FMT-MIXED / PUNCT-001~010 / TXT-REDUNDANT / TXT-BULLET-PUNCT / TXT-DUP-SENTENCE / TXT-NEAR-DUP / FMT-ALIGN / FMT-OVERLAP / FMT-SAFE-MARGIN / FMT-TEXT-OVERFLOW / FMT-TABLE-FIT / FMT-FOOTER / FMT-IMAGE / FMT-CHART / STR-MASTER / VOCAB-REJECT / PY-SPELL / PY-ZH-GRAMMAR（不经 rules.md 配置） |
 
-### 2.2 规则清单（26 条，以 rules.md 为唯一入口）
+### 2.2 规则清单（30 条，以 rules.md 为唯一入口）
 
 > 规则声明、严重度、阈值、check_type 全部以 `rules.md` 为准，本表仅为速览；
 > 新增/修改/删除规则只编辑 `rules.md`，本文件不重复维护规则定义。
@@ -50,6 +50,7 @@
 | STR-006 | structure | 标题末尾禁止标点：标题末尾不应使用句号、逗号等标点符号 |
 | STR-007 | structure | 图表标题格式一致性：图表标题编号格式应全文统一 |
 | STR-008 | structure | 幻灯片版式多样性：不应全部使用完全相同版式 |
+| STR-009 | structure | 图表须被正文引用：图/表标题存在但正文从未引用 |
 | FMT-001 | format | 正文字体统一：幻灯片正文必须使用指定字体之一（仅 PPTX） |
 | FMT-002 | format | 标题字号范围：标题 28-44pt，正文 12-32pt（仅 PPTX） |
 | FMT-003 | format | 每页文本量限制：单张幻灯片文本不应过于密集（仅 PPTX） |
@@ -68,8 +69,11 @@
 | CON-003-B | factual | 缩写重复定义：同一技术缩写在文档中被多次定义 |
 | CON-003-C | factual | 缩写在定义前使用：读者可能不理解 |
 | CON-004 | factual | 每页须有结论：每一页必须有明确的结论或关键要点 |
+| CON-005 | factual | 结论须有量化支撑：结论句缺少数字/百分比/单位 |
+| CON-006 | factual | 必含章节须有实体内容：章节只有标题无正文 |
+| CON-007 | factual | 数值须带单位：量词语境下的数值缺少单位 |
 
-> 共 26 条规则；TERM-001~003 为 regex 类型（由 CustomRulesAuditor 的 `_execute_regex_rule()` 直接处理），
+> 共 30 条规则；TERM-001~003 为 regex 类型（由 CustomRulesAuditor 的 `_execute_regex_rule()` 直接处理），
 > 其余经 `_DISPATCH` 表委托到对应 Auditor 检查方法。
 
 ### 2.3 关键技术特性
@@ -93,7 +97,8 @@ Reporter 层 (HTML/JSON/CSV/SARIF 报告)
     ↓
 Auditor 层 (5 个 Auditor)
     ↓
-Engine 层 (8 个引擎)
+Engine 层 (15 个引擎: pipeline / rule_parser / check_registry / terminology / vocabulary /
+languagetool / exemptions / validation / autofix)
     ↓
 Converter 层 (PPTX/DOCX/PDF/MD → Document)
     ↓

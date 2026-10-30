@@ -34,6 +34,124 @@ class AuditRule:
         }
 
 
+# ── 全局参数（rules.md frontmatter `parameters:`）────────────────────────
+# 这些阈值原先硬编码在各 Auditor 里（2026-11 审查列为"假阳性只能改代码"）。
+# 现统一从 rules.md 声明, 未声明时用这里的默认值（与历史硬编码值一致）。
+# GLOBAL_PARAM_SPECS: name → (type, default, min, max, 中文名)
+GLOBAL_PARAM_SPECS: dict[str, tuple[type, Any, float | None, float | None, str]] = {
+    "alignment_tolerance": (float, 5.0, 0.0, 100.0, "对齐容差 (pt)"),
+    "max_font_types": (int, 3, 1, 50, "全局字体种类上限"),
+    "near_duplicate_similarity": (float, 0.90, 0.50, 1.0, "近似重复页相似度阈值"),
+    "near_duplicate_min_chars": (int, 40, 10, 10000, "近似重复页最小字符数"),
+    "conclusion_min_paragraphs": (int, 3, 1, 100, "CON-004 判断 2 的内容段落门槛"),
+    "table_fit_height_ratio": (float, 1.15, 1.0, 5.0, "表格行高不足判定倍率"),
+    "table_fit_min_excess_pt": (float, 6.0, 0.0, 100.0, "表格行高不足最小超出 (pt)"),
+    "table_fit_col_ratio": (float, 1.05, 1.0, 5.0, "表格列宽不足判定倍率"),
+    "table_fit_col_min_excess_pt": (float, 2.0, 0.0, 100.0, "表格列宽不足最小超出 (pt)"),
+    "table_margin_pt_pptx": (float, 7.2, 0.0, 50.0, "PPTX 单元格默认内边距 (pt)"),
+    "table_margin_pt_docx": (float, 5.4, 0.0, 50.0, "DOCX 单元格默认内边距 (pt)"),
+    "text_overflow_height_ratio": (float, 1.15, 1.0, 5.0, "文本溢出判定倍率"),
+    "text_overflow_min_excess_pt": (float, 8.0, 0.0, 100.0, "文本溢出最小超出 (pt)"),
+    "image_min_dpi": (float, 150.0, 1.0, 10000.0, "图片最低 DPI"),
+    "numeric_length_units": (
+        list,
+        ["nm", "μm", "um", "mm", "cm", "m"],
+        None,
+        None,
+        "CON-001 视为工艺节点的长度单位",
+    ),
+    "common_uppercase_extra": (list, [], None, None, "缩写扫描额外豁免词 (大写)"),
+}
+
+
+def global_param_defaults() -> dict[str, Any]:
+    """全局参数默认值（深拷贝列表，避免调用方修改默认值）。"""
+    defaults: dict[str, Any] = {}
+    for name, (_typ, default, _lo, _hi, _label) in GLOBAL_PARAM_SPECS.items():
+        defaults[name] = list(default) if isinstance(default, list) else default
+    return defaults
+
+
+def _read_rules_text(file_path: str | Path) -> str:
+    """读取 rules.md（UTF-8 → GBK 回退，去 BOM，永不抛解码异常）。
+
+    2026-11 max 审查 S7：Windows 记事本保存的 UTF-8 BOM 会让 ``startswith("---")``
+    失效 → frontmatter ``parameters:`` 被静默忽略（全局阈值全部回退默认值）。
+    """
+    path = Path(file_path)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning("rules.md 非 UTF-8 编码，尝试 GBK 回退读取: %s", file_path)
+        content = path.read_text(encoding="gbk", errors="replace")
+    return content.lstrip("\ufeff")
+
+
+def parse_rules_globals(file_path: str | Path) -> dict[str, Any]:
+    """解析 rules.md frontmatter 的 ``parameters:`` 全局参数（原样返回，不做类型转换）。
+
+    非法类型/范围的报错由 ``validation.validate_rules`` 负责；运行时由
+    ``extract_auditor_config`` 做带告警的强制转换（不能因一处笔误阻断审查）。
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return {}
+    content = _read_rules_text(path)
+    if not content.startswith("---"):
+        return {}
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return {}
+    try:
+        data = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    raw = data.get("parameters")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): v for k, v in raw.items()}
+
+
+def _coerce_global(name: str, raw: Any, current: Any) -> Any:
+    """把 rules.md 的全局参数值转换成期望类型；非法值告警并保留当前值。"""
+    typ, _default, lo, hi, label = GLOBAL_PARAM_SPECS[name]
+    banner = f"全局参数 {label}（{name}）"
+    if typ is list:
+        if isinstance(raw, str):
+            values = [v.strip() for v in raw.split(",") if v.strip()]
+        elif isinstance(raw, (list, tuple)):
+            values = [str(v).strip() for v in raw if str(v).strip()]
+        else:
+            logger.warning("%s 值无效: %r，使用默认值 %r", banner, raw, current)
+            return current
+        return values
+    try:
+        value = typ(raw)
+    except (TypeError, ValueError):
+        logger.warning("%s 值无效: %r，使用默认值 %r", banner, raw, current)
+        return current
+    if (lo is not None and value < lo) or (hi is not None and value > hi):
+        logger.warning("%s 超出范围 [%s, %s]: %r，使用默认值 %r", banner, lo, hi, raw, current)
+        return current
+    return value
+
+
+def _parse_frontmatter_body(content: str) -> tuple[dict | None, str]:
+    """拆 frontmatter 与正文；返回 (frontmatter mapping 或 None, 正文)。"""
+    if not content.startswith("---"):
+        return None, content
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return None, content
+    try:
+        data = yaml.safe_load(parts[1])
+    except yaml.YAMLError:
+        return None, parts[2]
+    return (data if isinstance(data, dict) else None), parts[2]
+
+
 def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
     """解析 rules.md 文件，返回规则列表"""
     path = Path(file_path)
@@ -44,22 +162,10 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
     # 编码回退 (2026-09-06 审查 B-1): 用户误存 GBK 的 rules.md 不应使整个规则
     # 配置失效 (UnicodeDecodeError 直接抛出) — 与 vocabulary 的回退链对齐;
     # gbk+replace 兜底永不失败, 非 GBK 字节以 U+FFFD 可见呈现。
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        logger.warning("rules.md 非 UTF-8 编码，尝试 GBK 回退读取: %s", file_path)
-        content = path.read_text(encoding="gbk", errors="replace")
+    content = _read_rules_text(path)
 
-    # 解析 YAML frontmatter (可选，当前仅用于跳过)
-    body = content
-    if content.startswith("---"):
-        parts = content.split("---", 2)
-        if len(parts) >= 3:
-            try:
-                yaml.safe_load(parts[1])  # validate but discard
-            except yaml.YAMLError:
-                pass
-            body = parts[2]
+    # 解析 YAML frontmatter (跳过；parameters 由 parse_rules_globals 读取)
+    _frontmatter, body = _parse_frontmatter_body(content)
 
     rules: list[AuditRule] = []
     current_section = ""
@@ -176,11 +282,27 @@ def parse_rules_md(file_path: str | Path) -> list[AuditRule]:
                 elif key == "豁免版式" or key == "exempt_layouts":
                     vals = _parse_list(value)
                     rule.params["exempt_layouts"] = vals
+                elif key == "量词关键词" or key == "unit_keywords":
+                    rule.params["量词关键词"] = _parse_list(value)
+                elif key in ("最小数字个数", "evidence_min_numbers"):
+                    rule.params[key] = _safe_int(value)
+                elif key in ("最小内容段落", "section_min_paragraphs"):
+                    rule.params[key] = _safe_int(value)
+                elif key in ("最小字数", "section_min_chars"):
+                    rule.params[key] = _safe_int(value)
                 else:
                     rule.params[key] = value
 
     logger.info("从 rules.md 解析到 %d 条规则", len(rules))
     return rules
+
+
+def _safe_int(value: Any) -> int | str:
+    """解析整数；失败时保留原始值（供 validation 报告非法原值）。"""
+    try:
+        return int(str(value).strip())
+    except (ValueError, TypeError):
+        return str(value)
 
 
 def _parse_list(value: str) -> list[str]:
@@ -209,43 +331,66 @@ def _parse_range(value: str) -> tuple[int, int] | None:
     return None
 
 
-def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
+def extract_auditor_config(
+    rules: list[AuditRule], globals_: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """从 rules.md 解析结果中提取各 Auditor 的配置参数。
+
+    Args:
+        rules: ``parse_rules_md`` 结果。
+        globals_: ``parse_rules_globals`` 结果（rules.md frontmatter 的
+            ``parameters:``）；未声明或非法值回退 ``GLOBAL_PARAM_SPECS`` 默认值
+            并记 warning（运行时降级；校验时由 ``validate_rules`` 显式报错）。
 
     Returns:
         dict with keys: allowed_fonts, title_size_range, body_size_range,
-                        required_sections, max_chars_per_page
+                        required_sections, max_chars_per_page,
+                        以及全局参数（alignment_tolerance / max_font_types /
+                        near_duplicate_* / conclusion_min_paragraphs /
+                        table_fit_* / table_margin_* / text_overflow_* /
+                        image_min_dpi / numeric_length_units /
+                        common_uppercase_extra）
     """
-    config: dict[str, Any] = {
-        "allowed_fonts": ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"],
-        "title_size_range": (28, 44),
-        "body_size_range": (12, 32),
-        "required_sections": [],
-        "max_chinese_chars": 150,
-        "max_english_chars": 300,
-        "max_explicit_newlines": 3,
-        "max_chars_per_page": 200,
-        "conclusion_keywords": [
-            "结论",
-            "小结",
-            "总结",
-            "要点",
-            "关键",
-            "建议",
-            "展望",
-            "Summary",
-            "Conclusion",
-            "Key",
-            "Takeaway",
-            "Recommend",
-        ],
-        "max_english_words": 10,  # STR-004
-        "max_chinese_chars_title": 40,  # STR-004
-        "min_title_font_size": 28,  # STR-001 标题页大号标题文本判定阈值
-        "min_contrast": 4.5,  # FMT-008 表格对比度阈值 (WCAG AA 正文)
-        "large_text_min_contrast": 3.0,  # FMT-008 大字对比度阈值 (WCAG AA 大字)
-        "large_text_threshold": 18,  # FMT-008 大字字号阈值 (pt)
-    }
+    config: dict[str, Any] = global_param_defaults()
+    config.update(
+        {
+            "allowed_fonts": ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"],
+            "title_size_range": (28, 44),
+            "body_size_range": (12, 32),
+            "required_sections": [],
+            "max_chinese_chars": 150,
+            "max_english_chars": 300,
+            "max_explicit_newlines": 3,
+            "max_chars_per_page": 200,
+            "conclusion_keywords": [
+                "结论",
+                "小结",
+                "总结",
+                "要点",
+                "关键",
+                "建议",
+                "展望",
+                "Summary",
+                "Conclusion",
+                "Key",
+                "Takeaway",
+                "Recommend",
+            ],
+            "max_english_words": 10,  # STR-004
+            "max_chinese_chars_title": 40,  # STR-004
+            "min_title_font_size": 28,  # STR-001 标题页大号标题文本判定阈值
+            "min_contrast": 4.5,  # FMT-008 表格对比度阈值 (WCAG AA 正文)
+            "large_text_min_contrast": 3.0,  # FMT-008 大字对比度阈值 (WCAG AA 大字)
+            "large_text_threshold": 18,  # FMT-008 大字字号阈值 (pt)
+        }
+    )
+
+    # rules.md frontmatter `parameters:` 覆盖全局阈值（非法值告警并保留默认）
+    for _name, _raw in (globals_ or {}).items():
+        if _name in GLOBAL_PARAM_SPECS:
+            config[_name] = _coerce_global(_name, _raw, config[_name])
+        else:
+            logger.warning("rules.md parameters 含未知参数键: %s（已忽略）", _name)
 
     for rule in rules:
         rid = rule.rule_id
@@ -377,6 +522,21 @@ def extract_auditor_config(rules: list[AuditRule]) -> dict[str, Any]:
                 config["conclusion_keywords"] = rule.params["关键词"]
             if "exempt_layouts" in rule.params:
                 config["exempt_layouts"] = rule.params["exempt_layouts"]
+
+        # 内容级检查参数 (2026-11): CON-005 结论量化 / CON-006 章节实体 / CON-007 单位
+        elif rid.startswith("CON-005"):
+            if "关键词" in rule.params:
+                config["conclusion_keywords"] = rule.params["关键词"]
+            if "最小数字个数" in rule.params:
+                config["evidence_min_numbers"] = rule.params["最小数字个数"]
+        elif rid.startswith("CON-006"):
+            if "最小内容段落" in rule.params:
+                config["section_min_paragraphs"] = rule.params["最小内容段落"]
+            if "最小字数" in rule.params:
+                config["section_min_chars"] = rule.params["最小字数"]
+        elif rid.startswith("CON-007"):
+            if "量词关键词" in rule.params:
+                config["unit_keywords"] = rule.params["量词关键词"]
 
     # languagetool_url 接线 (2026-08 审查 L6): 任一规则 params 含该键即注入 config,
     # 由 pipeline.build_auditors 传给 LanguageAuditor (本地服务地址, 白名单在

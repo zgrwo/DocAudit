@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
+from src.text_utils import is_cjk_char as _is_cjk_char
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +53,13 @@ def _already_preferred(text: str, match_start: int, match_end: int, preferred: s
 
     策略：
     1. 提取 preferred 中的搜索词: 有括号则取缩写 (如 "TSV")，否则取全词
-    2. 在匹配位置前后 60 字符的窗口内用单词边界匹配搜索
+    2. 在匹配位置前后 60 字符的窗口内搜索该词
     3. 若搜索词存在 → 说明文档已使用推荐形式 → 应跳过
+
+    搜索词的边界处理（2026-11 审查）：含汉字的推荐写法（如 preferred
+    "微凸块 (Micro Bump)"）不能用 ``\\b`` —— 汉字属于 ``\\w``，"采用微凸块"
+    中「微」左侧是汉字故无词边界 → 守卫失效 → 已按推荐写法书写的文档被误报。
+    汉字词改用子串搜索（中文本无空格分词），拉丁词保留 ``\\b`` 防 "NA" 命中 "NANO"。
     """
     # 提取搜索词:
     # "TSV (Through Silicon Via)"  → "TSV" (取括号前)
@@ -67,10 +73,12 @@ def _already_preferred(text: str, match_start: int, match_end: int, preferred: s
             search_term = inner
     if not search_term or len(search_term) < 2:
         return False
-    # 在匹配位置周围用单词边界搜索 (避免 "NA" 误匹配 "NANO")
+    # 在匹配位置周围用词边界搜索 (避免 "NA" 误匹配 "NANO")
     window_start = max(0, match_start - 60)
     window_end = min(len(text), match_end + 60)
     window = text[window_start:window_end]
+    if any(_is_cjk_char(ch) for ch in search_term):
+        return search_term.casefold() in window.casefold()
     return bool(re.search(r"\b" + re.escape(search_term) + r"\b", window, re.IGNORECASE))
 
 

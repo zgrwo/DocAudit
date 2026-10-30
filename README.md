@@ -125,6 +125,10 @@ docker-compose up -d                    # &#8594; http://localhost:8010
 
 适用于内网、保密车间等无法连接 PyPI 的场景。一次下载，反复使用。
 
+> &#128204; 依赖缓存位于**项目根目录** `packages/`（与 PDF 模型缓存 `packages/hf_cache/` 同一目录，
+> 便于整体拷贝）。旧版本把 wheel 下到 `scripts/packages/`，脚本仍会沿用该旧位置（兼容），
+> 迁移时把内容移到项目根 `packages/` 即可。
+
 **第 1 步：在有网机器上下载依赖**
 
 ```bash
@@ -253,14 +257,14 @@ for f in findings:
 
 ## 规则速览
 
-共 26 条审查规则，分 4 个类别，全部通过 `rules.md` 配置：
+共 30 条审查规则，分 4 个类别，全部通过 `rules.md` 配置（全局阈值在 rules.md frontmatter `parameters:`）：
 
 | 类别 | 规则 | 示例 |
 |------|------|------|
-| **结构** (8条) | STR-001~008 | 标题页、编号连续、层级递进、标题长度/重复/标点、图表格式、结构一致性 |
+| **结构** (9条) | STR-001~009 | 标题页、编号连续、层级递进、标题长度/重复/标点、图表格式、结构一致性、图表引用 |
 | **格式** (8条) | FMT-001~008 | 字体、字号、文本密度、段落长度、溢出、占位符、项目符号、表格对比度（FMT-001~003/005 仅 PPTX） |
 | **术语** (3条) | TERM-001~003 | 先进封装术语、硅通孔术语、中英混排 (regex 驱动) |
-| **内容** (7条) | CON-001~004 + 子规则 | 数值一致性、必含章节、缩写定义 + 生命周期管理、每页结论 |
+| **内容** (11条) | CON-001~007 + 子规则 | 数值一致性、必含章节、缩写定义 + 生命周期管理、每页结论、结论量化、章节实体内容、数值单位 |
 
 > 所有规则定义 &#8594; [rules.md](rules.md) &nbsp;|&nbsp; 规则对应检查方法 &#8594; [API 参考](docs/specification/api-reference.md)
 
@@ -300,7 +304,7 @@ UI/CLI &#8594; Reporter &#8594; Auditor &#8594; Engine &#8594; Converter &#8594;
 
 ## 质量保证
 
-- **627 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
+- **735 个测试用例**：models / auditors / engines / rules / integration / golden paths / cli / scripts / 报告工作流 / 配置校验
 - **真实三路径黄金测试**：Python API = 真实 CLI subprocess = Web UI (AppTest) 结果完全一致
 - **DISPATCH 验证**：自动化检查 `_DISPATCH` 与 `_skip_checks` 完整性
 - **治理门禁（pytest 化）**：裸异常处理器 / html.escape 合规 / api-reference 同步 / 文档数字一致性，由 `tests/test_gates.py` 断言强制（原 tools/ 门禁 2026-09-06 5S 移除后回归）
@@ -407,3 +411,30 @@ python scripts/benchmark.py --sizes 20 --format docx --json bench.json
 **核心原则**：SSOT（信息只在一处定义）、Skill-first（修改代码前加载技能）、四条核心准则。
 
 <!-- last_updated: 2026-10-29 -->
+
+---
+
+## 质量评估（0.3.0 新增）
+
+除了逐条发现，报告现在直接回答"这份文档值多少分、哪些维度没查"：
+
+- **质量分**：0–100 + 等级（A≥90 / B≥75 / C≥60 / D）+ 分维度子分（结构/格式/语言/事实）。
+  罚分 = Σ(严重度权重 × 条数) / 页数，满分罚分 20；`SYS-ERROR` 不计罚分，单独统计；
+  溢出/表格 fit/DPI 等估算类发现按半权计入。HTML 头部、JSON `score`、CLI `[SCORE]`、
+  SARIF `run.properties.docAuditScore` 均可见。
+- **审查范围与可信度**：报告顶部列出语言检查后端（Docker/Java/纯 Python tier-3 能力不同）、
+  无版面几何/字体信息的格式、未执行的 PPTX 专属检查、执行失败的审计器——让"没问题"
+  与"没查"可区分。
+- **内容级检查**：图表是否被正文引用（STR-009）、结论有无量化支撑
+  （CON-005）、必含章节是否有实体内容（CON-006）、量词语境数值是否带单位（CON-007）。
+- **批量跨文档一致性**：目录审查时自动比对同一缩写的全称、必含章节覆盖（BATCH-TERM /
+  BATCH-SECTION）。
+- **版本对比**：`--baseline old.json` 输出「已修复 / 新引入 / 仍存在」，`--fail-on-new`
+  可把新引入的 error 变成 CI 阻断。
+- **规则 profile**：`--profile strict|standard|relaxed`（warning 阻断 / error 阻断 / 不阻断
+  且隐藏 info），`--fail-on` 显式覆盖。
+- **全局阈值可配置**：对齐容差、字体种类上限、近似重复页阈值、结论门槛、表格/溢出倍率、
+  图片 DPI、长度单位表等 16 项写入 `rules.md` frontmatter `parameters:`，
+  改阈值不必改代码，`docaudit rules validate` 静态校验。
+- **豁免生命周期**：`.docauditignore` 条目支持 `created` / `reviewer` / `expires`；
+  过期条目自动失效并在 CLI 提示复查。

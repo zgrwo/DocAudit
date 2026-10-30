@@ -4,7 +4,7 @@
 > 完整用法 → [用户手册](../user-manual/user-manual.md) &nbsp;|&nbsp; 编码规范 → [skills/python/SKILL.md](../../skills/python-SKILL.md)
 > 结构导航 → [project-structure.md](../governance/project-structure.md)
 
-**总模块**: 28 | **规则**: 26 条
+**总模块**: 35 | **规则**: 30 条
 
 ---
 
@@ -59,6 +59,14 @@
 
 `src/auditors/` — Document → [AuditFinding, ...]
 
+### Auditor 基类与共用判定 `src/auditors/base.py`
+
+| 名称 | 签名 | 说明 |
+|------|------|------|
+| `BaseAuditor` | `(config: dict \| None = None)` | Auditor 抽象基类；子类实现 `audit(doc)` |
+| `is_cover_layout` | `(layout_name: str \| None, exempt_layouts)` | → `bool` 封面/标题版式判定（精确匹配 + 封面专用短语前缀/包含；通用词 "Title" 不做子串匹配）。CON-004 页豁免与 FormatAuditor 版式复用提示共用 |
+| `DEFAULT_COVER_LAYOUTS` | `tuple[str, ...]` | 封面版式内置默认名（rules.md 未声明 exempt_layouts 时的回退） |
+
 ### `StructureAuditor` `src/auditors/structure.py`
 
 | 方法 | 签名 | 规则 ID | 说明 |
@@ -81,7 +89,7 @@
 
 | 方法 | 签名 | 规则 ID | 说明 |
 |------|------|---------|------|
-| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,44), `body_size_range`(12,32), `max_font_types`, `max_explicit_newlines`, `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `enabled_rule_ids`(rules.md 声明驱动, 2026-10-28), `_skip_checks`（`alignment_tolerance` 为类常量 5.0 pt，暂不可配置） |
+| `__init__` | `(config: dict \| None)` | — | `allowed_fonts`, `title_size_range`(28,44), `body_size_range`(12,32), `max_font_types`, `max_explicit_newlines`, `max_chinese_chars`(150), `max_english_chars`(300), `max_chars_per_page`(200), `min_contrast`(4.5), `large_text_min_contrast`(3.0), `large_text_threshold`(18), `rule_severities`(rule_id→严重度覆盖, 2026-09-06 C-1), `enabled_rule_ids`(rules.md 声明驱动, 2026-10-28), `exempt_layouts`(封面版式判定, 与 CON-004 共用), `_skip_checks`（`alignment_tolerance` 为类常量 5.0 pt，暂不可配置） |
 | `audit` | `(doc: Document)` | — | → `list[AuditFinding]` |
 | `_check_font_consistency` | `(page: Page)` | FMT-001 | 字体是否在允许列表中 (西文 latin 与中文 eastAsia 分别判定，按页+字体+作用域聚合) |
 | `_check_global_font_consistency` | `(doc: Document)` | FMT-001 | 全文字体种类统计 |
@@ -100,6 +108,7 @@
 | `_check_empty_placeholders` | `(page: Page, doc: Document)` | FMT-006 | 空白占位符检测 (PPTX only) |
 | `_check_bullet_consistency` | `(page: Page, doc: Document)` | FMT-007 | 项目符号样式一致性 |
 | `_check_table_contrast` | `(page: Page, doc: Document)` | FMT-008 | 表格底色 vs 字体色 WCAG 对比度 (PPTX/DOCX) |
+| `_check_table_fit` | `(page: Page, doc: Document)` | FMT-TABLE-FIT | 表格行高/列宽/页面越界估算 (按 colspan/rowspan 累加几何) |
 | `_hex_to_rgb` / `_relative_luminance` / `_contrast_ratio` | 模块级纯函数 | — | WCAG 对比度计算 (FMT-008) |
 
 ### `LanguageAuditor` `src/auditors/language.py`
@@ -113,7 +122,14 @@
 | `_check_punctuation` | `(text, page_index, page_label)` | PUNCT-001~007 | 重复/冲突标点、全半角、配对、省略号/破折号 |
 | `_check_redundancy` | `(text, page_index, page_label)` | TXT-REDUNDANT | 高精度中文冗余表达 |
 | `_check_mixed_formatting` | `(text, page_index, page_label)` | FMT-MIXED-001~003 | CJK-Latin 间距 + 标点 |
-| `_check_rejected_vocab` | `(text, page_index, page_label)` | — | reject.txt 禁用词匹配 |
+| `_check_rejected_vocab` | `(text, page_index, page_label)` | VOCAB-REJECT | reject.txt 禁用词匹配 |
+| `_check_date_format_consistency` | `(doc: Document)` | PUNCT-008 | 全文日期格式混用 (中文/ISO/斜杠) |
+| `_check_range_separator_consistency` | `(doc: Document)` | PUNCT-009 | 数值范围连接符混用 (-/—/~/至) |
+| `_check_unit_spacing_consistency` | `(doc: Document)` | PUNCT-010 | 数值与单位空格用法不一致 |
+| `_check_bullet_trailing_punctuation` | `(page: Page)` | TXT-BULLET-PUNCT | 页内项目符号末尾标点不一致 |
+| `_check_duplicate_sentences` | `(doc: Document)` | TXT-DUP-SENTENCE | 跨页重复句子 |
+| `_check_near_duplicate_pages` | `(doc: Document)` | TXT-NEAR-DUP | 近似重复页 (二元组 Jaccard ≥ 0.90) |
+| `_audit_auxiliary` | `(doc: Document)` | — | DOCX 页眉/页脚/脚注的语言类检查 |
 | `_segment_by_language` | `(text)` | — | → `list[(text, "zh"\|"en")]` 语言分段 |
 
 ### `FactualAuditor` `src/auditors/factual.py`
@@ -167,6 +183,10 @@ pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`Chec
 | `table_contrast` | fa | `_check_table_contrast` | ✓ | ✗ |
 | `slide_structure_consistency` | sa | `_check_slide_structure_consistency` | ✗ | ✓ |
 | `title_length` | sa | `_check_title_length` | ✗ | ✗ |
+| `figure_referenced` | sa | `_check_figure_referenced` | ✗ | ✗ |
+| `conclusion_has_evidence` | sa | `_check_conclusion_evidence` | ✗ | ✗ |
+| `section_has_substance` | sa | `_check_section_substance` | ✗ | ✗ |
+| `numeric_unit_presence` | fca | `_check_numeric_unit_presence` | ✗ | ✗ |
 
 > sa=StructureAuditor, fa=FormatAuditor, fca=FactualAuditor
 
@@ -181,21 +201,25 @@ pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`Chec
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `find_converter` | `(file_path: str)` | `Converter \| None` | 自动匹配转换器 |
-| `build_auditors` | `(rules_path, glossary_dir, vocab_dir)` | `list[(name, auditor)]` | 构建配置好的审计器列表 |
+| `build_auditors` | `(rules_path, glossary_dir, vocab_dir=None)` | `list[(name, auditor)]` | 构建配置好的审计器列表（`vocab_dir=None` 时按 `glossary_dir` 同级目录派生） |
 | `run_auditors` | `(doc: Document, auditors: list, on_progress=None)` | `list[AuditFinding]` | 顺序执行审计器 → 去重 |
+| `build_report_context` | `(doc, auditors, findings)` | `dict` | 质量分 + 覆盖/降级声明（CLI/HTML/JSON/SARIF 共用） |
 
 ### RuleParser `src/engines/rule_parser.py`
 
 | 函数 | 签名 | 返回 | 说明 |
 |------|------|------|------|
 | `parse_rules_md` | `(file_path: str \| Path)` | `list[AuditRule]` | 解析 rules.md → 规则对象列表 |
-| `extract_auditor_config` | `(rules: list)` | `dict` | 从规则中提取 Auditor 配置参数 |
+| `parse_rules_globals` | `(file_path: str \| Path)` | `dict` | 解析 frontmatter `parameters:` 全局阈值（原样返回，不做类型转换） |
+| `extract_auditor_config` | `(rules: list, globals_: dict \| None = None)` | `dict` | 从规则中提取 Auditor 配置参数（全局参数覆盖默认值） |
+| `global_param_defaults` | `()` | `dict` | 全局参数默认值（由 `GLOBAL_PARAM_SPECS` 派生） |
 
-数据类（同文件）:
+常量与数据类（同文件）:
 
 | 类 | 字段 | 说明 |
 |------|------|------|
 | `AuditRule` | `rule_id` / `category` / `severity` / `description` / `check_type` / `params` / `raw_text` | 单条审查规则 (`parse_rules_md` 返回) |
+| `GLOBAL_PARAM_SPECS` | `name → (type, default, min, max, 中文名)` | 全局阈值规格表（16 项；rules.md `parameters:` 与校验共用） |
 
 ### `TerminologyChecker` `src/engines/terminology.py`
 
@@ -205,7 +229,7 @@ pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`Chec
 | `load_glossaries` | `(glossary_dir: str \| Path)` | `None` | 加载/重载术语规则 (就地修改 self.glossaries) |
 | `check` | `(text, page_index, page_label)` | `list[AuditFinding]` | 对文本执行术语检查 (含跳过去重) |
 
-数据类（同文件）:
+常量与数据类（同文件）:
 
 | 类 | 字段 | 说明 |
 |------|------|------|
@@ -222,6 +246,7 @@ pipeline 的 `_skip_checks` 由它派生（2026-10-29 起不再手改）。`Chec
 |------|------|------|------|
 | `__init__` | `(base_url: str = DEFAULT_URL, timeout: int = 30, auto_start: bool = True)` | — | 初始化三层降级 |
 | `is_available` | (属性) | `bool` | 是否有可用后端 |
+| `backend` | (属性) | `str \| None` | 当前后端 `docker`/`java`/`python`（Coverage 声明用） |
 | `check` | `(text: str, language: str = "auto", mother_tongue: str \| None = None)` | `list[dict]` | 语法拼写检查 (Docker→Java→Python) |
 | `reset` | `()` | — | 清除缓存并重新探测后端 (有测试覆盖; 供外部手动重启探测) |
 
@@ -262,9 +287,73 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 | 符号 | 签名/字段 | 说明 |
 |------|-----------|------|
 | `CheckSpec` | `(auditor: str, method: str, per_page: bool = False, pptx_only: bool = False, skip_key: str = "")` | 单条检查声明；`skip_key` 为空表示与 check_type 同名 |
-| `CHECK_REGISTRY` | `dict[str, CheckSpec]` | check_type → 声明（当前 19 条） |
+| `CHECK_REGISTRY` | `dict[str, CheckSpec]` | check_type → 声明（当前 23 条） |
 
-### Exemptions `src/engines/exemptions.py`
+### AuditorConfig `src/engines/auditor_config.py`
+
+配置装配唯一真相来源：`pipeline.build_auditors` 与 `CustomRulesAuditor` 回退路径
+共用同一份键集（2026-11 新增，消除"两份手工 dict 漂移"）。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `build_auditor_configs` | `(config: dict, enabled_rule_ids: set \| None = None, skip_checks: dict \| None = None, glossary_dir: str \| None = None, vocab_dir: str \| None = None)` | `dict` | 拆成 `{"sa","fa","la","fca"}` 四份构造参数；`skip_checks` 仅 pipeline 传入 |
+
+### Scoring `src/engines/scoring.py`
+
+质量分（0-100 + 等级 + 分维度）。只计可行动发现；`SYS-ERROR` 不计罚分、单独统计；
+`metadata.estimated` 的估算类发现按半权计入。
+
+| 函数/常量 | 签名 | 说明 |
+|-----------|------|------|
+| `compute_score` | `(findings: list, page_count: int, penalty_cap: float = 20.0)` | 返回 `{score, grade, penalty, penalty_per_page, pages, counts, dimensions, system_errors, estimated}` |
+| `SEVERITY_WEIGHTS` | `dict[str, float]` | error=10 / warning=3 / info=1 |
+| `GRADE_THRESHOLDS` | `tuple[tuple[str, int], ...]` | A≥90 / B≥75 / C≥60 / 其余 D |
+| `DEFAULT_PENALTY_CAP` | `float` | 每页加权罚分达到 20 即 0 分 |
+
+### Coverage `src/engines/coverage.py`
+
+审查范围与降级声明（"没问题"与"没查"可区分）：语言后端层级、无几何/字体信息的
+格式、PPTX 专属检查未执行清单、执行失败审计器、估算类发现。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `collect_coverage` | `(doc: Document, auditors: list, findings: list)` | `dict` | 含 `format/pages/language_backend/geometry/font_metadata/not_applicable_checks/failed_auditors/estimated_findings/complete/notes` |
+| `format_coverage_lines` | `(coverage: dict)` | `list[str]` | CLI 文本行（与报告同源） |
+
+### Batch `src/engines/batch.py`
+
+跨文档一致性（仅批量模式 ≥2 文件）：同一缩写在多份报告中全称不一致（BATCH-TERM）、
+必含章节仅部分报告包含（BATCH-SECTION）。单文档审查看不见这类口径漂移。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `cross_document_findings` | `(entries: list[tuple[str, Document]], required_sections: list[str] \| None = None)` | `list[AuditFinding]` | 跨文档缩写/章节一致性检查 |
+
+### Baseline `src/engines/baseline.py`
+
+版本对比：读取上一版 JSON 报告的 `findings[].key`（稳定 `exemption_key`），输出
+「已修复 / 新引入 / 仍存在」；`--fail-on-new` 可把新引入 error 变成 CI 阻断。
+
+| 函数 | 签名 | 返回 | 说明 |
+|------|------|------|------|
+| `load_baseline_keys` | `(path: str \| Path)` | `set[str]` | 读取基线键集合（缺失/损坏 → 空集合，fail-open） |
+| `compare_with_baseline` | `(findings: list, baseline_keys: set[str])` | `dict` | 返回 `{fixed, new, remaining}` |
+| `format_baseline_summary` | `(result: dict)` | `str` | 一行摘要（已修复 / 新引入含 error/warning / 仍存在） |
+
+### Profiles `src/engines/profiles.py`
+
+规则 profile：只调整退出码阈值与报告最低严重度，不改变规则内容。
+
+| 符号 | 签名/字段 | 说明 |
+|------|-----------|------|
+| `PROFILES` | `dict[str, dict]` | `strict`（warning 阻断）/ `standard`（error 阻断）/ `relaxed`（不阻断，隐藏 info） |
+| `get_profile` | `(name: str \| None)` | 返回 profile 配置；未知名称回退 standard 并标 `unknown=True` |
+| `filter_by_severity` | `(findings: list, min_severity: str)` | 过滤低于最低严重度的发现（relaxed 降噪） |
+
+### Batch、Baseline、Profiles 的使用入口
+
+CLI `audit` 参数：`--profile {strict,standard,relaxed}`、`--baseline <上一版.json>`、
+`--fail-on-new`；批量目录审查自动输出 `[BATCH-CONSISTENCY]` 段。
 
 豁免持久化（`.docauditignore`，JSON v1）。读取只信任 `key` 字段（稳定 `exemption_key`）。编码回退 utf-8-sig → gbk → replace，GBK/BOM 文件均可读；
 其余为人工评审元数据；文件缺失/损坏返回空集合（fail-open 到"多报"）。
@@ -311,7 +400,7 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 | `all_text` (属性) | `str` | 全文拼接 (缓存) |
 | `all_paragraphs` (属性) | `list[Paragraph]` | 全文档段落 |
 
-内部数据类（同文件）:
+内部常量与数据类（同文件）:
 
 | 类 | 字段 | 说明 |
 |------|------|------|
@@ -451,8 +540,11 @@ dispatch 检查的单一真相来源（Engine 层纯声明，避免 Engine → A
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `audit_file` | `(file_path, rules_path="rules.md", glossary_dir="glossary", vocab_dir=None, verbose=False)` → `(Document, list[AuditFinding])` | 执行单文件审查并返回结果 |
+| `audit_file` | `(file_path, rules_path="rules.md", glossary_dir="glossary", vocab_dir=None, verbose=False)` → `(Document, list[AuditFinding])` | 执行单文件审查并返回结果（向后兼容包装） |
+| `audit_document` | `(file_path, rules_path="rules.md", glossary_dir="glossary", vocab_dir=None, verbose=False)` → `(Document, list[AuditFinding], dict)` | 同 `audit_file`，额外返回质量分/覆盖声明 context |
 | `print_summary` | `(findings)` | 打印审查结果摘要 |
+| `print_score_line` | `(score: dict \| None)` | 打印 `[SCORE]` 质量分行 |
+| `print_coverage` | `(coverage: dict \| None)` | 打印 `[COVERAGE]` 审查范围/降级声明 |
 | `doctor_check` | `()` → `int` | 环境诊断：检查运行环境健康状态，失败项 > 0 时返回 1 |
 
 子命令：`audit`（默认）、`doctor`、`rules validate`（配置校验，错误时 exit 1）、

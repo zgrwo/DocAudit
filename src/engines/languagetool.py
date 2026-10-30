@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from src.text_utils import ENGLISH_WORD_MIN4_RE, is_technical_token
+from src.text_utils import ENGLISH_WORD_MIN4_RE, is_technical_token, mask_prose_noise
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,14 @@ class LanguageToolClient:
     # ── Availability ─────────────────────────────────────────
 
     @property
+    def backend(self) -> str | None:
+        """当前语言检查后端: "docker" | "java" | "python" | None（未探测）。
+
+        供 Coverage 声明使用（tier-3 的语法/风格覆盖有限，报告需如实告知）。
+        """
+        return self._backend
+
+    @property
     def is_available(self) -> bool:
         """检查是否有可用的语言检查后端"""
         if self._available is not None:
@@ -233,7 +241,7 @@ class LanguageToolClient:
                     self.base_url = java_url
                     logger.info("LanguageTool: Java server started on port %d", port)
                     return True
-            # 超时: 先终止子进程，再读 stderr (避免对活进程的阻塞 read())
+            # 超时: 终止子进程 (stderr 已是 DEVNULL，无阻塞 read 风险)
             try:
                 self._java_process.terminate()
                 self._java_process.wait(timeout=5)
@@ -248,17 +256,12 @@ class LanguageToolClient:
                     self._java_process.kill()
                 except Exception:
                     pass  # bare-handler-ok — 子进程清理尽力而为，kill 失败可安全忽略
-            # 进程已终止，stderr 可安全读取 (EOF 已到达)
-            stderr_output = ""
-            try:
-                if self._java_process.stderr:
-                    stderr_output = self._java_process.stderr.read().decode(errors="replace")
-            except Exception:
-                pass  # bare-handler-ok — stderr 读取失败时按空输出处理，日志仍会给出超时警告
+            # 诊断信息不来自 stderr (DEVNULL)：给出可操作的排查线索
             logger.warning(
-                "LanguageTool Java server timed out (port %d). stderr: %s",
+                "LanguageTool Java server timed out (port %d, jar=%s): "
+                "检查内存 (-Xmx)、端口占用与 jar 版本；或改用 Docker (docker-compose up -d)",
                 port,
-                stderr_output[:500] if stderr_output else "(empty)",
+                jar_path,
             )
             self._java_process = None
             return False
@@ -371,13 +374,17 @@ class LanguageToolClient:
         - 非全大写缩写 (如 TSV) 且非驼峰 (如 FinFET)
         - 每页最多 100 个独立词
         需要完整拼写+语法检查请启动 Docker/Java LanguageTool 后端。
+
+        代码块/行内代码/URL/邮箱先掩码（等长空格）：其中的标识符不是拼写错误
+        （2026-11 审查：项目 README 自审时 `docaudit`/`streamlit` 等被报 misspelling）。
         """
         results: list[dict[str, Any]] = []
+        masked = mask_prose_noise(text)
 
         # ── 智能英文拼写检查 ──────────────────────────────────
         if self._spell_checker and language in ("en-US", "en", "auto"):
             # 使用 text_utils 共享的正则和分类函数
-            raw_words = ENGLISH_WORD_MIN4_RE.findall(text)
+            raw_words = ENGLISH_WORD_MIN4_RE.findall(masked)
             # 过滤：排除技术缩写/驼峰词，小写去重
             candidates: list[str] = []
             seen: set[str] = set()
@@ -396,15 +403,15 @@ class LanguageToolClient:
                 # 统一转小写进行拼写检查
                 lower_candidates = [w.lower() for w in candidates]
                 misspelled = self._spell_checker.unknown(lower_candidates)
-                for word_lower in misspelled:
-                    if len(word_lower) <= 3 or word_lower.isdigit():
-                        continue
+                # sorted(): unknown() 返回 set，遍历顺序受哈希种子影响 → 报告顺序
+                # 跨进程不稳定 (2026-11 审查: 确定性回归只比集合，掩盖了顺序漂移)
+                for word_lower in sorted(misspelled):
                     candidates_list = self._spell_checker.candidates(word_lower)
                     suggestion = ", ".join(list(candidates_list)[:3]) if candidates_list else None
                     # 使用大小写不敏感正则查找所有出现位置 (带词边界 —
                     # 修复 2026-08 审查 L11: 无边界时 "xrecieve" 内的 "recieve" 也被命中)
                     pattern = re.compile(rf"\b{re.escape(word_lower)}\b", re.IGNORECASE)
-                    for m in pattern.finditer(text):
+                    for m in pattern.finditer(masked):
                         # context 必须携带 offset/length (相对 context.text)，供
                         # language.py 的 accept.txt 白名单过滤定位匹配词。
                         # 否则 ctx_length=0 会导致白名单过滤被整体跳过。
@@ -430,7 +437,7 @@ class LanguageToolClient:
 
         # ── 中文基础语法正则 ──────────────────────────────────
         if language in ("zh-CN", "auto"):
-            results.extend(self._check_chinese_patterns(text))
+            results.extend(self._check_chinese_patterns(masked))
 
         return results
 

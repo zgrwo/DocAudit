@@ -14,8 +14,9 @@ from src.auditors import (
 )
 from src.auditors.base import BaseAuditor
 from src.converters import DocxConverter, MarkdownConverter, PdfConverter, PptxConverter
+from src.engines.auditor_config import build_auditor_configs
 from src.engines.check_registry import CHECK_REGISTRY
-from src.engines.rule_parser import extract_auditor_config, parse_rules_md
+from src.engines.rule_parser import extract_auditor_config, parse_rules_globals, parse_rules_md
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
@@ -52,7 +53,8 @@ def build_auditors(
     Returns: list of (name, auditor) tuples.
     """
     rules = parse_rules_md(rules_path)
-    config = extract_auditor_config(rules)
+    globals_ = parse_rules_globals(rules_path)
+    config = extract_auditor_config(rules, globals_)
     # rules.md 是格式规则启用状态的唯一入口: FMT-001/002/004 无 check_type,
     # 必须显式告知 FormatAuditor 哪些规则仍存在 (2026-10-28 修复删除规则仍执行)。
     enabled_rule_ids = {rule.rule_id for rule in rules}
@@ -64,76 +66,24 @@ def build_auditors(
             logger.debug("vocab 目录不存在，跳过词汇表检查: %s", derived)
         vocab_dir = str(derived)
 
-    # 构建各审计器实例 (使用 .get() 防御，避免 extract_auditor_config 未来重构时 KeyError)
-    structure_auditor = StructureAuditor(
-        config={
-            "required_sections": config.get("required_sections", []),
-            "required_sections_severity": config.get("required_sections_severity", "error"),
-            "conclusion_keywords": config.get(
-                "conclusion_keywords",
-                [
-                    "结论",
-                    "小结",
-                    "总结",
-                    "要点",
-                    "关键",
-                    "建议",
-                    "展望",
-                    "Summary",
-                    "Conclusion",
-                    "Key",
-                    "Takeaway",
-                    "Recommend",
-                ],
-            ),
-            # 修复 (2026-08 审查 L10): 未声明时传 None (而非 []), 否则空列表
-            # 覆盖 StructureAuditor 内置默认豁免版式
-            "exempt_layouts": config.get("exempt_layouts"),
-            "max_english_words": config.get("max_english_words", 10),
-            "max_chinese_chars_title": config.get("max_chinese_chars_title", 40),
-            "min_title_font_size": config.get("min_title_font_size", 28),
-            # 跳过已由 CustomRulesAuditor dispatch 的检查，避免双重执行
-            # (由 CHECK_REGISTRY 派生: 注册即跳过，漏注册不可能发生)
-            "_skip_checks": CustomRulesAuditor.skip_checks_for("sa"),
-        }
+    # 配置装配唯一真相来源 (src/engines/auditor_config.py): 与 CustomRulesAuditor
+    # 回退路径共用同一份键集，避免"两份手工 dict 漂移"(特检 #4)。
+    configs = build_auditor_configs(
+        config,
+        enabled_rule_ids=enabled_rule_ids,
+        skip_checks={
+            "sa": CustomRulesAuditor.skip_checks_for("sa"),
+            "fa": CustomRulesAuditor.skip_checks_for("fa"),
+            "fca": CustomRulesAuditor.skip_checks_for("fca"),
+        },
+        glossary_dir=glossary_dir,
+        vocab_dir=vocab_dir,
     )
-    format_auditor = FormatAuditor(
-        config={
-            "allowed_fonts": config.get(
-                "allowed_fonts", ["微软雅黑", "Arial", "Calibri", "Noto Sans SC"]
-            ),
-            "title_size_range": config.get("title_size_range", (28, 44)),
-            "body_size_range": config.get("body_size_range", (12, 32)),
-            "max_chinese_chars": config.get("max_chinese_chars", 150),
-            "max_english_chars": config.get("max_english_chars", 300),
-            "max_explicit_newlines": config.get("max_explicit_newlines", 3),
-            "max_chars_per_page": config.get("max_chars_per_page", 200),
-            "min_contrast": config.get("min_contrast", 4.5),
-            "large_text_min_contrast": config.get("large_text_min_contrast", 3.0),
-            "large_text_threshold": config.get("large_text_threshold", 18),
-            # 无 check_type 的 format 规则 (FMT-001/002/004) 严重度以 rules.md 为准
-            # (2026-09-06 审查 C-1); dispatch 型规则仍由 custom_rules 覆盖, 不经此处
-            "rule_severities": config.get("rule_severities", {}),
-            "enabled_rule_ids": enabled_rule_ids,
-            "_skip_checks": CustomRulesAuditor.skip_checks_for("fa"),
-        }
-    )
-    # languagetool_url 可选注入: rules.md 声明时传入, 未声明时由
-    # LanguageAuditor 使用内置默认 (http://localhost:8010/v2)。显式传 None
-    # 会覆盖默认值, 故仅在该键存在时注入。
-    _language_cfg: dict[str, Any] = {
-        "glossary_dir": glossary_dir,
-        "vocab_dir": vocab_dir,
-    }
-    if "languagetool_url" in config:
-        _language_cfg["languagetool_url"] = config["languagetool_url"]
-    language_auditor = LanguageAuditor(config=_language_cfg)
-    factual_auditor = FactualAuditor(
-        config={
-            "vocab_dir": vocab_dir,
-            "_skip_checks": CustomRulesAuditor.skip_checks_for("fca"),
-        }
-    )
+
+    structure_auditor = StructureAuditor(config=configs["sa"])
+    format_auditor = FormatAuditor(config=configs["fa"])
+    language_auditor = LanguageAuditor(config=configs["la"])
+    factual_auditor = FactualAuditor(config=configs["fca"])
     custom_rules_auditor = CustomRulesAuditor(
         config={"rules_path": rules_path, "vocab_dir": vocab_dir}
     )
@@ -194,3 +144,22 @@ def run_auditors(
     if on_progress:
         on_progress("完成", total, total)
     return AuditFinding.deduplicate(all_findings)
+
+
+def build_report_context(
+    doc: Document,
+    auditors: list[tuple[str, BaseAuditor]],
+    findings: list[AuditFinding],
+) -> dict:
+    """汇总报告所需的派生信息：质量分 + 覆盖/降级声明（2026-11）。
+
+    唯一真相来源：CLI / Web UI / HTML / JSON 报告都从这里取，避免各自计算
+    导致"报告分数与摘要不一致"。
+    """
+    from src.engines.coverage import collect_coverage
+    from src.engines.scoring import compute_score
+
+    return {
+        "score": compute_score(findings, len(doc.pages)),
+        "coverage": collect_coverage(doc, auditors, findings),
+    }

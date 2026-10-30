@@ -23,7 +23,7 @@ from src.engines.exemptions import (
     load_exemptions,
     save_exemptions,
 )
-from src.engines.pipeline import find_converter, run_auditors
+from src.engines.pipeline import build_report_context, find_converter, run_auditors
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
 from src.reporters.csv_reporter import generate_csv_report
@@ -132,6 +132,9 @@ if "audit_completed" not in st.session_state:
     st.session_state.audit_completed = False
 if "audit_progress" not in st.session_state:
     st.session_state.audit_progress = {}
+if "audit_context" not in st.session_state:
+    # 质量分 + 覆盖/降级声明（build_report_context 结果）；无审查结果时为 None
+    st.session_state.audit_context = None
 if "exempted_finding_ids" not in st.session_state:
     # 启动时自动载入工作目录的 .docauditignore（跨会话复用误报豁免）
     st.session_state.exempted_finding_ids = load_exemptions(EXEMPTION_FILE)
@@ -211,12 +214,19 @@ def _paginate(items: list, page: int, page_size: int = 100) -> tuple[list, int, 
 
 
 def _reset_batch_state() -> None:
-    """重置审查状态和过滤器（新文件上传时调用）。"""
+    """重置审查状态和过滤器（新文件上传时调用）。
+
+    豁免键（exempted_finding_ids）不重置为空集合：它由 finding 内容派生、跨审查
+    稳定，且启动时已从 `.docauditignore` 载入团队基线。旧实现一律置空，导致
+    "启动自动载入豁免" 在上传后立即失效 —— Web UI 永远用不上该文件
+    （2026-11 审查）。这里改为重新从文件载入，语义等价于"沿用基线"。
+    """
     st.session_state.findings = []
     st.session_state.doc = None
     st.session_state.audit_completed = False
     st.session_state.audit_progress = {}
-    st.session_state.exempted_finding_ids = set()
+    st.session_state.audit_context = None
+    st.session_state.exempted_finding_ids = load_exemptions(EXEMPTION_FILE)
     st.session_state.findings_page = 1  # 新文件从第 1 页开始
     st.session_state.batch_docs = []
     st.session_state.batch_findings = {}
@@ -282,6 +292,30 @@ def _batch_file_key(f, index: int, used_keys: set[str]) -> str:
         key = str(Path(f))
     used_keys.add(key)
     return key
+
+
+def _batch_context(docs: list, file_count: int, findings: list) -> dict:
+    """批量聚合的 score/coverage context（与单文件 build_report_context 同源口径）。
+
+    ``complete`` 反映是否有文件转换/审查失败：批量结果不完整时必须如实声明，
+    否则 Web UI 会把"部分文件没审"显示成"审查完整"（2026-11 reaudit S9）。
+    """
+    from src.engines.scoring import compute_score
+
+    pages = sum(len(getattr(d, "pages", []) or []) for d in docs)
+    return {
+        "score": compute_score(findings, pages),
+        "coverage": {
+            "format": "batch",
+            "pages": pages,
+            "complete": len(docs) == file_count,
+            "language_backend": None,
+            "notes": [
+                f"批量模式: {len(docs)} 个文件 / {pages} 页",
+                "语言检查后端与格式能力因文件而异，详见各文件审查报告",
+            ],
+        },
+    }
 
 
 def _run_batch_audit(files: list) -> None:
@@ -350,6 +384,8 @@ def _run_batch_audit(files: list) -> None:
             new_metadata["source_file"] = fkey
             combined.append(_dc_replace(fd, metadata=new_metadata))
     st.session_state.findings = combined
+    # 批量聚合质量分 + 覆盖声明（缺失时 Web UI 批量模式没有 I 维度显示 — reaudit S9）
+    st.session_state.audit_context = _batch_context(docs, len(files), combined)
     st.session_state.findings_page = 1  # 批量审查结果从第 1 页开始
     st.session_state.doc = docs[0] if docs else None
     # 批量审查完成标记: docs 为空 (全部失败) 时不进入结果页, 由调用方提示错误。
@@ -371,6 +407,8 @@ def run_audit(doc: Document) -> list[AuditFinding]:
             progress_bar.progress((i + 0.5) / total, f"正在执行: {name} ({i + 1}/{total})")
 
     findings = run_auditors(doc, auditors, on_progress=on_progress)
+    # 质量分 + 覆盖/降级声明（与 CLI/HTML/JSON 同一 build_report_context）
+    st.session_state.audit_context = build_report_context(doc, auditors, findings)
     progress_bar.empty()  # 清除进度条
 
     return findings
@@ -581,6 +619,8 @@ with st.sidebar:
                 page_count=page_count,
                 # 批量聚合报告不含单一文件的页面几何 → 关闭缩略图避免误导
                 show_thumbnails=not st.session_state.get("batch_mode"),
+                score=(st.session_state.get("audit_context") or {}).get("score"),
+                coverage=(st.session_state.get("audit_context") or {}).get("coverage"),
             )
             st.download_button(
                 "📥 下载 HTML 报告",
@@ -593,6 +633,8 @@ with st.sidebar:
             report = generate_json_report(
                 st.session_state.doc,
                 filtered_download,
+                score=(st.session_state.get("audit_context") or {}).get("score"),
+                coverage=(st.session_state.get("audit_context") or {}).get("coverage"),
             )
             st.download_button(
                 "📋 下载 JSON 报告",
@@ -763,6 +805,25 @@ if st.session_state.doc and st.session_state.get("audit_completed"):
             st.metric("🔴 严重", errors)
         with c4:
             st.metric("📋 总计", len(filtered))
+
+    # ── 质量分 + 审查范围声明（2026-11: 让"没问题"与"没查"可区分）──
+    _ctx = st.session_state.get("audit_context") or {}
+    _score = _ctx.get("score")
+    _cov = _ctx.get("coverage")
+    if _score:
+        sc1, sc2 = st.columns([1, 2])
+        with sc1:
+            st.metric("质量分", f"{_score.get('score', '-')} / 100", f"等级 {_score.get('grade')}")
+        with sc2:
+            dims = " · ".join(
+                f"{name} {info['score']}" for name, info in (_score.get("dimensions") or {}).items()
+            )
+            st.caption(f"分维度: {dims or '—'}")
+    if _cov:
+        status = "完整" if _cov.get("complete", True) else "不完整（有检查执行失败）"
+        with st.expander(f"审查范围与可信度：{status}", expanded=False):
+            for _note in _cov.get("notes", []):
+                st.write(f"- {_note}")
 
     # ── 仪表盘 ──
     st.divider()

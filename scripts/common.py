@@ -28,9 +28,28 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _packages_dir_for(root: Path, scripts_dir: Path) -> Path:
+    """离线依赖缓存的目录决策（纯函数，便于单测）。
+
+    优先 `<项目根>/packages`；仅当根目录不存在而旧位置 `<scripts>/packages`
+    存在时沿用旧位置（兼容历史下载结果）。
+    """
+    root_packages = root / "packages"
+    legacy_packages = scripts_dir / "packages"
+    if not root_packages.exists() and legacy_packages.is_dir():
+        return legacy_packages
+    return root_packages
+
+
 def packages_dir() -> Path:
-    """离线依赖缓存目录。"""
-    return Path(__file__).resolve().parent / "packages"
+    """离线依赖缓存目录（项目根 `packages/`，与 HF 模型缓存 `packages/hf_cache` 同目录）。
+
+    离线流程的对外说明是"把 packages/ 复制到离线机器的项目根目录"，且
+    `run.py` / `run.sh` / `pdf_converter._hf_cache_dir()` 都把 HF 模型缓存放在
+    `<项目根>/packages/hf_cache`。旧实现把 wheel 下到 `scripts/packages/`，
+    与说明和模型缓存分属两处（2026-11 审查）→ 统一到项目根；旧位置作为兼容保留。
+    """
+    return _packages_dir_for(project_root(), Path(__file__).resolve().parent)
 
 
 def venv_dir() -> Path:

@@ -11,6 +11,7 @@ from src.engines.rule_parser import AuditRule, parse_rules_md
 from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
+from src.text_utils import mask_prose_noise
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,9 @@ class CustomRulesAuditor(BaseAuditor):
         seen_terms: set[str] = set()
 
         for page in doc.pages:
-            text = page.all_text
+            # 代码块/URL 内的文本不是正文用法 (如代码常量里的缩写)；
+            # 掩码等长替换、字符位置不变，context 仍可回原文切片
+            text = mask_prose_noise(page.all_text)
             # 仅中文页面: 页面无 CJK 字符时跳过 (如 TERM-003 中英混排规则对纯英文页无意义)
             # 布尔解析统一: "false"/"0" 等字符串不得误判为真
             if str(rule.params.get("仅中文页面", "")).lower() in ("true", "1", "yes") and not any(
@@ -357,57 +360,38 @@ class CustomRulesAuditor(BaseAuditor):
 
         独立模式(无 pipeline 注入)下使用此路径 — 不需要 _skip_checks，
         因为没有 CustomRulesAuditor 分发来实现双重执行。
+
+        配置键集由 `src/engines/auditor_config.build_auditor_configs` 统一定义
+        （与 pipeline.build_auditors 共用），回退路径不再手写第二份 dict。
         """
         from src.auditors.factual import FactualAuditor
         from src.auditors.format import FormatAuditor
         from src.auditors.structure import StructureAuditor
+        from src.engines.auditor_config import build_auditor_configs
 
-        cfg = self._resolve_auditor_config()
-
+        configs = build_auditor_configs(
+            self._resolve_auditor_config(),
+            enabled_rule_ids={r.rule_id for r in self.rules},
+            vocab_dir=self.vocab_dir,
+        )
         if key == "sa":
-            return StructureAuditor(
-                config={
-                    "required_sections": cfg.get("required_sections", []),
-                    "required_sections_severity": cfg.get("required_sections_severity", "error"),
-                    "conclusion_keywords": cfg.get("conclusion_keywords", []),
-                    # 陷阱 #4: 与 build_auditors 一致 — 未声明时传 None (而非 []),
-                    # 否则空列表覆盖 StructureAuditor 内置默认豁免版式 (2026-08 审查 P1-1)
-                    "exempt_layouts": cfg.get("exempt_layouts"),
-                    "max_english_words": cfg.get("max_english_words", 10),
-                    "max_chinese_chars_title": cfg.get("max_chinese_chars_title", 40),
-                    "min_title_font_size": cfg.get("min_title_font_size", 28),
-                }
-            )
-        elif key == "fa":
-            return FormatAuditor(
-                config={
-                    "allowed_fonts": cfg.get("allowed_fonts", []),
-                    "title_size_range": cfg.get("title_size_range"),
-                    "body_size_range": cfg.get("body_size_range"),
-                    "max_chinese_chars": cfg.get("max_chinese_chars"),
-                    "max_english_chars": cfg.get("max_english_chars"),
-                    "max_explicit_newlines": cfg.get("max_explicit_newlines"),
-                    "max_chars_per_page": cfg.get("max_chars_per_page"),
-                    # 陷阱 #4: 回退路径 config 键集必须与 build_auditors 一致
-                    "min_contrast": cfg.get("min_contrast", 4.5),
-                    "large_text_min_contrast": cfg.get("large_text_min_contrast", 3.0),
-                    "large_text_threshold": cfg.get("large_text_threshold", 18),
-                    "rule_severities": cfg.get("rule_severities", {}),
-                    "enabled_rule_ids": {r.rule_id for r in self.rules},
-                }
-            )
-        elif key == "fca":
-            return FactualAuditor(config=cfg)
-        else:
-            raise ValueError(f"Unknown auditor key: {key}")
+            return StructureAuditor(config=configs["sa"])
+        if key == "fa":
+            return FormatAuditor(config=configs["fa"])
+        if key == "fca":
+            return FactualAuditor(config=configs["fca"])
+        raise ValueError(f"Unknown auditor key: {key}")
 
     def _resolve_auditor_config(self) -> dict:
-        """从 rules 提取并缓存配置。"""
+        """从 rules 提取并缓存配置（含 rules.md frontmatter 全局参数）。"""
         if self._auditor_cfg_cache is not None:
             return self._auditor_cfg_cache
-        from src.engines.rule_parser import extract_auditor_config
+        from src.engines.rule_parser import extract_auditor_config, parse_rules_globals
 
-        cfg = extract_auditor_config(self.rules)
+        globals_ = {}
+        if self.rules_path:
+            globals_ = parse_rules_globals(self.rules_path)
+        cfg = extract_auditor_config(self.rules, globals_)
         if self.config:
             for k, v in self.config.items():
                 if k != "rules_path":

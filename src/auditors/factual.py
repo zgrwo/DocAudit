@@ -9,6 +9,7 @@ from src.auditors.base import BaseAuditor
 from src.engines.vocabulary import Vocabulary
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
+from src.text_utils import mask_prose_noise
 
 # 常见英语大写单词 (非技术缩写)，出现在文档中时不应标记为“未定义缩写”
 _COMMON_UPPERCASE_WORDS = frozenset(
@@ -175,6 +176,41 @@ class FactualAuditor(BaseAuditor):
         # 缩写扫描缓存 — 每次 audit() 调用时重置；独立模式 (dispatch 直调) 下
         # 以 (id(doc), result) 绑定文档身份，防止跨文档串档
         self._abbr_scan_cache: tuple | None = None
+        # 全局参数 (rules.md frontmatter parameters.*)
+        units = cfg.get("numeric_length_units")
+        self._length_units = frozenset(str(u) for u in units) if units else _LENGTH_UNITS
+        keywords = cfg.get("unit_keywords")
+        self.unit_keywords = (
+            [str(k) for k in keywords]
+            if keywords
+            else [
+                "厚度",
+                "宽度",
+                "深度",
+                "直径",
+                "间距",
+                "线宽",
+                "高度",
+                "长度",
+                "温度",
+                "电压",
+                "电流",
+                "功率",
+                "速度",
+                "尺寸",
+                "距离",
+                "容量",
+                "重量",
+                "压力",
+                "频率",
+                "密度",
+                "角度",
+            ]
+        )
+        extra = cfg.get("common_uppercase_extra") or []
+        self._common_uppercase_words = frozenset(_COMMON_UPPERCASE_WORDS) | frozenset(
+            str(w).upper() for w in extra
+        )
 
     def audit(self, doc: Document) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
@@ -204,7 +240,7 @@ class FactualAuditor(BaseAuditor):
         numeric_entries: list[dict] = [
             entry
             for entry in self._extract_numeric_values(doc)
-            if not self._is_qualifier_numeric_entry(entry)
+            if not self._is_qualifier_numeric_entry(entry, self._length_units)
         ]
 
         # 按相似上下文聚类。key 保留年份/季度/节点等限定词，
@@ -270,7 +306,7 @@ class FactualAuditor(BaseAuditor):
         return normalized + "|" + ",".join(sorted(qualifiers))
 
     @staticmethod
-    def _is_qualifier_numeric_entry(entry: dict) -> bool:
+    def _is_qualifier_numeric_entry(entry: dict, length_units: frozenset = _LENGTH_UNITS) -> bool:
         """判断数值是否只是年份/季度/工艺节点等限定词，而非指标值。
 
         例：
@@ -279,7 +315,7 @@ class FactualAuditor(BaseAuditor):
         - 5nm 节点良率 95% → 5nm 是工艺节点，不参与比较；95% 参与。
         """
         unit = str(entry.get("unit", "")).lower()
-        if unit in _LENGTH_UNITS:
+        if unit in length_units:
             return True
 
         prefix = str(entry.get("prefix", ""))
@@ -306,7 +342,8 @@ class FactualAuditor(BaseAuditor):
         entries: list[dict] = []
 
         for page in doc.pages:
-            text = page.all_text
+            # 代码块/URL 内的数值不是待比较的指标值；掩码等长替换、字符位置不变
+            text = mask_prose_noise(page.all_text)
             for m in _NUMERIC_VALUE_RE.finditer(text):
                 value_str = m.group(1).strip()
                 start = m.start()
@@ -402,7 +439,8 @@ class FactualAuditor(BaseAuditor):
         scan_result: dict = {}
 
         for page in doc.pages:
-            text = page.all_text
+            # 代码块/URL 内的缩写不是正文用法；掩码等长替换、字符位置不变
+            text = mask_prose_noise(page.all_text)
             # 括号组区间 (每页一次) — 定义站点判定依赖
             paren_ranges = _compute_paren_ranges(text)
 
@@ -410,7 +448,7 @@ class FactualAuditor(BaseAuditor):
                 abbr = m.group(1)
 
                 # 跳过常见英语单词
-                if abbr in _COMMON_UPPERCASE_WORDS:
+                if abbr in self._common_uppercase_words:
                     continue
 
                 # 跳过项目白名单中的领域缩写 (WLP/FOWLP/RDL/TSV/IC...)。
@@ -420,21 +458,34 @@ class FactualAuditor(BaseAuditor):
                 pos = m.start()
                 abbr_end = m.end()
 
+                # 文件名/路径片段不是待定义的技术缩写 (2026-11 审查:
+                # README 的 "AGENTS.md" / "MANIFEST.in" 曾被当缩写报 CON-003)。
+                if re.match(r"\.[A-Za-z]{1,5}(?![A-Za-z])", text[abbr_end:]):
+                    continue
+                if pos > 0 and text[pos - 1] in "/\\":
+                    continue
+
                 # 定义站点判定 (修复 2026-08 审查 L14: 曾用 120 字符窗口
                 # is_full_before 把"定义后的再次使用"误计为定义 → CON-003-B 假阳性;
                 # 改为紧邻判定 — 定义站点 = 括号组 open 位置):
                 # 1. is_def_after: 缩写后紧跟括号组 "ABBR (全称)" (仅允许空白)
-                # 2. in_paren: 缩写位于括号组内 "全称 (ABBR)"
+                # 2. in_paren: 缩写位于括号组内且是括号内容最后一个 token
+                #    "全称 (ABBR)"；"（核心依赖 + PDF + 开发工具）" 这类顺带提及
+                #    不是定义 (2026-11 审查: README 实测 19 处"定义"里 5 处是误判)
                 def_site: int | None = None
                 after_window = text[abbr_end : abbr_end + 80]
-                m_after = re.match(r"[\s]*\([^)]+\)", after_window)
+                # 半角/全角括号都识别: 中文文档常用 "TSV（硅通孔）"，旧实现只认
+                # 半角 "("，全角写法靠 in_paren 兜底才算定义（收窄 in_paren 后必须补上）
+                m_after = re.match(r"[\s]*[(（][^)）]+[)）]", after_window)
                 if m_after:
-                    paren_start = abbr_end + m_after.group(0).find("(")
+                    paren_start = abbr_end + re.search(r"[(（]", m_after.group(0)).start()
                     def_site = paren_start
                 else:
                     for op, cl in paren_ranges:
                         if op < pos < cl:
-                            def_site = op
+                            tail = text[abbr_end:cl].strip(" \t\r\n，,。.；;：:、")
+                            if not tail:
+                                def_site = op
                             break
 
                 occurrence = {
@@ -458,14 +509,21 @@ class FactualAuditor(BaseAuditor):
 
         # 按出现顺序排序并标记 first_is_definition / definition_count
         # definition_count = 不同定义站点数 (同一括号组 "TSV (硅通孔 TSV)" 中
-        # 括号内出现不再重复计入, 修复 CON-003-B 假阳性)
+        # 括号内出现不再重复计入, 修复 CON-003-B 假阳性)。
+        # 定义站点必须用 (页码, 页内位置) 二元组：def_site 是页内字符偏移，
+        # 两页在同一偏移各定义一次时会被误判为"同一定义站点"→ CON-003-B 漏报
+        # (2026-11 审查: 两页模板句 "TSV (Through Silicon Via)" 实测漏报)。
         for abbr, data in scan_result.items():
             data["occurrences"].sort(key=lambda o: (o["page_index"], o["position"]))
             data["first_is_definition"] = (
                 data["occurrences"][0]["is_definition"] if data["occurrences"] else False
             )
             data["definition_count"] = len(
-                {o["def_site"] for o in data["occurrences"] if o["def_site"] is not None}
+                {
+                    (o["page_index"], o["def_site"])
+                    for o in data["occurrences"]
+                    if o["def_site"] is not None
+                }
             )
 
         self._abbr_scan_cache = (weakref.ref(doc), scan_result)
@@ -511,8 +569,15 @@ class FactualAuditor(BaseAuditor):
             # 必须已定义
             if not data["first_is_definition"] and data["definition_count"] == 0:
                 continue
-            # 总出现次数 <= 定义次数 → 定义后未再使用
-            if data["total_count"] <= data["definition_count"]:
+            # 定义之外的"实际使用"次数 = 总出现次数 - 定义站点内的出现次数。
+            # 旧实现拿 total_count 直接比 definition_count(去重站点)：定义括号内
+            # 再次写出缩写时（"TSV (硅通孔 TSV)" total=2 > def=1）永不报 ⇒ 定义后
+            # 从未使用却漏报 CON-003-A（2026-11 审查）。
+            definition_occurrences = sum(
+                1 for occ in data["occurrences"] if occ["def_site"] is not None
+            )
+            usage_count = data["total_count"] - definition_occurrences
+            if usage_count <= 0:
                 first_occ = data["occurrences"][0]
                 findings.append(
                     AuditFinding(
@@ -527,6 +592,7 @@ class FactualAuditor(BaseAuditor):
                         metadata={
                             "total_occurrences": data["total_count"],
                             "definition_count": data["definition_count"],
+                            "usage_count": usage_count,
                         },
                     )
                 )
@@ -586,14 +652,25 @@ class FactualAuditor(BaseAuditor):
                     None,
                 )
                 def_page = def_occ["page_number"] if def_occ else "?"
+                # 同一页内"先用后定义"时旧文案会输出"在第 N 页使用，但在第 N 页才给出
+                # 定义"(自相矛盾, 2026-11 审查 README 实测), 改为明示同页后文定义。
+                if def_occ is not None and def_page == first_occ["page_number"]:
+                    message = f"缩写「{abbr}」在第 {first_occ['page_number']} 页首次使用，同页后文才给出定义"
+                    location = f"第 {first_occ['page_number']} 页（定义位于后文）"
+                else:
+                    message = (
+                        f"缩写「{abbr}」在第 {first_occ['page_number']} 页使用，"
+                        f"但在第 {def_page} 页才给出定义"
+                    )
+                    location = f"第 {first_occ['page_number']} 页 (使用) → 第 {def_page} 页 (定义)"
                 findings.append(
                     AuditFinding(
                         type=FindingType.FACTUAL,
                         severity=FindingSeverity.WARNING,
-                        message=f"缩写「{abbr}」在第 {first_occ['page_number']} 页使用，但在第 {def_page} 页才给出定义",
+                        message=message,
                         rule_id="CON-003-C",
                         page_index=first_occ["page_index"],
-                        location=f"第 {first_occ['page_number']} 页 (使用) → 第 {def_page} 页 (定义)",
+                        location=location,
                         context=first_occ["context"][:120],
                         suggestion="建议将缩写定义移至首次出现处，写为「全称 (ABBR)」格式",
                         metadata={
@@ -604,3 +681,56 @@ class FactualAuditor(BaseAuditor):
                 )
 
         return findings
+
+    # ── 数值单位完整性（2026-11 新增 CON-007）─────────────────
+
+    def _check_numeric_unit_presence(self, doc: Document) -> list[AuditFinding]:
+        """量词语境下的数值缺少单位（如「厚度 5」而非「厚度 5nm」）。
+
+        保守判定，避免与普通计数/序号误报：
+        - 只检查前面 8 字符内出现配置量词（厚度/宽度/电压…）的数值；
+        - 数值自身带单位（nm/mm/%/V…）或后接中文单位（纳米/毫米/伏…）则跳过；
+        - 每页最多 3 条，避免刷屏。
+        """
+        if not self.unit_keywords:
+            return []
+        keyword_re = re.compile(
+            "|".join(re.escape(k) for k in sorted(self.unit_keywords, key=len, reverse=True))
+        )
+        findings: list[AuditFinding] = []
+        for page in doc.pages:
+            label = f"第 {page.slide_number or page.index + 1} 页"
+            text = mask_prose_noise(page.all_text)
+            page_hits: list[tuple[str, str]] = []
+            for m in _NUMERIC_VALUE_RE.finditer(text):
+                token = m.group(0)
+                if re.search(r"[A-Za-z%％°]", token):
+                    continue  # 自带单位/百分比/角度
+                prefix = text[max(0, m.start() - 10) : m.start()]
+                if not keyword_re.search(prefix[-8:]):
+                    continue
+                if _CN_UNIT_RE.match(text, m.end()):
+                    continue  # 后接中文单位
+                context = (prefix[-8:] + token).strip()
+                page_hits.append((token, context))
+            for _token, context in page_hits[:3]:
+                findings.append(
+                    AuditFinding(
+                        type=FindingType.FACTUAL,
+                        severity=FindingSeverity.INFO,
+                        message="数值缺少单位",
+                        rule_id="CON-007",
+                        page_index=page.index,
+                        location=label,
+                        context=context[:80],
+                        suggestion="为量值补充单位（如 nm / μm / V / %），避免歧义",
+                    )
+                )
+        return findings
+
+
+# 中文单位词（数值后紧邻出现即视为已有单位）
+_CN_UNIT_RE = re.compile(
+    r"(?:纳米|微米|毫米|厘米|米|伏特|伏|毫伏|千伏|安培|安|毫安|瓦特|瓦|千瓦|赫兹|赫|千赫|兆赫|"
+    r"秒|毫秒|微秒|分钟|小时|度|摄氏度|克|千克|公斤|吨|升|毫升|帕|兆帕|牛|牛顿|焦耳|欧姆|欧)"
+)

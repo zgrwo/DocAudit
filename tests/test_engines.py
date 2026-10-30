@@ -11,6 +11,8 @@ from src.engines.terminology import (
     _already_preferred,
 )
 from src.engines.vocabulary import Vocabulary, _has_regex_chars
+from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
+from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
 # ── Terminology: _already_preferred ──────────────────────────
 
@@ -90,6 +92,27 @@ terms:
         # 文档已正确使用 TSV 缩写
         findings = checker.check("使用 TSV (Through Silicon Via, 硅通孔) 技术", 0, "第1页")
         assert len(findings) == 0, f"Expected 0 findings, got: {findings}"
+
+    def test_check_skips_already_preferred_cjk(self, tmp_path):
+        """preferred 为中文时仍应识别「已使用推荐写法」(2026-11 审查)
+
+        ``\\b`` 对汉字不成立（"采用微凸块" 里「微」左侧是汉字 → 无词边界），
+        旧实现对已按推荐写法书写的文档误报术语不合规。
+        """
+        glossary_file = tmp_path / "cjk.yaml"
+        glossary_file.write_text(
+            "category: 测试\n"
+            "version: '1.0'\n"
+            "terms:\n"
+            "  - pattern: '(?i)micro.?bump'\n"
+            "    preferred: '微凸块 (Micro Bump)'\n",
+            encoding="utf-8",
+        )
+        checker = TerminologyChecker(str(tmp_path))
+        assert checker.check("采用微凸块（Micro Bump）实现互连。", 0, "第 1 页") == []
+        # 对照: 未使用推荐写法时仍应报
+        findings = checker.check("采用 micro bump 实现互连。", 0, "第 1 页")
+        assert len(findings) == 1, f"未用推荐写法应报 1 条, got: {findings}"
 
     def test_check_flags_unpreferred(self, tmp_path):
         """文档未使用推荐写法 → 产生 findings"""
@@ -347,6 +370,36 @@ class TestLanguageToolFallback:
         assert len(recieve_hits) == 1, f"应仅命中独立词 'recieve', got {len(recieve_hits)} 条"
         assert text[recieve_hits[0]["offset"]] == "r", "命中位置应为独立词 'recieve' 起点"
 
+    def test_python_spell_skips_code_and_urls(self):
+        """PY-SPELL: 行内代码/URL 内的词不参与拼写检查 (2026-11 审查)
+
+        pyspellchecker 词典不含技术名词，旧实现连代码与 URL 一起检查 →
+        项目 README 自审时 `streamlit` / URL 里的 `docaudit` 等被报 misspelling。
+        """
+        from unittest.mock import MagicMock
+
+        from src.engines.languagetool import LanguageToolClient
+
+        client = LanguageToolClient(auto_start=False)
+        spell = MagicMock()
+        spell.unknown.return_value = {"streamlit", "docaudit"}
+        spell.candidates.return_value = ["stream"]
+        client._spell_checker = spell
+        client._available = True
+        client._backend = "python"
+
+        text = "使用 `streamlit` 启动，见 https://example.com/docaudit"
+        hits = [r for r in client._check_python(text, "en-US") if r["rule"]["id"] == "PY-SPELL"]
+        assert hits == [], f"代码/URL 内的词不应报拼写错误, got: {hits}"
+
+        # 对照: 同样的词出现在正文时仍应报 (掩码不能吞掉真实拼写检查)
+        prose_hits = [
+            r
+            for r in client._check_python("streamlit is a framework", "en-US")
+            if r["rule"]["id"] == "PY-SPELL"
+        ]
+        assert len(prose_hits) == 1, f"正文中的可疑词仍应报, got: {prose_hits}"
+
     def test_chinese_patterns_context_has_offset_length(self):
         """中文分支 context 必须含 offset/length 键（与 PY-SPELL 分支对齐，
         否则 language.py 的 accept.txt 白名单过滤整体跳过）"""
@@ -577,3 +630,284 @@ class TestProbeCache:
         LanguageToolClient(base_url="http://127.0.0.1:8010/v2", auto_start=False).is_available
         LanguageToolClient(base_url="http://127.0.0.1:8012/v2", auto_start=False).is_available
         assert len(calls) == 2
+
+
+class TestProfiles:
+    """2026-11: 规则 profile（strict/standard/relaxed）。"""
+
+    def test_profiles_have_expected_defaults(self):
+        from src.engines.profiles import get_profile
+
+        assert get_profile("strict")["fail_on"] == "warning"
+        assert get_profile("standard")["fail_on"] == "error"
+        assert get_profile("relaxed")["fail_on"] == "none"
+        assert get_profile("relaxed")["min_severity"] == "warning"
+
+    def test_unknown_profile_falls_back_to_standard(self):
+        from src.engines.profiles import get_profile
+
+        profile = get_profile("turbo")
+        assert profile["fail_on"] == "error"
+        assert profile["unknown"] is True and profile["requested"] == "turbo"
+
+    def test_filter_by_severity_drops_info_only(self):
+        from src.engines.profiles import filter_by_severity
+
+        findings = [
+            AuditFinding(type=FindingType.FORMAT, severity=FindingSeverity.ERROR, message="e"),
+            AuditFinding(type=FindingType.FORMAT, severity=FindingSeverity.WARNING, message="w"),
+            AuditFinding(type=FindingType.FORMAT, severity=FindingSeverity.INFO, message="i"),
+        ]
+        assert [f.message for f in filter_by_severity(findings, "warning")] == ["e", "w"]
+        assert len(filter_by_severity(findings, "info")) == 3
+
+
+class TestBatchConsistency:
+    """2026-11: 跨文档一致性（BATCH-TERM / BATCH-SECTION）。"""
+
+    @staticmethod
+    def _doc(text: str) -> Document:
+        return Document(
+            format="md",
+            source_path="x.md",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text=text, runs=[])],
+                        )
+                    ],
+                )
+            ],
+        )
+
+    def test_same_abbr_different_full_name_flagged(self):
+        from src.engines.batch import cross_document_findings
+
+        entries = [
+            ("a.md", self._doc("原子层沉积（ALD）是关键技术。")),
+            ("b.md", self._doc("原子层堆叠（ALD）是关键技术。")),
+        ]
+        findings = cross_document_findings(entries)
+        assert [f.rule_id for f in findings] == ["BATCH-TERM"]
+        assert "ALD" in findings[0].message
+
+    def test_consistent_abbr_not_flagged(self):
+        from src.engines.batch import cross_document_findings
+
+        entries = [
+            ("a.md", self._doc("原子层沉积（ALD）是关键技术。")),
+            ("b.md", self._doc("原子层沉积（ALD）的工艺窗口。")),
+        ]
+        assert cross_document_findings(entries) == []
+
+    def test_required_section_missing_in_some_files(self):
+        from src.engines.batch import cross_document_findings
+
+        def heading_doc(title: str) -> Document:
+            return Document(
+                format="md",
+                source_path="x.md",
+                metadata=DocumentMetadata(),
+                pages=[
+                    Page(
+                        index=0,
+                        elements=[
+                            PageElement(
+                                type="text_frame",
+                                paragraphs=[
+                                    Paragraph(text=title, level=1, runs=[]),
+                                    Paragraph(text="内容", runs=[]),
+                                ],
+                            )
+                        ],
+                    )
+                ],
+            )
+
+        entries = [("a.md", heading_doc("结论")), ("b.md", heading_doc("方法"))]
+        findings = cross_document_findings(entries, required_sections=["结论"])
+        assert [f.rule_id for f in findings] == ["BATCH-SECTION"]
+
+    def test_single_document_returns_empty(self):
+        from src.engines.batch import cross_document_findings
+
+        assert cross_document_findings([("a.md", self._doc("结论"))]) == []
+
+
+class TestBaseline:
+    """2026-11: --baseline 版本对比。"""
+
+    def test_compare_detects_new_and_fixed(self):
+        from src.engines.baseline import compare_with_baseline
+
+        old = AuditFinding(
+            type=FindingType.FORMAT,
+            severity=FindingSeverity.ERROR,
+            message="旧问题",
+            rule_id="FMT-001",
+        )
+        new = AuditFinding(
+            type=FindingType.FORMAT,
+            severity=FindingSeverity.ERROR,
+            message="新问题",
+            rule_id="FMT-001",
+        )
+        result = compare_with_baseline([new], {old.exemption_key})
+        assert result["fixed"] == 1
+        assert [f.message for f in result["new"]] == ["新问题"]
+        assert result["remaining"] == []
+
+    def test_same_finding_not_new(self):
+        from src.engines.baseline import compare_with_baseline
+
+        finding = AuditFinding(
+            type=FindingType.FORMAT,
+            severity=FindingSeverity.ERROR,
+            message="同一问题",
+            rule_id="FMT-001",
+        )
+        result = compare_with_baseline([finding], {finding.exemption_key})
+        assert result["new"] == [] and result["fixed"] == 0 and len(result["remaining"]) == 1
+
+    def test_load_baseline_keys_from_json_report(self, tmp_path):
+        import json
+
+        from src.engines.baseline import load_baseline_keys
+
+        path = tmp_path / "r.json"
+        path.write_text(
+            json.dumps({"findings": [{"key": "abc123"}]}),
+            encoding="utf-8",
+        )
+        assert load_baseline_keys(path) == {"abc123"}
+
+    def test_load_baseline_missing_file_is_empty(self, tmp_path):
+        from src.engines.baseline import load_baseline_keys
+
+        assert load_baseline_keys(tmp_path / "missing.json") == set()
+
+    def test_summary_counts_new_errors(self):
+        from src.engines.baseline import format_baseline_summary
+
+        new = AuditFinding(
+            type=FindingType.FORMAT, severity=FindingSeverity.ERROR, message="e", rule_id="FMT-001"
+        )
+        text = format_baseline_summary({"fixed": 2, "new": [new], "remaining": []})
+        assert "已修复 2" in text and "error 1" in text
+
+
+class TestBatchSectionEdges:
+    """reaudit S1/S4: 章节存在性判定边界（目录行 / PPTX 正文提及）。"""
+
+    @staticmethod
+    def _doc(text: str) -> Document:
+        return Document(
+            format="md",
+            source_path="x.md",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text=text, runs=[])],
+                        )
+                    ],
+                )
+            ],
+        )
+
+    def test_toc_line_with_multiple_sections_not_counted(self):
+        """目录行含 ≥2 个必含章节名 → 不算章节存在（reaudit S1）。"""
+        from src.engines.batch import cross_document_findings
+
+        a = self._doc("结论 概述")
+        b = self._doc("概述")
+        findings = cross_document_findings(
+            [("a.md", a), ("b.md", b)], required_sections=["概述", "结论"]
+        )
+        assert [f.rule_id for f in findings] == ["BATCH-SECTION"]
+        assert "概述" in findings[0].message  # 结论在两份里都没有 → 交给 CON-002
+
+    def test_pptx_body_mention_not_counted_as_section(self):
+        """PPTX 正文提及章节名不算章节存在（只认标题占位符，reaudit S4）。"""
+        from src.engines.batch import cross_document_findings
+
+        a = Document(
+            format="pptx",
+            source_path="a.pptx",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    slide_number=1,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            is_title=True,
+                            paragraphs=[Paragraph(text="方法", runs=[])],
+                        ),
+                        PageElement(
+                            type="text_frame",
+                            is_body=True,
+                            paragraphs=[Paragraph(text="结论将在下页给出", level=1, runs=[])],
+                        ),
+                    ],
+                )
+            ],
+        )
+        b = Document(
+            format="pptx",
+            source_path="b.pptx",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    slide_number=1,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            is_title=True,
+                            paragraphs=[Paragraph(text="结论", runs=[])],
+                        )
+                    ],
+                )
+            ],
+        )
+        findings = cross_document_findings(
+            [("a.pptx", a), ("b.pptx", b)], required_sections=["结论"]
+        )
+        assert [f.rule_id for f in findings] == ["BATCH-SECTION"]
+
+    def test_baseline_metadata_non_dict_is_ignored(self, tmp_path):
+        """手工 JSON 的 metadata 非 dict 不得崩溃（reaudit S8）。"""
+        import json
+
+        from src.engines.baseline import load_baseline_keys
+
+        path = tmp_path / "bad.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "type": "format",
+                            "severity": "error",
+                            "message": "m",
+                            "rule_id": "FMT-001",
+                            "page_index": 0,
+                            "location": "p",
+                            "context": "c",
+                            "metadata": ["not-a-dict"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert len(load_baseline_keys(path)) == 1

@@ -72,4 +72,9 @@ CHECK_REGISTRY: dict[str, CheckSpec] = {
         "sa", "_check_slide_structure_consistency", pptx_only=True
     ),
     "title_length": CheckSpec("sa", "_check_title_length"),
+    # 内容级检查（2026-11）: 只判断"信息是否给全"，不做语义评价
+    "figure_referenced": CheckSpec("sa", "_check_figure_referenced"),
+    "conclusion_has_evidence": CheckSpec("sa", "_check_conclusion_evidence"),
+    "section_has_substance": CheckSpec("sa", "_check_section_substance"),
+    "numeric_unit_presence": CheckSpec("fca", "_check_numeric_unit_presence"),
 }

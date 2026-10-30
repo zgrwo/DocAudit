@@ -219,6 +219,27 @@ def test_exempt_ids_whole_assignment():
     del st.session_state["exempted_finding_ids"]
 
 
+def test_reset_batch_state_keeps_persisted_exemptions(tmp_path, monkeypatch):
+    """新文件上传时不得清空 .docauditignore 载入的豁免 (2026-11 审查)
+
+    旧实现把 exempted_finding_ids 置空, 会在每次"开始审查"后立刻丢弃启动时
+    自动载入的团队豁免基线 → Web UI 永远用不上该文件, 且"保存豁免"会把空
+    基线写回。
+    """
+    import streamlit as st
+
+    from src.engines.exemptions import save_exemptions
+
+    exempt_file = tmp_path / ".docauditignore"
+    assert save_exemptions(exempt_file, ["key-1", "key-2"])
+    monkeypatch.setattr(app, "EXEMPTION_FILE", str(exempt_file))
+    st.session_state["exempted_finding_ids"] = set()
+
+    app._reset_batch_state()
+
+    assert st.session_state["exempted_finding_ids"] == {"key-1", "key-2"}
+
+
 # ── P9: 审计器缓存 ────────────────────────────────────────────
 
 
@@ -457,3 +478,43 @@ class TestMarkdownNeutralization:
         import app
 
         assert app._md_safe("普通文本 100% v0.2.1") == "普通文本 100% v0.2.1"
+
+
+class TestBatchContext:
+    """2026-11 reaudit S9: 批量质量分/覆盖声明（此前声称已修但未落码）。"""
+
+    @staticmethod
+    def _doc(pages: int) -> Document:
+        return Document(
+            format="pptx",
+            source_path="x.pptx",
+            metadata=DocumentMetadata(),
+            pages=[Page(index=i, slide_number=i + 1) for i in range(pages)],
+        )
+
+    def test_batch_context_aggregates_pages_and_findings(self):
+        docs = [self._doc(2), self._doc(3)]
+        findings = [
+            AuditFinding(
+                type=FindingType.FORMAT,
+                severity=FindingSeverity.ERROR,
+                message="e",
+                rule_id="FMT-001",
+            )
+        ]
+        ctx = app._batch_context(docs, 2, findings)
+        assert ctx["coverage"]["format"] == "batch"
+        assert ctx["coverage"]["pages"] == 5
+        assert ctx["coverage"]["complete"] is True
+        assert ctx["score"]["pages"] == 5
+        assert 0 <= ctx["score"]["score"] < 100
+
+    def test_batch_context_incomplete_when_some_files_failed(self):
+        ctx = app._batch_context([self._doc(1)], 3, [])
+        assert ctx["coverage"]["complete"] is False
+        assert "批量模式: 1 个文件 / 1 页" in ctx["coverage"]["notes"][0]
+
+    def test_batch_context_empty_docs(self):
+        ctx = app._batch_context([], 0, [])
+        assert ctx["coverage"]["pages"] == 0
+        assert ctx["score"]["score"] == 100  # 无可罚分（页数按 1 计）

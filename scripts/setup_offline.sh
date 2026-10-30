@@ -9,7 +9,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PACKAGES_DIR="$SCRIPT_DIR/packages"
+# 离线依赖缓存: 项目根 packages/ (与 HF 模型缓存 packages/hf_cache 同目录), 与
+# setup_offline.py -> common.packages_dir() 语义一致 (2026-11 审查)。
+# 兼容旧位置 scripts/packages: 根目录不存在而旧目录存在时沿用旧目录。
+PACKAGES_DIR="$PROJECT_DIR/packages"
+if [ ! -d "$PACKAGES_DIR" ] && [ -d "$SCRIPT_DIR/packages" ]; then
+    PACKAGES_DIR="$SCRIPT_DIR/packages"
+fi
 # 2026-09-06 r5 审查 F-03: venv 绝对路径, 与 .py 孪生 (common.venv_python) 对齐,
 # 免 CWD 强依赖 (相对 .venv + 裸 pip 从非项目根调用会装错位置)
 VENV_DIR="$PROJECT_DIR/.venv"

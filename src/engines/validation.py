@@ -52,6 +52,15 @@ _KNOWN_RULE_KEYS = frozenset(
         "最小标题字号",
         "最大英文词数",
         "最大中文字数",
+        # 内容级检查参数 (2026-11 CON-005/006/007)
+        "最小数字个数",
+        "evidence_min_numbers",
+        "最小内容段落",
+        "section_min_paragraphs",
+        "最小字数",
+        "section_min_chars",
+        "量词关键词",
+        "unit_keywords",
         # 布尔键（TERM-003 / TXT-REDUNDANT）
         "仅中文页面",
         "大小写敏感",
@@ -98,8 +107,55 @@ def _read_text_with_fallback(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _validate_globals(path: Path, result: ValidationResult) -> None:
+    """校验 rules.md frontmatter ``parameters:`` 全局参数（2026-11）。
+
+    运行时 ``extract_auditor_config`` 对非法值降级为默认并记 warning；校验时
+    显式报错，避免"写了参数但从未生效"静默漂移。
+    """
+    from src.engines.rule_parser import GLOBAL_PARAM_SPECS, parse_rules_globals
+
+    # frontmatter 语法错误：parse_rules_globals 运行时降级返回 {}，校验时必须显式报错
+    # （否则 parameters: 写坏 = 全局阈值静默回退默认值，2026-11 max 审查 F7）
+    # 去 BOM：UTF-8 BOM 会让 startswith("---") 失效（2026-11 reaudit S7）
+    content = path.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            try:
+                yaml.safe_load(parts[1])
+            except yaml.YAMLError as e:
+                result.errors.append(f"frontmatter YAML 无法解析: {e}")
+                return
+
+    raw = parse_rules_globals(path)
+    for name, value in raw.items():
+        spec = GLOBAL_PARAM_SPECS.get(name)
+        if spec is None:
+            result.warnings.append(
+                f"parameters: 未知参数 '{name}'（可用: {', '.join(sorted(GLOBAL_PARAM_SPECS))}）"
+            )
+            continue
+        typ, _default, lo, hi, label = spec
+        if typ is list:
+            if not isinstance(value, (list, tuple, str)):
+                result.errors.append(
+                    f"parameters.{name}（{label}）需为列表或以逗号分隔的字符串，实际: {value!r}"
+                )
+            continue
+        try:
+            num = typ(value)
+        except (TypeError, ValueError):
+            result.errors.append(f"parameters.{name}（{label}）需为数值，实际: {value!r}")
+            continue
+        if (lo is not None and num < lo) or (hi is not None and num > hi):
+            result.errors.append(
+                f"parameters.{name}（{label}）超出范围 [{lo}, {hi}]，实际: {value!r}"
+            )
+
+
 def validate_rules(rules_path: str | Path = "rules.md") -> ValidationResult:
-    """校验 rules.md：ID/严重度/check_type/正则/数值范围/重复项。"""
+    """校验 rules.md：ID/严重度/check_type/正则/数值范围/重复项 + frontmatter 全局参数。"""
     result = ValidationResult()
     path = Path(rules_path)
     if not path.exists():
@@ -111,6 +167,8 @@ def validate_rules(rules_path: str | Path = "rules.md") -> ValidationResult:
     except Exception as e:  # noqa: BLE001 — 校验器必须报告而非崩溃
         result.errors.append(f"规则文件解析失败: {path} — {e}")
         return result
+
+    _validate_globals(path, result)
 
     if not rules:
         result.errors.append(f"未解析到任何规则（检查 '## 规则ID: 说明' 标题格式）: {path}")
@@ -208,6 +266,9 @@ def _validate_params(rule, result: ValidationResult) -> None:
     _int_param(rule, ("最小标题字号",), "最小标题字号", result)
     _int_param(rule, ("最大英文词数",), "最大英文词数", result)
     _int_param(rule, ("最大中文字数",), "最大中文字数", result)
+    _int_param(rule, ("最小数字个数", "evidence_min_numbers"), "最小数字个数", result, minimum=1)
+    _int_param(rule, ("最小内容段落", "section_min_paragraphs"), "最小内容段落", result, minimum=0)
+    _int_param(rule, ("最小字数", "section_min_chars"), "最小字数", result, minimum=0)
 
     for key, label in (("title_range", "标题字号"), ("body_range", "正文字号")):
         if key in params and params[key] is None:

@@ -16,8 +16,19 @@ def generate_json_report(
     doc: Document,
     findings: list[AuditFinding],
     output_path: str | Path | None = None,
+    *,
+    score: dict | None = None,
+    coverage: dict | None = None,
 ) -> dict:
-    """生成 JSON 格式审查报告"""
+    """生成 JSON 格式审查报告。
+
+    Args:
+        doc: 统一文档模型。
+        findings: 发现列表。
+        output_path: 可选输出路径。
+        score: ``compute_score()`` 结果（质量分）；None 时不输出该键（向后兼容）。
+        coverage: ``collect_coverage()`` 结果（审查范围/降级声明）。
+    """
     report = {
         "meta": {
             "tool": "DocAudit",
@@ -39,9 +50,17 @@ def generate_json_report(
             "warnings": sum(1 for f in findings if f.severity.value == "warning"),
             "info": sum(1 for f in findings if f.severity.value == "info"),
             "by_type": {},
+            # 质量分（0-100 + 等级）— 2026-11 新增
+            "score": score["score"] if score else None,
+            "grade": score["grade"] if score else None,
         },
-        "findings": [f.to_dict() for f in findings],
+        # key = 稳定 exemption_key（跨版本/跨文件唯一），供 --baseline 对比
+        "findings": [dict(f.to_dict(), key=f.exemption_key) for f in findings],
     }
+    if score:
+        report["score"] = score
+    if coverage:
+        report["coverage"] = coverage
 
     # 按类型统计
     for f in findings:

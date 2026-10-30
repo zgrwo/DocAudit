@@ -151,7 +151,7 @@ class PdfConverter(BaseConverter):
                 elements = self._pymupdf_page_elements(page, toc_entries.get(page_idx + 1, []))
                 pages.append(Page(index=page_idx, elements=elements, slide_number=page_idx + 1))
 
-            props: dict = {}
+            props: dict = {"pdf_backend": "pymupdf"}
             try:
                 rect = pdf[0].rect
                 if rect.width > 0 and rect.height > 0:

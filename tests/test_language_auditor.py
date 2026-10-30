@@ -74,6 +74,17 @@ class TestMixedFormatting:
         rule_ids = [f.rule_id for f in findings]
         assert "FMT-MIXED-003" in rule_ids
 
+    def test_single_letter_label_before_chinese_punct_not_flagged(self, auditor):
+        """「方案 A：」「v1.0：」「5nm：」不是"英文后中文标点" (2026-11 审查)
+
+        旧实现按单字符匹配：任何字母/数字后跟中文标点都算，导致中文里正常的
+        单字母标签、版本号、数字单位全部误报（项目 README 实测 7 条）。
+        """
+        for text in ("方案 A：一键启动", "版本 v1.0：说明", "厚度 5nm：满足要求"):
+            findings = auditor._check_mixed_formatting(text, 0, "第 1 页")
+            mixed_003 = [f for f in findings if f.rule_id == "FMT-MIXED-003"]
+            assert mixed_003 == [], f"{text!r} 不应报 FMT-MIXED-003, got: {mixed_003}"
+
     def test_pure_chinese_no_finding(self, auditor):
         """纯中文文本 → 无混排 finding"""
         findings = auditor._check_mixed_formatting("这是一段纯中文文本", 0, "第 1 页")
@@ -86,6 +97,16 @@ class TestMixedFormatting:
         # 每种 rule_id 最多 1 条
         rule_ids = [f.rule_id for f in findings]
         assert len(rule_ids) == len(set(rule_ids))
+
+    def test_code_span_and_url_masked(self, auditor):
+        """行内代码/URL 内的中英混排不报 (2026-11 审查: 代码不是自然语言)"""
+        text = "配置 `中文English` 与 https://example.com/文档abc 两处。"
+        findings = auditor._check_mixed_formatting(text, 0, "第 1 页")
+        mixed = [f for f in findings if f.rule_id in ("FMT-MIXED-001", "FMT-MIXED-002")]
+        assert mixed == [], f"代码/URL 内不应报混排, got: {mixed}"
+        # 对照: 同样的字符出现在正文(无掩码)时仍应报
+        control = auditor._check_mixed_formatting("配置 中文English 两处。", 0, "第 1 页")
+        assert [f.rule_id for f in control if f.rule_id.startswith("FMT-MIXED")]
 
 
 class TestPunctuation:
@@ -128,6 +149,20 @@ class TestPunctuation:
     def test_fenced_code_not_flagged(self, auditor):
         findings = auditor._check_punctuation("```python\n中文, English\n```", 0, "第 1 页")
         assert findings == []
+
+    def test_markdown_horizontal_rule_not_flagged(self, auditor):
+        """Markdown 分隔线 `---` 不是中文语境下的英文破折号 (2026-11 审查)
+
+        旧实现只掩码代码/URL，README 自审时 19 条 PUNCT-007 全部来自分隔线。
+        """
+        text = "第一段结束。\n\n---\n\n第二段开始。"
+        findings = auditor._check_punctuation(text, 0, "第 1 页")
+        assert [f.rule_id for f in findings if f.rule_id == "PUNCT-007"] == []
+
+    def test_html_comment_not_flagged(self, auditor):
+        """HTML 注释 (<!-- … -->) 不参与标点检查"""
+        text = "正文。<!-- last_updated: 2026-10-29 -->"
+        assert auditor._check_punctuation(text, 0, "第 1 页") == []
 
     def test_redundant_phrase(self, auditor):
         findings = auditor._check_redundancy("原因是设备故障造成的。", 0, "第 1 页")
@@ -196,9 +231,9 @@ class TestSegmentByLanguage:
     def test_numbers_dont_switch_language(self, auditor):
         """数字不触发语言切换"""
         segments = auditor._segment_by_language("良率达到95%以上")
-        # 整段应视为中文（数字保持当前语言）
-        zh_segments = [s for s, lang in segments if lang == "zh"]
-        assert len(zh_segments) >= 1
+        # 整段应视为中文（数字保持当前语言）—— 弱化成 ">=1 个中文段" 会让
+        # "数字被切成英文段" 的实现同样通过（2026-11 审查）
+        assert segments == [("良率达到95%以上", "zh")], f"数字不应切换语言, got: {segments}"
 
     def test_empty_text(self, auditor):
         segments = auditor._segment_by_language("")
@@ -412,3 +447,26 @@ class TestLanguageToolBatching:
         # 同样的段再次出现（下一页/模板句）→ 命中缓存，零新增请求
         auditor._check_text(text, 1, "第 2 页")
         assert len(calls) == first
+
+    def test_segment_cache_resets_between_documents(self, auditor):
+        """段缓存是文档作用域：第二份文档的相同段必须重新提交 (2026-11 审查)
+
+        Web UI 用 @st.cache_resource 复用审计器实例；旧实现把缓存留在实例上 →
+        第二份文档里与第一份相同的英文段不再送检，LanguageTool 结果被静默吞掉。
+        """
+        calls = []
+
+        class FakeClient:
+            is_available = True
+
+            def check(self, text, language=None):
+                calls.append((language, text))
+                return []
+
+        auditor.lt_client = FakeClient()
+        text = "MES system is running well here."
+        auditor.audit(_make_doc(text))
+        first = len(calls)
+        assert first >= 1, "第一份文档应至少提交 1 次"
+        auditor.audit(_make_doc(text))
+        assert len(calls) - first >= 1, "第二份文档的相同段应重新提交（缓存不得跨文档）"

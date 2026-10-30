@@ -356,6 +356,23 @@ class DocxConverter(BaseConverter):
                 )
             )
 
+        def _block_text(hf) -> str:
+            """页眉/页脚文本：段落 + 表格单元格。
+
+            python-docx 的 ``header.paragraphs`` 不含表格内文字；表单类文档常在
+            页眉/页脚放表格 → 旧实现静默漏检（2026-11 审查）。
+            """
+            parts = [p.text for p in hf.paragraphs if p.text.strip()]
+            try:
+                for table in hf.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if cell.text.strip():
+                                parts.append(cell.text.strip())
+            except Exception as e:
+                logger.debug("页眉/页脚表格提取失败（该节降级为仅段落）: %s", e)
+            return "\n".join(parts)
+
         try:
             for section in doc.sections:
                 for hf, kind, label in (
@@ -366,8 +383,7 @@ class DocxConverter(BaseConverter):
                     (section.even_page_header, "header", "偶数页页眉"),
                     (section.even_page_footer, "footer", "偶数页页脚"),
                 ):
-                    text = "\n".join(p.text for p in hf.paragraphs if p.text.strip())
-                    add(kind, label, text)
+                    add(kind, label, _block_text(hf))
         except Exception as e:
             logger.warning("页眉/页脚提取失败，跳过页眉页脚审查: %s", e)
 
@@ -594,8 +610,30 @@ class DocxConverter(BaseConverter):
             return None  # 空表格 — 无有意义内容
         try:
             cells: list[TableCell] = []
+            # 合并单元格去重 (2026-11 审查): python-docx 对横向合并的每个网格位
+            # 返回同一个 w:tc, 对纵向合并的续行也返回起始单元格 → 旧实现把同一
+            # 单元格重复产出 (同一文本审两次) 且 colspan/rowspan 恒为 1
+            # (FMT-TABLE-FIT 按单列宽估算合并表头 → 误报列宽不足)。
+            # 键必须是 w:tc 元素本身(持有强引用) —— 不能用 id(tc): lxml 代理对象
+            # 在无引用时可被回收, id 会被复用 → 不同单元格被误判为同一个。
+            cells_by_tc: dict[object, TableCell] = {}
             for row_idx, row in enumerate(table.rows):
+                seen_in_row: set[object] = set()
                 for col_idx, cell in enumerate(row.cells):
+                    tc = cell._tc
+                    if tc in seen_in_row:
+                        # 横向合并的后续网格位: 只累计 origin 的 colspan
+                        existing = cells_by_tc.get(tc)
+                        if existing is not None and existing.row == row_idx:
+                            existing.colspan += 1
+                        continue
+                    seen_in_row.add(tc)
+                    existing = cells_by_tc.get(tc)
+                    if existing is not None:
+                        # 纵向合并的续行: 只累计 origin 的 rowspan
+                        existing.rowspan += 1
+                        continue
+
                     cell_text = cell.text.strip()
                     # 提取第一个段落第一个 run 的字体信息
                     font_name = None
@@ -625,24 +663,25 @@ class DocxConverter(BaseConverter):
                     except Exception:
                         fill_color = None  # bare-handler-ok — 异常 XML 结构，降级
 
-                    cells.append(
-                        TableCell(
-                            text=cell_text,
-                            row=row_idx,
-                            col=col_idx,
-                            font_name=font_name,
-                            font_size=font_size,
-                            fill_color=fill_color,
-                            font_color=font_color,
-                        )
+                    new_cell = TableCell(
+                        text=cell_text,
+                        row=row_idx,
+                        col=col_idx,
+                        font_name=font_name,
+                        font_size=font_size,
+                        fill_color=fill_color,
+                        font_color=font_color,
                     )
+                    cells_by_tc[tc] = new_cell
+                    cells.append(new_cell)
 
             nrows = len(table.rows)
-            # 按行分组 (单次遍历，与 PptxConverter._convert_table 一致)
+            # 按行分组；用 range(nrows) 保证行索引与 table_row_heights 对齐
+            # (整行都被纵向合并覆盖时不丢行位)
             row_map: dict[int, list[TableCell]] = defaultdict(list)
             for c in cells:
                 row_map[c.row].append(c)
-            rows: list[list[TableCell]] = [row_map[r] for r in sorted(row_map) if r < nrows]
+            rows: list[list[TableCell]] = [row_map.get(r, []) for r in range(nrows)]
 
             # 表格几何 (FMT-TABLE-FIT)：Word 自动布局下为 None/0 → 保留 0.0 占位，
             # 保证与行列索引对齐；判定时跳过 <= 0。

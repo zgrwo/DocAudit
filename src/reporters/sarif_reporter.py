@@ -55,6 +55,9 @@ def generate_sarif_report(
     findings: list[AuditFinding],
     output_path: str | Path | None = None,
     uri_base: str | Path | None = None,
+    *,
+    score: dict | None = None,
+    coverage: dict | None = None,
 ) -> str:
     """生成 SARIF v2.1.0 报告 (JSON 文本)。
 
@@ -64,6 +67,8 @@ def generate_sarif_report(
         output_path: 可选输出文件路径
         uri_base: 可选 artifact 路径基准目录；提供时输出相对路径
             （CI 传仓库根，如 "."），用于 GitHub Code Scanning 关联文件
+        score: 可选质量分（写入 run.properties.docAuditScore）
+        coverage: 可选覆盖声明（写入 run.properties.docAuditCoverageComplete）
     """
     ordered = _sort_findings(findings)
 
@@ -123,22 +128,31 @@ def generate_sarif_report(
             result["properties"]["suggestion"] = f.suggestion
         results.append(result)
 
+    run: dict = {
+        "tool": {
+            "driver": {
+                "name": "DocAudit",
+                "informationUri": "https://github.com/zgrwo/DocAudit",
+                "version": __version__,
+                "rules": rules,
+            }
+        },
+        "results": results,
+    }
+    properties: dict = {}
+    if score:
+        properties["docAuditScore"] = score.get("score")
+        properties["docAuditGrade"] = score.get("grade")
+    if coverage:
+        properties["docAuditCoverageComplete"] = bool(coverage.get("complete", True))
+        properties["docAuditLanguageBackend"] = coverage.get("language_backend")
+    if properties:
+        run["properties"] = properties
+
     report = {
         "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": "DocAudit",
-                        "informationUri": "https://github.com/zgrwo/DocAudit",
-                        "version": __version__,
-                        "rules": rules,
-                    }
-                },
-                "results": results,
-            }
-        ],
+        "runs": [run],
     }
 
     text = json.dumps(report, ensure_ascii=False, indent=2)

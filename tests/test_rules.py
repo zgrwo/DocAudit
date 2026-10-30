@@ -33,7 +33,7 @@ class TestRuleParser:
         rules = parse_rules_md(RULES_MD)
         # 精确锚定 (2026-09-06 审查 G-1): 宽松下限 (>=10) 拦不住规则数缓慢缩减;
         # 规则数变更需同步 rules.md / api-reference.md / ci.yml 断言 / 白名单文档
-        assert len(rules) == 26
+        assert len(rules) == 30
 
     def test_extract_auditor_config(self):
         rules = parse_rules_md(RULES_MD)
@@ -481,10 +481,13 @@ class TestRuleParser:
         findings = auditor.audit(_md_doc("bullet 测试"))
         sys_errors = [f for f in findings if f.rule_id == "SYS-ERROR"]
         assert len(sys_errors) >= 1, "规则执行异常应产生 SYS-ERROR finding"
-        assert (
-            "bullet_consistency" in (sys_errors[0].metadata or {}).get("rule_id", "")
-            or "模拟 dispatch" in sys_errors[0].message
+        # 2026-11 审查: 旧断言用 `or "模拟 dispatch" in message` —— 后半支恒真
+        # (异常文本必然拼进 message)，前半支拿 check_type 比 rule_id 恒假，整体零约束。
+        # 现锚定失败规则的 rule_id (FMT-007) 与异常文本两侧。
+        assert (sys_errors[0].metadata or {}).get("rule_id") == "FMT-007", (
+            f"SYS-ERROR 应记录失败规则 ID, got: {(sys_errors[0].metadata or {}).get('rule_id')}"
         )
+        assert "模拟 dispatch" in sys_errors[0].message
 
     def test_multiple_sys_errors_not_deduped(self, monkeypatch):
         """回归: 多条规则同时失败时 SYS-ERROR 不得被 deduplicate 折叠为一条"""
@@ -674,3 +677,113 @@ class TestCheckRegistry:
         from src.auditors.custom_rules import CHECK_REGISTRY
 
         assert {spec.auditor for spec in CHECK_REGISTRY.values()} <= {"sa", "fa", "fca"}
+
+
+class TestGlobalParameters:
+    """2026-11: rules.md frontmatter `parameters:` 全局阈值（原硬编码）。"""
+
+    @staticmethod
+    def _rules_file(tmp_path: Path, parameters_yaml: str) -> Path:
+        path = tmp_path / "rules.md"
+        path.write_text(
+            "---\n"
+            'version: "1.0"\n'
+            f"{parameters_yaml}\n"
+            "---\n\n"
+            "# 结构规则\n\n"
+            "## STR-001: 必须有标题页\n"
+            "- 严重度: error\n"
+            "- 检查: first_slide_has_title_layout\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_defaults_when_not_declared(self):
+        from src.engines.rule_parser import global_param_defaults
+
+        cfg = extract_auditor_config(parse_rules_md(RULES_MD), {})
+        defaults = global_param_defaults()
+        assert cfg["alignment_tolerance"] == defaults["alignment_tolerance"]
+        assert cfg["max_font_types"] == defaults["max_font_types"]
+        assert cfg["numeric_length_units"] == defaults["numeric_length_units"]
+
+    def test_declared_values_override(self, tmp_path):
+        from src.engines.rule_parser import parse_rules_globals
+
+        rules_file = self._rules_file(
+            tmp_path,
+            "parameters:\n"
+            "  alignment_tolerance: 9.5\n"
+            "  max_font_types: 5\n"
+            "  numeric_length_units: [nm, mm]\n"
+            "  common_uppercase_extra: [ABCX]\n",
+        )
+        globals_ = parse_rules_globals(rules_file)
+        cfg = extract_auditor_config(parse_rules_md(rules_file), globals_)
+        assert cfg["alignment_tolerance"] == 9.5
+        assert cfg["max_font_types"] == 5
+        assert cfg["numeric_length_units"] == ["nm", "mm"]
+        assert cfg["common_uppercase_extra"] == ["ABCX"]
+
+    def test_invalid_value_falls_back_with_warning(self, tmp_path, caplog):
+        from src.engines.rule_parser import parse_rules_globals
+
+        rules_file = self._rules_file(
+            tmp_path,
+            "parameters:\n  alignment_tolerance: not-a-number\n  max_font_types: 999\n",
+        )
+        globals_ = parse_rules_globals(rules_file)
+        with caplog.at_level("WARNING", logger="src.engines.rule_parser"):
+            cfg = extract_auditor_config(parse_rules_md(rules_file), globals_)
+        assert cfg["alignment_tolerance"] == 5.0
+        assert cfg["max_font_types"] == 3
+        assert any("alignment_tolerance" in r.message for r in caplog.records)
+
+    def test_unknown_key_warns(self, tmp_path, caplog):
+        from src.engines.rule_parser import parse_rules_globals
+
+        rules_file = self._rules_file(tmp_path, "parameters:\n  not_a_param: 1\n")
+        with caplog.at_level("WARNING", logger="src.engines.rule_parser"):
+            extract_auditor_config(parse_rules_md(rules_file), parse_rules_globals(rules_file))
+        assert any("not_a_param" in r.message for r in caplog.records)
+
+    def test_pipeline_and_fallback_share_config_keys(self):
+        """配置装配 SSOT: build_auditors 与 custom_rules 回退路径键集一致 (特检 #4)。"""
+        from src.auditors.custom_rules import CustomRulesAuditor
+        from src.engines.auditor_config import build_auditor_configs
+
+        config = extract_auditor_config(parse_rules_md(RULES_MD), {})
+        pipeline_cfgs = build_auditor_configs(
+            config,
+            enabled_rule_ids={"FMT-001"},
+            skip_checks={"sa": ["x"], "fa": ["y"], "fca": ["z"]},
+        )
+        standalone_cfgs = build_auditor_configs(config, enabled_rule_ids={"FMT-001"})
+        assert set(pipeline_cfgs) == {"sa", "fa", "la", "fca"}
+        for key in ("sa", "fa", "fca"):
+            assert set(pipeline_cfgs[key]) - {"_skip_checks"} == set(standalone_cfgs[key]), (
+                f"{key} 键集在 pipeline 与回退路径间漂移"
+            )
+        # CustomRulesAuditor 回退路径实际实例化不抛错
+        auditor = CustomRulesAuditor(config={"rules_path": RULES_MD})
+        auditor.load_rules()
+        assert auditor._create_auditor("fa") is not None
+
+    def test_bom_frontmatter_parameters_are_loaded(self, tmp_path):
+        """UTF-8 BOM 的 rules.md 不得丢掉 parameters（reaudit S7）。"""
+        from src.engines.rule_parser import parse_rules_globals
+
+        path = tmp_path / "rules.md"
+        path.write_text(
+            "---\n"
+            'version: "1.0"\n'
+            "parameters:\n"
+            "  alignment_tolerance: 9.5\n"
+            "---\n\n"
+            "# 结构规则\n\n"
+            "## STR-001: x\n- 严重度: error\n- 检查: first_slide_has_title_layout\n",
+            encoding="utf-8-sig",
+        )
+        assert parse_rules_globals(path) == {"alignment_tolerance": 9.5}
+        cfg = extract_auditor_config(parse_rules_md(path), parse_rules_globals(path))
+        assert cfg["alignment_tolerance"] == 9.5

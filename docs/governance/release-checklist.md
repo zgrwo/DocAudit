@@ -10,7 +10,7 @@
 |---|------|----------|-------|
 | R1 | 全量测试通过（0 failed，skip 必须全部是环境性） | `pytest tests/ -q` | ✅ CI |
 | R2 | 治理四门禁通过（裸异常/HTML 转义/api 同步/文档数字）+ 发行门禁（版本双源/CHANGELOG 发行头/3.10 语法） | `pytest tests/test_gates.py -q` | ✅ |
-| R3 | 覆盖率不低于门槛（当前 82%，实测 87%） | `pytest --cov=src --cov-fail-under=82` | ✅ CI |
+| R3 | 覆盖率不低于门槛（当前 82%，实测 89%） | `pytest --cov=src --cov-fail-under=82` | ✅ CI |
 | R4 | ruff check + format 全绿 | `ruff check src/ tests/ scripts/ app.py` / `ruff format --check ...` | ✅ CI |
 | R5 | DISPATCH 完整性 | `docaudit` 内 `validate_dispatch()` 返回 `[]` | ✅ CI |
 | R6 | 配置校验零告警 | `python src/cli.py rules validate` | ✅ CI |
@@ -61,9 +61,9 @@ git tag -a vX.Y.Z -m "DocAudit vX.Y.Z"
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `0.2.1`（2026-10-29，深度审查修复版） |
-| 测试 | 617 passed, 2 skipped（627 collected，~63s） |
-| 覆盖率 | 87%（门槛 82%） |
+| 版本 | `0.3.0`（2026-11-05，质量评估与内容级检查增强版） |
+| 测试 | 733 passed, 2 skipped（735 collected，~85s） |
+| 覆盖率 | 89%（门槛 82%） |
 | ruff / 门禁 / 配置校验 | 全绿 |
 | wheel 构建 | 已验证可离线构建（docaudit-0.2.0-py3-none-any.whl，41 文件，含 src/） |
 | 源码包 | `MANIFEST.in` 覆盖 app.py/rules.md/glossary/vocab/docs/skills/scripts/tests |

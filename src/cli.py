@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
 from src import __version__
 from src.engines.exemptions import apply_exemptions, load_exemptions
-from src.engines.pipeline import build_auditors, find_converter, run_auditors
+from src.engines.pipeline import build_auditors, build_report_context, find_converter, run_auditors
 from src.models.document import Document
 from src.models.finding import AuditFinding, FindingSeverity
 from src.reporters.csv_reporter import generate_csv_report
@@ -54,7 +54,29 @@ def audit_file(
     vocab_dir: str | None = None,
     verbose: bool = False,
 ) -> tuple[Document, list[AuditFinding]]:
-    """审查单个文件，返回 (doc, findings)"""
+    """审查单个文件，返回 (doc, findings)（向后兼容包装，见 audit_document）。"""
+    doc, findings, _context = audit_document(
+        file_path,
+        rules_path=rules_path,
+        glossary_dir=glossary_dir,
+        vocab_dir=vocab_dir,
+        verbose=verbose,
+    )
+    return doc, findings
+
+
+def audit_document(
+    file_path: str,
+    rules_path: str = "rules.md",
+    glossary_dir: str = "glossary",
+    vocab_dir: str | None = None,
+    verbose: bool = False,
+) -> tuple[Document, list[AuditFinding], dict]:
+    """审查单个文件，返回 (doc, findings, context)。
+
+    context 含质量分与覆盖/降级声明（``pipeline.build_report_context``），
+    供 CLI 摘要、HTML/JSON/SARIF 报告共用。
+    """
     if verbose:
         logging.getLogger().setLevel(logging.INFO)
 
@@ -79,6 +101,7 @@ def audit_file(
     )
 
     all_findings = run_auditors(doc, auditors)
+    context = build_report_context(doc, auditors, all_findings)
 
     # 按发现类型统计（CustomRulesAuditor dispatch 的结果保留原始类型，无法按审计器拆分）
     type_counts: dict[str, int] = {}
@@ -97,7 +120,32 @@ def audit_file(
         label = type_labels.get(t, t)
         print(f"   {label}: {count} 个发现")
 
-    return doc, all_findings
+    print_score_line(context.get("score"))
+
+    return doc, all_findings, context
+
+
+def print_score_line(score: dict | None) -> None:
+    """打印质量分行（CLI 摘要用；与 HTML/JSON 同一 compute_score 结果）。"""
+    if not score:
+        return
+    dims = " · ".join(
+        f"{name} {info['score']}" for name, info in (score.get("dimensions") or {}).items()
+    )
+    print(
+        f"[SCORE] {score.get('score', '-')}/100 等级 {score.get('grade', '-')}"
+        + (f" | {dims}" if dims else "")
+    )
+
+
+def print_coverage(coverage: dict | None) -> None:
+    """打印审查范围与降级声明（让"没查"与"没问题"可区分）。"""
+    if not coverage:
+        return
+    from src.engines.coverage import format_coverage_lines
+
+    for line in format_coverage_lines(coverage):
+        print(f"[COVERAGE] {line}" if not line.startswith("  ") else line)
 
 
 def print_summary(findings: list[AuditFinding]) -> None:
@@ -332,10 +380,27 @@ def main():
     )
     audit_parser.add_argument("--fix", action="store_true", help="自动修复简单格式问题")
     audit_parser.add_argument(
+        "--profile",
+        metavar="{strict,standard,relaxed}",
+        default=None,
+        help="规则执行 profile：strict=warning 阻断 / standard=error 阻断（默认）/ "
+        "relaxed=不阻断且隐藏 info（未知值回退 standard）",
+    )
+    audit_parser.add_argument(
         "--fail-on",
         choices=["error", "warning", "info", "none"],
-        default="error",
-        help="达到该严重度即退出码 1（默认 error；none 表示从不因问题失败，仅处理失败时 1）",
+        default=None,
+        help="达到该严重度即退出码 1（默认按 --profile 或 error；none 表示从不因问题失败）",
+    )
+    audit_parser.add_argument(
+        "--baseline",
+        default=None,
+        help="上一版 JSON 报告路径；输出「已修复/新引入/仍存在」对比",
+    )
+    audit_parser.add_argument(
+        "--fail-on-new",
+        action="store_true",
+        help="配合 --baseline：存在新引入的 error 级发现时退出码 1（CI 回归门禁）",
     )
     audit_parser.add_argument(
         "--exempt-file",
@@ -462,23 +527,53 @@ def main():
         sys.exit(1)
 
     # 处理每个文件
+    from src.engines.profiles import filter_by_severity, get_profile
+
+    profile = get_profile(args.profile)
+    if profile["unknown"]:
+        print(
+            f"[WARN] 未知 profile '{profile['requested']}'，回退 standard"
+            f"（可选: strict / standard / relaxed）"
+        )
+    fail_on = args.fail_on or profile["fail_on"]
+    if profile["min_severity"] != "info":
+        print(
+            f"[PROFILE] {profile['requested']}: 隐藏 info 级提示；"
+            "报告与质量分均按可见发现计算（--profile standard 查看全量）"
+        )
+
     total_findings = []
     failed_files = 0  # 处理失败的文件数 (README: 处理失败 → 退出码 1)
     last_doc: Document | None = None  # SARIF 聚合写入需要文档元数据 (工具/artifact)
+    last_context: dict | None = None  # 质量分/覆盖声明（单文件展示 + SARIF 属性）
+    total_pages = 0
+    batch_docs: list[tuple[str, Document]] = []  # 跨文档一致性检查输入
     exempt_keys = load_exemptions(args.exempt_file) if args.exempt_file else set()
+    if args.exempt_file:
+        from src.engines.exemptions import exemption_stats
+
+        stats = exemption_stats(args.exempt_file)
+        if stats["expired"]:
+            print(
+                f"[EXEMPT] {stats['expired']}/{stats['total']} 条豁免已过期"
+                f"（不再生效；请复查后更新 {args.exempt_file}）"
+            )
     exempted_total = 0
     for i, file_path in enumerate(files, 1):
         if len(files) > 1:
             print(f"\n[{i}/{len(files)}] {'=' * 40}")
 
         try:
-            doc, findings = audit_file(
+            doc, findings, context = audit_document(
                 str(file_path),
                 rules_path=args.rules,
                 glossary_dir=args.glossary,
                 vocab_dir=args.vocab,
                 verbose=args.verbose,
             )
+            batch_docs.append((str(file_path), doc))
+            last_context = context
+            total_pages += len(doc.pages)
             # 批量时先做来源标注，再应用豁免（2026-10-29 审查）：
             # 1) 聚合 SARIF 的 artifact 归属依赖 metadata["source_file"]；
             # 2) exemption_key 已把来源文件纳入哈希，批量下不同文件不再共用键。
@@ -493,6 +588,9 @@ def main():
                 exempted_total += exempted
                 if exempted:
                     print(f"[EXEMPT] {exempted} finding(s) exempted by {args.exempt_file}")
+            # profile 降噪: relaxed 隐藏 info 级提示（规则内容不变，只是展示口径）
+            if profile["min_severity"] != "info":
+                findings = filter_by_severity(findings, profile["min_severity"])
             total_findings.extend(findings)
             print_summary(findings)
 
@@ -593,10 +691,18 @@ def main():
                         findings,
                         output_path=out_path,
                         show_thumbnails=args.thumbnails,
+                        score=context.get("score"),
+                        coverage=context.get("coverage"),
                     )
                     print(f"\n[EXPORT] HTML report saved: {out_path}")
                 elif out_path.suffix == ".json":
-                    generate_json_report(doc, findings, output_path=out_path)
+                    generate_json_report(
+                        doc,
+                        findings,
+                        output_path=out_path,
+                        score=context.get("score"),
+                        coverage=context.get("coverage"),
+                    )
                     print(f"\n[EXPORT] JSON report saved: {out_path}")
                 elif out_path.suffix == ".csv":
                     generate_csv_report(findings, output_path=out_path)
@@ -623,6 +729,8 @@ def main():
                 total_findings,
                 output_path=sarif_path,
                 uri_base=args.sarif_base,
+                score=(last_context or {}).get("score"),
+                coverage=(last_context or {}).get("coverage"),
             )
             if not sarif_path.exists():
                 raise OSError(f"报告导出失败，输出文件未生成: {sarif_path}")
@@ -631,25 +739,70 @@ def main():
             failed_files += 1
             print(f"[ERROR] Processing failed: {sarif_path} -- {e}")
 
-    # 批量总结
+    # 批量总结 / 跨文档一致性 / 覆盖声明
     if len(files) > 1:
+        from src.engines.batch import cross_document_findings
+        from src.engines.rule_parser import (
+            extract_auditor_config,
+            parse_rules_globals,
+            parse_rules_md,
+        )
+        from src.engines.scoring import compute_score
+
+        required_sections = (
+            extract_auditor_config(parse_rules_md(args.rules), parse_rules_globals(args.rules)).get(
+                "required_sections"
+            )
+            or []
+        )
+        batch_findings = cross_document_findings(batch_docs, required_sections)
+        if batch_findings:
+            print(f"\n[BATCH-CONSISTENCY] {len(batch_findings)} 条跨文档不一致")
+            for finding in batch_findings:
+                print(f"  - [{finding.rule_id}] {finding.message} — {finding.location}")
+            total_findings.extend(batch_findings)
         print(f"\n{'=' * 60}")
         print(f"[BATCH] {len(files)} files audited, {len(total_findings)} total findings")
+        print_score_line(compute_score(total_findings, total_pages))
         print(f"{'=' * 60}")
+    else:
+        print_coverage((last_context or {}).get("coverage"))
     if exempted_total:
         print(f"[EXEMPT] 共豁免 {exempted_total} 条 finding（来源: {args.exempt_file}）")
+
+    # ── 版本对比 (--baseline / --fail-on-new) ──
+    new_error_count = 0
+    if args.fail_on_new and not args.baseline:
+        print("[WARN] --fail-on-new 需要配合 --baseline <上一版.json> 才生效（已忽略）")
+    if args.baseline:
+        from src.engines.baseline import (
+            compare_with_baseline,
+            format_baseline_summary,
+            load_baseline_keys,
+        )
+
+        comparison = compare_with_baseline(total_findings, load_baseline_keys(args.baseline))
+        print(f"[BASELINE] {format_baseline_summary(comparison)}")
+        for finding in comparison["new"][:5]:
+            print(f"  + [{finding.rule_id}] {finding.message}")
+        new_error_count = sum(
+            1 for finding in comparison["new"] if finding.severity == FindingSeverity.ERROR
+        )
 
     # ── Exit code 按严重度阈值 (默认 error，与历史行为一致；2026-10-29 增加 --fail-on) ──
     # 处理失败的文件优先置 1 (README: 处理失败 → 退出码 1)
     if failed_files:
         print(f"\n[EXIT] {failed_files} file(s) failed to process → exit 1")
         sys.exit(1)
-    threshold = getattr(args, "fail_on", "error")
+    threshold = fail_on
     errors = [f for f in total_findings if f.severity == FindingSeverity.ERROR]
     warnings = [f for f in total_findings if f.severity == FindingSeverity.WARNING]
     infos = [f for f in total_findings if f.severity == FindingSeverity.INFO]
     summary = f"{len(errors)} error(s), {len(warnings)} warning(s), {len(infos)} info"
     code = _findings_exit_code(total_findings, threshold)
+    if args.fail_on_new and new_error_count:
+        print(f"[BASELINE] 新引入 {new_error_count} 条 error → --fail-on-new 阻断")
+        code = 1
     reached = code == 1
     print(
         f"\n[EXIT] {summary}; {'达到' if reached else '未达到'} --fail-on {threshold} → exit {code}"

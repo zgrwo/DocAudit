@@ -37,8 +37,8 @@
 
 | # | 陷阱 | 正确做法 |
 |---|------|----------|
-| 14 | **裸 grep 搜 `except:` 误伤 docstring/注释中的教学文字**（模板 #20 教训；本项目曾有"禁止写 except:"这类文字） | 用 AST 解析（`tools/check_bare_handlers.py`），天然跳过注释与字符串；不要用 grep 实现语义检查 |
-| 15 | **门禁工具自身违反门禁**（检查器若用 `except Exception: pass` 处理读取失败，CI 自检即说谎） | 门禁工具也被自身扫描（check_bare_handlers 的默认扫描范围含 tools/） |
+| 14 | **裸 grep 搜 `except:` 误伤 docstring/注释中的教学文字**（模板 #20 教训；本项目曾有"禁止写 except:"这类文字） | 用 AST 解析（`tests/test_gates.py::check_bare_handlers_in_file`，原 `tools/check_bare_handlers.py` 已随 5S 移除并 pytest 化），天然跳过注释与字符串；不要用 grep 实现语义检查 |
+| 15 | **门禁工具自身违反门禁**（检查器若用 `except Exception: pass` 处理读取失败，CI 自检即说谎） | 门禁实现也被自身扫描（`test_bare_handlers_gate` 的扫描范围覆盖仓库全部 `.py`，排除生成物目录） |
 | 16 | **测试文件命名不匹配框架 glob** → 测试永不运行、CI 静默通过 | 本项目 pytest `python_files = ["test_*.py"]`，新测试必须 `test_*.py` 命名（tests/ 根目录） |
 | 17 | **ruff per-file-ignores / noqa 无理由注释** | 每条豁免必须附中文理由（如 `# bare-handler-ok — 降级路径...`），防止 copy-paste 豁免 |
 

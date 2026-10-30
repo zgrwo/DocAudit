@@ -82,8 +82,9 @@ class TestMainAudit:
 
     def test_fix_unsupported_format_message(self, monkeypatch, tmp_path, capsys):
         src = _write_md(tmp_path / "a.md")
-        code = _run_main(monkeypatch, str(src), "--rules", RULES, "--fix")
-        assert code in (0, 1)
+        # --fail-on none 固定退出码，避免用 "code in (0, 1)" 这种与取值域同宽的弱断言
+        code = _run_main(monkeypatch, str(src), "--rules", RULES, "--fix", "--fail-on", "none")
+        assert code == 0
         assert "暂不支持自动修复" in capsys.readouterr().out
 
     def test_exempt_file_filters_findings(self, monkeypatch, tmp_path):

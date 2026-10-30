@@ -27,6 +27,9 @@ def generate_html_report(
     file_label: str | None = None,
     page_count: int | None = None,
     show_thumbnails: bool = True,
+    *,
+    score: dict | None = None,
+    coverage: dict | None = None,
 ) -> str:
     """生成独立 HTML 审查报告。
 
@@ -41,6 +44,8 @@ def generate_html_report(
                     None 时保持现状取 len(doc.pages)，向后兼容)
         show_thumbnails: 是否渲染页面 SVG 线框缩略图 (批量聚合报告应传 False，
                     否则只反映首个文件的页面几何)
+        score: ``compute_score()`` 结果（质量分卡 + 分维度）；None 时不渲染
+        coverage: ``collect_coverage()`` 结果（审查范围/降级声明）；None 时不渲染
     """
 
     # 按严重度统计
@@ -77,6 +82,35 @@ def generate_html_report(
     type_stats_html = (
         f'<p class="type-stats">按类型: {escape(type_stats)}</p>' if type_stats else ""
     )
+
+    # ── 质量分卡（2026-11）────────────────────────────────────
+    score_html = ""
+    if score:
+        dims = " · ".join(
+            f"{name} {info['score']}" for name, info in (score.get("dimensions") or {}).items()
+        )
+        grade = escape(str(score.get("grade", "-")))
+        score_html = f"""
+    <div class="score-card grade-{grade}">
+        <div class="score-num">{score.get("score", "-")}<span class="score-max">/100</span></div>
+        <div class="score-grade">等级 {grade}</div>
+        <div class="score-detail">加权罚分 {score.get("penalty", 0)} / {score.get("pages", 0)} 页
+            （每页 {score.get("penalty_per_page", 0)}；满分罚分 {score.get("penalty_cap", 20)}）</div>
+        <div class="score-dims">分维度: {escape(dims) if dims else "—"}</div>
+    </div>
+"""
+
+    # ── 审查范围 / 可信度声明（2026-11）──────────────────────
+    coverage_html = ""
+    if coverage:
+        notes = "".join(f"<li>{escape(str(n))}</li>" for n in (coverage.get("notes") or []))
+        status = "完整" if coverage.get("complete", True) else "不完整（有检查执行失败）"
+        coverage_html = f"""
+    <details class="coverage" open>
+        <summary>审查范围与可信度：{escape(status)}</summary>
+        <ul>{notes}</ul>
+    </details>
+"""
 
     thumbnails_section = (
         f"""
@@ -137,6 +171,18 @@ def generate_html_report(
     .thumb .el-image {{ fill: #ffe0b2; stroke: #f57c00; stroke-width: 1; }}
     .thumb .el-chart {{ fill: #e1bee7; stroke: #7b1fa2; stroke-width: 1; }}
     .footer {{ text-align: center; padding: 32px; color: #aaa; font-size: 12px; }}
+    .score-card {{ background: white; border-radius: 8px; padding: 16px 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }}
+    .score-num {{ font-size: 34px; font-weight: bold; color: #1e3a5f; }}
+    .score-max {{ font-size: 14px; color: #888; font-weight: normal; }}
+    .score-grade {{ font-size: 15px; font-weight: 600; }}
+    .grade-A .score-grade {{ color: #2e7d32; }}
+    .grade-B .score-grade {{ color: #1976d2; }}
+    .grade-C .score-grade {{ color: #f57c00; }}
+    .grade-D .score-grade {{ color: #d32f2f; }}
+    .score-detail, .score-dims {{ font-size: 12px; color: #888; }}
+    .coverage {{ background: white; border-radius: 8px; padding: 12px 18px; margin-bottom: 16px; font-size: 13px; color: #555; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }}
+    .coverage summary {{ cursor: pointer; font-weight: 600; }}
+    .coverage ul {{ margin: 8px 0 0 18px; }}
 </style>
 </head>
 <body>
@@ -165,7 +211,9 @@ def generate_html_report(
             <div class="label">📋 总计</div>
         </div>
     </div>
+{score_html}
 {type_stats_html}
+{coverage_html}
 {thumbnails_section}
     <h2 style="margin-bottom:16px">审查发现</h2>
     {findings_html if findings_html else '<p style="color:#888">🎉 未发现任何问题！</p>'}

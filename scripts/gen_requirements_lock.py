@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import common
+
 PROFILES = {"core": "", "pdf": "[pdf]", "full": "[all]"}
 TOKEN_RE = re.compile(r"^(?P<name>.+)-(?P<ver>\d[0-9A-Za-z.+\-]*)$")
 SKIP_PROJECTS = {"docaudit"}  # 项目自身由源码目录安装，不进入锁文件
@@ -75,7 +77,9 @@ def resolve_profile(root: Path, packages: Path, extras: str) -> list[str]:
 
 def main(argv=None) -> int:
     root = Path(__file__).resolve().parent.parent
-    packages = root / "scripts" / "packages"
+    # 缓存位置 SSOT: common.packages_dir()（项目根 packages/，兼容旧 scripts/packages）。
+    # 旧实现此处硬编码 root/"scripts"/"packages"，与 common 的路径各自演进 → 漂移。
+    packages = common.packages_dir()
     if not packages.is_dir():
         print(f"[错误] packages/ 目录不存在: {packages}")
         print("       请先运行 setup_offline download 生成依赖缓存。")

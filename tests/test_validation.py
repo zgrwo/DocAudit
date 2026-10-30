@@ -242,7 +242,7 @@ class TestRulesValidateCli:
     def test_rules_list_prints_rules(self):
         result = self._run_cli("rules", "list")
         assert result.returncode == 0, result.stdout[-400:]
-        assert "[RULES] 共 26 条" in result.stdout
+        assert "[RULES] 共 30 条" in result.stdout
         assert "STR-001" in result.stdout and "FMT-008" in result.stdout
 
     def test_rules_list_missing_file_exits_1(self, tmp_path):
@@ -315,3 +315,58 @@ class TestParamValidationRegressions:
         )
         result = validate_rules(path)
         assert any("术语规则" in e for e in result.errors), result.errors
+
+
+class TestValidateGlobalParameters:
+    """2026-11: rules.md frontmatter `parameters:` 的静态校验。"""
+
+    @staticmethod
+    def _file(tmp_path: Path, parameters: str) -> Path:
+        return _write(
+            tmp_path / "rules.md",
+            "---\n"
+            'version: "1.0"\n'
+            f"{parameters}\n"
+            "---\n\n"
+            "# 结构规则\n\n"
+            "## STR-001: 必须有标题页\n"
+            "- 严重度: error\n"
+            "- 检查: first_slide_has_title_layout\n",
+        )
+
+    def test_valid_parameters_pass(self, tmp_path):
+        path = self._file(
+            tmp_path,
+            "parameters:\n  alignment_tolerance: 6.0\n  numeric_length_units: [nm, mm]\n",
+        )
+        result = validate_rules(path)
+        assert result.ok, result.errors
+
+    def test_unknown_parameter_warns(self, tmp_path):
+        path = self._file(tmp_path, "parameters:\n  typo_threshold: 1\n")
+        result = validate_rules(path)
+        assert result.ok
+        assert any("typo_threshold" in w for w in result.warnings), result.warnings
+
+    def test_non_numeric_parameter_errors(self, tmp_path):
+        path = self._file(tmp_path, "parameters:\n  alignment_tolerance: abc\n")
+        result = validate_rules(path)
+        assert not result.ok
+        assert any("alignment_tolerance" in e for e in result.errors), result.errors
+
+    def test_out_of_range_parameter_errors(self, tmp_path):
+        path = self._file(tmp_path, "parameters:\n  image_min_dpi: 0\n")
+        result = validate_rules(path)
+        assert not result.ok
+        assert any("image_min_dpi" in e for e in result.errors), result.errors
+
+    def test_list_parameter_accepts_comma_string(self, tmp_path):
+        path = self._file(tmp_path, "parameters:\n  numeric_length_units: nm, mm\n")
+        result = validate_rules(path)
+        assert result.ok, result.errors
+
+    def test_list_parameter_rejects_scalar(self, tmp_path):
+        path = self._file(tmp_path, "parameters:\n  numeric_length_units: 3\n")
+        result = validate_rules(path)
+        assert not result.ok
+        assert any("numeric_length_units" in e for e in result.errors), result.errors

@@ -354,6 +354,47 @@ class TestMarkdownConverter:
         doc = md_converter.convert(str(path))
         assert "print('hello')" in doc.all_text
 
+    def test_list_items_split_into_paragraphs(self, md_converter, tmp_path):
+        """Markdown 列表块逐项拆 Paragraph (2026-11 审查)
+
+        旧实现把整个列表块塞进一个 Paragraph（\\n 连接）→ FMT-004 误报"段落过长"、
+        FMT-007 / TXT-BULLET-PUNCT 只看得到首项。与 PPTX"每个项目符号一个段落"对齐。
+        """
+        md = "# 列表\n\n- 第一项\n- 第二项\n- 第三项\n"
+        path = tmp_path / "list.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+        text_frames = [e for p in doc.pages for e in p.flattened_elements if e.type == "text_frame"]
+        list_frame = next(e for e in text_frames if any("第一项" in p.text for p in e.paragraphs))
+        assert [p.text for p in list_frame.paragraphs] == ["- 第一项", "- 第二项", "- 第三项"], (
+            f"列表项应为 3 个段落, got: {[p.text for p in list_frame.paragraphs]}"
+        )
+
+    def test_hash_comment_inside_fence_not_page_boundary(self, md_converter, tmp_path):
+        """围栏代码块内的 "#" 行不是页面边界 (2026-11 审查)
+
+        旧实现用 ``re.split(r"\\n(?=\\s{0,3}#{1,3}\\s)")`` 切页: shell/Python 注释
+        以 "#" 开头 → 代码块被切断, 注释行变成标题元素(参与标题类检查), 后半段
+        失去围栏保护(混排/标点/拼写把代码当正文)。
+        """
+        md = "# 安装\n\n```bash\n# Web UI\nstreamlit run app.py\n```\n\n结束。\n"
+        path = tmp_path / "fence.md"
+        path.write_text(md, encoding="utf-8")
+        doc = md_converter.convert(str(path))
+
+        assert len(doc.pages) == 1, [
+            (p.index, [e.paragraphs[0].text for e in p.elements]) for p in doc.pages
+        ]
+        titles = [e.paragraphs[0].text for e in doc.pages[0].elements if e.is_title]
+        assert titles == ["安装"], f"只有真实标题才是标题元素, got: {titles}"
+        code_elems = [
+            e for e in doc.pages[0].elements if any("```bash" in p.text for p in e.paragraphs)
+        ]
+        assert len(code_elems) == 1, "代码块应保持为单个元素"
+        code_text = "\n".join(p.text for p in code_elems[0].paragraphs)
+        assert "# Web UI" in code_text and "streamlit run app.py" in code_text
+        assert "```" in code_text.splitlines()[-1], "闭合围栏应仍在同一元素内"
+
     def test_table_parsed(self, md_converter, tmp_path):
         """GFM 表格被解析为 table 元素"""
         md = "# Data\n\n| Name | Age |\n|------|-----|\n| Alice | 30 |\n"
@@ -1079,6 +1120,60 @@ class TestPdfConverterDocling119:
         assert len(tables) == 1
         assert [c.text for row in tables[0].tables for c in row] == ["A", "B", "1", "2"]
 
+    def test_enum_label_title_and_section_header(self, tmp_path, monkeypatch):
+        """真实 docling label 是枚举 (带 .value) — 该分支必须被覆盖 (2026-11 审查)
+
+        既有 2.119 用例把 label 传成 str，`label.value` 分支从未执行 → mock 与真实
+        库漂移。这里用枚举形态验证 title→level 1 / section_header→level 2。
+        """
+        from enum import Enum
+
+        from src.converters.pdf_converter import PdfConverter
+
+        class FakeLabel(Enum):
+            TITLE = "title"
+            SECTION = "section_header"
+
+        class FakeProv:
+            def __init__(self, page_no):
+                self.page_no = page_no
+
+        class FakeTextItem:
+            def __init__(self, text, label):
+                self.text = text
+                self.prov = [FakeProv(1)]
+                self.label = label
+
+        class FakePageItem:
+            pass
+
+        class FakeDoclingDoc:
+            pages = {1: FakePageItem()}
+            texts = [
+                FakeTextItem("枚举标题", FakeLabel.TITLE),
+                FakeTextItem("枚举小节", FakeLabel.SECTION),
+            ]
+            tables = []
+
+        class FakeResult:
+            document = FakeDoclingDoc()
+
+        class FakeDoclingConverter:
+            def __init__(self, *a, **kw):
+                pass
+
+            def convert(self, path):
+                return FakeResult()
+
+        _inject_fake_docling(monkeypatch, FakeDoclingConverter)
+        fake = tmp_path / "enum.pdf"
+        fake.write_bytes(b"%PDF-1.4 fake")
+
+        doc = PdfConverter().convert(str(fake))
+        levels = {p.text: p.level for e in doc.pages[0].flattened_elements for p in e.paragraphs}
+        assert levels["枚举标题"] == 1, f"title 枚举 → level 1, got: {levels}"
+        assert levels["枚举小节"] == 2, f"section_header 枚举 → level 2, got: {levels}"
+
     def test_item_spanning_multiple_pages_assigned_to_all(self, tmp_path, monkeypatch):
         """F3: 多 prov 页归属 — 跨页 item 并入所有涉及页面 (旧实现只取 prov[0])"""
         from src.converters.pdf_converter import PdfConverter
@@ -1615,6 +1710,43 @@ class TestTableGeometry:
         # python-docx 不暴露单元格边距 → None (审查器用默认值降级)
         assert elem.tables[0][0].margin_left is None
 
+    def test_docx_merged_cells_deduplicated_with_span(self, docx_converter, tmp_path):
+        """DOCX 合并单元格: 同一单元格不得重复产出, 且提取 colspan/rowspan (2026-11 审查)
+
+        旧实现直接遍历 row.cells: python-docx 对横向合并的每个网格位返回同一
+        w:tc → 同一文本产出多个 TableCell (重复审查), colspan 恒 1
+        (FMT-TABLE-FIT 按单列宽估算合并表头 → 误报列宽不足); 纵向合并续行同样重复。
+        """
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        table = doc.add_table(rows=3, cols=3)
+        table.style = "Table Grid"
+        table.cell(0, 0).merge(table.cell(0, 1)).text = "合并表头"
+        table.cell(0, 2).text = "C"
+        table.cell(1, 2).merge(table.cell(2, 2)).text = "纵合并"
+        table.cell(1, 0).text = "a"
+        table.cell(1, 1).text = "b"
+        table.cell(2, 0).text = "c"
+        table.cell(2, 1).text = "d"
+        path = tmp_path / "merged.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        elem = [e for p in result.pages for e in p.flattened_elements if e.type == "table"][0]
+        header = elem.tables[0]
+        assert [c.text for c in header] == ["合并表头", "C"], (
+            f"横向合并单元格应只出现一次, got: {[(c.row, c.col, c.text) for c in header]}"
+        )
+        assert [c.col for c in header] == [0, 2], "合并后列索引应保持网格列位"
+        assert header[0].colspan == 2
+        # 纵向合并: 起始单元格 rowspan=2, 续行不再产出
+        assert len(elem.tables) == 3, "行分组数应与表格行数一致"
+        vertical = [c for row in elem.tables for c in row if c.text == "纵合并"]
+        assert len(vertical) == 1 and vertical[0].rowspan == 2, (
+            f"纵向合并单元格应只出现一次且 rowspan=2, got: {[(c.row, c.col, c.rowspan) for c in vertical]}"
+        )
+
     def test_docx_autofit_table_degrades(self, docx_converter, tmp_path):
         """自动布局表格: 行高为自动 (0.0 占位)，列宽取 grid 值，不崩溃。"""
         from docx import Document as DocxDocument
@@ -1651,6 +1783,32 @@ class TestDocxAuxiliaryText:
         assert "header" in kinds and "footer" in kinds
         header = next(e for e in result.auxiliary_elements if e.placeholder_type == "header")
         assert "使用FinFET" in header.paragraphs[0].text
+
+    def test_header_table_text_extracted(self, docx_converter, tmp_path):
+        """页眉/页脚里的表格文本也要提取 (2026-11 审查)
+
+        python-docx 的 ``header.paragraphs`` 不含表格内文字；表单类文档常在页眉
+        放表格 → 旧实现整块静默漏检。
+        """
+        from docx import Document as DocxDocument
+        from docx.shared import Inches
+
+        doc = DocxDocument()
+        doc.add_paragraph("正文内容。")
+        header = doc.sections[0].header
+        table = header.add_table(rows=1, cols=2, width=Inches(6))
+        table.cell(0, 0).text = "表单编号"
+        table.cell(0, 1).text = "使用FinFET"
+        path = tmp_path / "header_table.docx"
+        doc.save(str(path))
+
+        result = docx_converter.convert(str(path))
+        header_elems = [e for e in result.auxiliary_elements if e.placeholder_type == "header"]
+        assert header_elems, "页眉辅助元素应存在"
+        header_text = "\n".join(p.text for e in header_elems for p in e.paragraphs)
+        assert "表单编号" in header_text and "使用FinFET" in header_text, (
+            f"页眉表格文本应被提取, got: {header_text!r}"
+        )
 
     def test_duplicate_header_deduped(self, docx_converter, tmp_path):
         from docx import Document as DocxDocument

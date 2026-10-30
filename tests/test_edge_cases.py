@@ -33,11 +33,11 @@ class TestEmptyDocument:
     """空文档（0 页）不应崩溃"""
 
     def test_zero_pages_no_crash(self):
-        """0 页文档：所有审计器应正常返回（可能产生提示，但不抛异常）"""
+        """0 页文档：所有审计器应正常返回且不产生误报（非 None / 非抛异常）"""
         doc = _make_doc([])
         for auditor in _all_auditors():
             findings = auditor.audit(doc)
-            assert isinstance(findings, list)
+            assert findings == [], f"{type(auditor).__name__} 对空文档不应产生误报: {findings}"
 
     def test_zero_pages_all_text_empty(self):
         """0 页文档：all_text 应为空字符串"""

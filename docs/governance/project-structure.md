@@ -85,7 +85,7 @@ DocAudit/
 ├── AGENTS.md                        # AI 上下文中枢 — 路由表 + 红线 + 约束（跨工具标准大写）
 ├── CLAUDE.md                        # Claude Code 兼容副本（AGENTS.md 静态副本，修改后需重新复制）
 ├── README.md                        # 人类项目首页 — 场景入口 + 快速上手
-├── rules.md                         # 审查规则声明 (26 条，配置驱动)
+├── rules.md                         # 审查规则声明 (30 条，配置驱动)
 ├── app.py                           # Streamlit Web UI 入口
 ├── docker-compose.yml               # LanguageTool Docker 服务
 ├── pyproject.toml                   # 项目配置 + 依赖声明
@@ -120,6 +120,8 @@ DocAudit/
 │
 ├── skills/                          # 🛠️ AI 编码规范
 │   ├── python-SKILL.md              #   Python 开发规范
+│   ├── rules.md                     #   规则声明格式
+│   ├── deep-code-review.md          #   深度审查入口（Prompt 模板在 docs/governance/ai-review-prompt.md）
 │   ├── refactoring-guardian.md      #   重构守卫专家
 │   ├── architecture-reviewer.md     #   架构审查专家
 │   └── project-plan-review.md       #   规划评审专家
@@ -138,13 +140,16 @@ DocAudit/
 │   ├── setup_offline.bat / .sh / .py           # 离线安装 (下载三步: 锁文件+构建依赖+自检)
 │   ├── gen_requirements_lock.py     #   从 packages/ 离线解析生成 requirements-*.txt
 │   ├── benchmark.py                 #   性能基线：合成 10/50/100 页文档分段计时
-│   ├── check_release.py             #   发行自检：版本/CHANGELOG/必备文件/CLI 版本
-│   └── packages/                    #   离线依赖缓存 (生成物，gitignore 排除)
+│   └── check_release.py             #   发行自检：版本/CHANGELOG/必备文件/CLI 版本
+│
+├── packages/                        # 📦 离线依赖缓存 + HF 模型缓存 (生成物，gitignore 排除)
+│   ├── *.whl / *.tar.gz             #   setup_offline download 产物 (旧位置 scripts/packages 仍兼容)
+│   └── hf_cache/                    #   docling 布局模型缓存 (HF_HUB_CACHE 指向此处)
 │
 ├── glossary/                        # 📖 半导体术语表 (YAML)
 │   ├── semiconductor_core.yaml      #   半导体制造核心 (17 条)
 │   ├── advanced_packaging.yaml      #   先进封装 (19 条)
-│   └── general_tech.yaml            #   通用技术写作 (9 条)
+│   └── general_tech.yaml            #   通用技术写作 (4 条)
 │
 ├── vocab/                           # 📝 词汇白名单/黑名单
 │   ├── accept.txt                   #   术语白名单 (80+ 词)
@@ -202,7 +207,7 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (627 用例)
+└── tests/                           # 🧪 测试 (735 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
@@ -278,6 +283,12 @@ DocAudit/
 | `vocabulary.py` | `Vocabulary` | accept.txt 白名单 + reject.txt 黑名单 |
 | `languagetool.py` | `LanguageToolClient` | Docker → Java → Python 三层降级 |
 | `autofix.py` | `AutoFixer` | 字体标准化 + 字号修正 + 间距 + 溢出 + 标点 + 项目符号 |
+| `auditor_config.py` | `build_auditor_configs()` | Auditor 配置装配（pipeline 与 CustomRulesAuditor 回退路径共用键集） |
+| `scoring.py` | `compute_score()` | 质量分 0-100 + 等级 + 分维度（估算类半权、SYS-ERROR 不计罚分） |
+| `coverage.py` | `collect_coverage()`, `format_coverage_lines()` | 审查范围/降级声明（语言后端、无几何/字体、PPTX 专属未执行、失败审计器） |
+| `batch.py` | `cross_document_findings()` | 跨文档一致性：同一缩写全称不一致 / 必含章节覆盖不一致 |
+| `baseline.py` | `load_baseline_keys()`, `compare_with_baseline()` | 版本对比「已修复/新引入/仍存在」；`--fail-on-new` 回归门禁 |
+| `profiles.py` | `PROFILES`, `get_profile()`, `filter_by_severity()` | 规则 profile 预设（退出码阈值 + 降噪最低严重度） |
 
 ### 报告层 (`src/reporters/`)
 

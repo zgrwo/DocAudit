@@ -276,6 +276,19 @@ python src/cli.py report.pptx --exempt-file .docauditignore
 ```
 
 > 豁免键基于「规则 + 页码 + 文本上下文」，文档内容改动后旧键可能失效（属于预期：问题变了应重新确认）。
+>
+> 条目可选 `expires`（YYYY-MM-DD）：过期后自动失效并在 CLI 输出 `[EXEMPT] n/m 条豁免已过期`，
+> 避免临时豁免永久掩盖问题；`reviewer` 字段用于评审留痕。
+
+### 质量分与审查范围
+
+审查完成后 CLI 摘要输出 `[SCORE] 78/100 等级 B | 格式 80 · 结构 83`，并输出
+`[COVERAGE]` 段声明本次审查范围（语言后端层级、无版面/字体信息、未执行的 PPTX 专属检查、
+执行失败的审计器）。HTML 报告头部含质量分卡与「审查范围与可信度」区块，JSON 含
+`score` / `coverage` 字段，SARIF `run.properties` 含 `docAuditScore` / `docAuditCoverageComplete`。
+
+> 质量分只用于趋势与门槛参考，不能替代人工评审：罚分权重与满分罚分（默认 20）见
+> `src/engines/scoring.py`，估算类发现按半权计入。
 
 ### 永久排除（修改规则）
 
@@ -302,7 +315,10 @@ python src/cli.py <path> [选项]
 | `--format` | choice | `all` | 按格式过滤: `pptx` / `docx` / `pdf` / `md` / `all` |
 | `--thumbnails` / `--no-thumbnails` | flag | 开启 | HTML 报告是否内嵌页面 SVG 线框缩略图 |
 | `--exempt-file` | `str` | `None` | 豁免文件路径（如 `.docauditignore`），命中项不计入报告与退出码 |
-| `--fail-on` | choice | `error` | 达到该严重度即退出码 1: `error` / `warning` / `info` / `none` |
+| `--fail-on` | choice | 按 `--profile` | 达到该严重度即退出码 1: `error` / `warning` / `info` / `none`（显式覆盖 profile） |
+| `--profile` | choice | `standard` | 规则执行 profile: `strict`（warning 阻断）/ `standard`（error 阻断）/ `relaxed`（不阻断，隐藏 info；**报告与质量分按可见发现计算**，CLI 会输出 `[PROFILE]` 提示） |
+| `--baseline` | `str` | `None` | 上一版 JSON 报告路径；输出「已修复 / 新引入 / 仍存在」对比 |
+| `--fail-on-new` | flag | `False` | 配合 `--baseline`：存在新引入 error 时退出码 1（CI 回归门禁） |
 | `--sarif-base` | `str` | `None` | SARIF artifact 基准目录（CI 传仓库根 `.`，输出仓库相对路径供 Code Scanning 关联文件） |
 | `--fix` | flag | `False` | 自动修复格式问题 |
 | `--fix-type` | choice | `all` | 修复类型: `all` / `font` / `spacing` / `overflow` / `title_punct` / `bullet` |
@@ -418,7 +434,9 @@ jobs:
 ### regex vs check 类型
 
 - **regex**：模式匹配 — 无需写 Python 代码，直接声明正则即可。适用于术语/用词规则。
-- **check**：检查委托 — 需在对应 Auditor 中实现方法，并注册到 `_DISPATCH` 表。适用于需要结构化逻辑的检查。
+- **check**：检查委托 — 需在对应 Auditor 中实现方法，并在 `src/engines/check_registry.py`
+  的 `CHECK_REGISTRY` 增加一行 `CheckSpec`（`_DISPATCH` 与 `_skip_checks` 由注册表自动派生，
+  不要手改）。适用于需要结构化逻辑的检查。
 
 ---
 
@@ -459,7 +477,9 @@ jobs:
 完全安全。所有处理在本地完成，上传的文件存临时目录，审查结束后自动删除。无任何数据上报逻辑。
 
 **Q: 支持哪些文件格式？**
-PPTX (.pptx, .ppt), DOCX (.docx, .doc), PDF (.pdf), Markdown (.md, .markdown, .txt)。
+PPTX (.pptx), DOCX (.docx), PDF (.pdf), Markdown (.md, .markdown, .txt)。
+旧版二进制 `.ppt` / `.doc` 不受支持：转换器会直接报错并提示先用 PowerPoint/Word/LibreOffice
+另存为 `.pptx` / `.docx` 后重试。
 
 **Q: 如何在不启动 Web UI 的情况下使用？**
 CLI 完全支持所有功能：`python src/cli.py report.pptx -o report.html --fix`。

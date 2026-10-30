@@ -46,7 +46,7 @@ jobs:
 
       - name: Verify rules.md parsing
         run: |
-          python -c "from src.engines.rule_parser import parse_rules_md; rules = parse_rules_md('rules.md'); print(f'{len(rules)} rules parsed'); assert len(rules) == 26, f'Expected exactly 26 rules (宽松下限拦不住规则数缓慢缩减, 2026-09-06 审查 G-1), got {len(rules)}; 规则数变更需同步 rules.md / api-reference.md / tests/test_rules.py / test_gates 文档数字白名单'"
+          python -c "from src.engines.rule_parser import parse_rules_md; rules = parse_rules_md('rules.md'); print(f'{len(rules)} rules parsed'); assert len(rules) == 30, f'Expected exactly 30 rules (宽松下限拦不住规则数缓慢缩减, 2026-09-06 审查 G-1), got {len(rules)}; 规则数变更需同步 rules.md / api-reference.md / tests/test_rules.py / test_gates 文档数字白名单'"
 
   lint:
     runs-on: ubuntu-latest
@@ -66,6 +66,40 @@ jobs:
 
       - name: Run ruff format check
         run: ruff format --check src/ tests/ scripts/ app.py
+
+  windows:
+    # Windows 专属快测 (2026-11): 项目主打 Windows（编码回退/文件锁/路径语义/
+    # UTF-8 控制台），历史上多次出现"只在 Windows 复现"的缺陷；ubuntu 矩阵
+    # 拦不住。只跑非 slow 子集（~40s），完整矩阵仍由 ubuntu test job 承担。
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Fast tests (Windows)
+        run: pytest tests/ -q -m "not slow"
+
+      - name: Validate configuration (Windows, non-ASCII path + console)
+        run: python src/cli.py rules validate
+
+      - name: Audit fixtures on Windows (smoke)
+        # 真实文件 → CLI 全链路（含中文输出、报告落盘、退出码），Windows 专属冒烟
+        shell: pwsh
+        run: |
+          python src/cli.py tests\fixtures\sample.pptx -o "$env:TEMP\docaudit_ci.html"
+          $code = $LASTEXITCODE
+          if ($code -ne 1) { Write-Host "期望 exit 1（样例含 error 级发现），实际 $code"; exit 1 }
+          if (-not (Test-Path "$env:TEMP\docaudit_ci.html")) { Write-Host "HTML 报告未生成"; exit 1 }
+          exit 0
 
   lockfile:
     # 锁文件自洽性门禁: dependabot 单点 bump 可能破坏版本约束

@@ -532,11 +532,12 @@ class PptxConverter(BaseConverter):
                     )
                 )
 
-        # 按行分组 (单次遍历)
+        # 按行分组 (单次遍历)；用 range 保证行索引与 table_row_heights 对齐
+        # (整行都被上方 rowspan 覆盖时不丢行位)
         row_map: dict[int, list[TableCell]] = defaultdict(list)
         for c in cells:
             row_map[c.row].append(c)
-        rows = [row_map[r] for r in sorted(row_map)]
+        rows = [row_map.get(r, []) for r in range(len(table.rows))]
 
         # 表格几何 (FMT-TABLE-FIT): 行高/列宽；0 表示自动/未设置 → 不参与判定
         row_heights = [

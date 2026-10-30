@@ -16,6 +16,7 @@ from src.models.document import Document, DocumentMetadata, Page, PageElement, P
 from src.models.finding import AuditFinding, FindingSeverity, FindingType
 from src.reporters.csv_reporter import generate_csv_report
 from src.reporters.html_reporter import generate_html_report
+from src.reporters.json_reporter import generate_json_report
 from src.reporters.sarif_reporter import generate_sarif_report
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -432,3 +433,69 @@ class TestSarifUriEncoding:
         assert "%23" in uri
         assert " " not in uri
         assert uri == "%E6%8A%A5%E5%91%8A%20v2%20%231%25.pptx"
+
+
+class TestScoreAndCoverageInReports:
+    """2026-11: 质量分与覆盖声明进入 HTML/JSON/SARIF 报告。"""
+
+    SCORE = {
+        "score": 78,
+        "grade": "B",
+        "penalty": 9.0,
+        "penalty_per_page": 1.5,
+        "penalty_cap": 20.0,
+        "pages": 6,
+        "counts": {"error": 1, "warning": 0, "info": 0},
+        "dimensions": {"格式": {"score": 80, "count": 1, "penalty": 3.0}},
+        "system_errors": 0,
+        "estimated": 0,
+    }
+    COVERAGE = {
+        "format": "pptx",
+        "pages": 6,
+        "language_backend": "python",
+        "language_available": True,
+        "geometry": True,
+        "font_metadata": True,
+        "not_applicable_checks": [],
+        "failed_auditors": [],
+        "estimated_findings": 0,
+        "estimated_rule_ids": [],
+        "complete": True,
+        "notes": ["语言检查后端: 纯 Python 降级"],
+    }
+
+    def test_json_report_includes_score_and_coverage(self):
+        doc = _doc()
+        report = generate_json_report(doc, [_finding()], score=self.SCORE, coverage=self.COVERAGE)
+        assert report["summary"]["score"] == 78
+        assert report["summary"]["grade"] == "B"
+        assert report["score"]["dimensions"]["格式"]["score"] == 80
+        assert report["coverage"]["language_backend"] == "python"
+
+    def test_json_report_omits_when_not_provided(self):
+        doc = _doc()
+        report = generate_json_report(doc, [_finding()])
+        assert report["summary"]["score"] is None
+        assert "coverage" not in report
+
+    def test_html_report_renders_score_card_and_coverage(self):
+        doc = _doc()
+        html = generate_html_report(doc, [_finding()], score=self.SCORE, coverage=self.COVERAGE)
+        assert "78" in html and "/100" in html
+        assert "等级 B" in html
+        assert "审查范围与可信度" in html
+        assert "纯 Python 降级" in html
+
+    def test_html_report_without_score_has_no_card(self):
+        html = generate_html_report(_doc(), [_finding()])
+        assert 'class="score-card' not in html
+        assert "审查范围与可信度" not in html
+
+    def test_sarif_run_properties_carry_score_and_coverage(self):
+        doc = _doc()
+        text = generate_sarif_report(doc, [_finding()], score=self.SCORE, coverage=self.COVERAGE)
+        run = json.loads(text)["runs"][0]
+        assert run["properties"]["docAuditScore"] == 78
+        assert run["properties"]["docAuditGrade"] == "B"
+        assert run["properties"]["docAuditCoverageComplete"] is True

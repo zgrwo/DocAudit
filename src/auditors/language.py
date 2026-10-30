@@ -17,6 +17,7 @@ from src.text_utils import (
     LETTERED_BULLET_RE,
     NUMBERED_BULLET_RE,
     SYMBOL_BULLET_RE,
+    mask_prose_noise,
 )
 from src.text_utils import (
     LATIN_CHINESE_PUNCT as _LATIN_CHINESE_PUNCT,
@@ -28,11 +29,6 @@ logger = logging.getLogger(__name__)
 # ── 标点/冗余检查 (2026-10-28) ────────────────────────────────
 # 说明: 这些检查必须与 LanguageTool 后端无关，始终执行；旧实现把中文模式
 # 只放在 Tier-3 Python 降级里，Docker/Java 可用时反而检查更少。
-
-_MASK_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
-_MASK_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
-_MASK_FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
-_MASK_CODE_RE = re.compile(r"`[^`]*`")
 
 _PUNCT_REPEAT_RE = re.compile(r"([；：！？])\1+")
 _PUNCT_ADJACENT_RE = re.compile(r"([，。、；：])\s*([，。、；：])")
@@ -177,11 +173,25 @@ def _bigrams(text: str) -> set[str]:
 
 
 def _mask_prose_noise(text: str) -> str:
-    """用等长空格掩码 URL/邮箱/行内代码，避免把其中的 . , : 当标点错误。"""
-    masked = text
-    for regex in (_MASK_FENCED_CODE_RE, _MASK_URL_RE, _MASK_EMAIL_RE, _MASK_CODE_RE):
-        masked = regex.sub(lambda m: " " * len(m.group(0)), masked)
-    return masked
+    """用等长空格掩码 URL/邮箱/代码，避免把其中的 . , : 当标点错误。
+
+    实现已收敛到 src/text_utils.mask_prose_noise（拼写/混排检查共用同一份掩码）。
+    """
+    return mask_prose_noise(text)
+
+
+def _latin_word_before(text: str, pos: int) -> bool:
+    """pos 前紧邻的拉丁串是否为「≥2 个纯字母」组成的英文词。
+
+    FMT-MIXED-003（英文后不应使用中文标点）要判定的是"英文词 + 中文标点"；
+    单字母标签（"方案 A："）、版本号（"v1.0："）、数字单位（"5nm："）在中文里
+    是正常写法，旧实现按单字符匹配 → 每处都误报（2026-11 审查：README 实测 7 条）。
+    """
+    start = pos
+    while start > 0 and text[start - 1].isascii() and text[start - 1].isalnum():
+        start -= 1
+    run = text[start:pos]
+    return len(run) >= 2 and run.isalpha()
 
 
 def _unmatched_pairs(text: str) -> list[str]:
@@ -226,9 +236,29 @@ class LanguageAuditor(BaseAuditor):
 
         vocab_dir = config.get("vocab_dir") if config else None
         self.vocabulary = Vocabulary(vocab_dir)
+        # 近似重复页阈值 (rules.md frontmatter parameters.near_duplicate_*)
+        try:
+            self.near_duplicate_similarity = float(
+                (config or {}).get("near_duplicate_similarity", 0.90)
+            )
+        except (TypeError, ValueError):
+            self.near_duplicate_similarity = 0.90
+        try:
+            self.near_duplicate_min_chars = max(
+                1, int((config or {}).get("near_duplicate_min_chars", 40))
+            )
+        except (TypeError, ValueError):
+            self.near_duplicate_min_chars = 40
+        # 段级去重缓存（文档作用域：audit() 开始时重置，见 audit 内注释）
+        self._lt_segment_cache: set[tuple[str, str]] = set()
 
     def audit(self, doc: Document) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
+
+        # 段级缓存按"文档"作用域：Web UI 用 @st.cache_resource 复用本审计器实例，
+        # 旧实现把缓存留在实例上 → 第二份文档里与第一份相同的英文段不再提交，
+        # LanguageTool 结果被静默吞掉（2026-11 审查实测：同文本第二份 0 请求）。
+        self._lt_segment_cache = set()
 
         # 按页处理
         for page in doc.pages:
@@ -325,16 +355,15 @@ class LanguageAuditor(BaseAuditor):
                 self._lt_unavailable_warned = True
             return findings
 
-        # 中英文分段
-        segments = self._segment_by_language(text)
+        # 中英文分段 (先掩码代码/URL: 其中的标识符与 `--flag` 不是自然语言，
+        # 不应送 LanguageTool/拼写检查 — 2026-11 审查)
+        segments = self._segment_by_language(_mask_prose_noise(text))
 
         # 段级去重 + 同语言合批（2026-10-29 深度审查 P1）：
         # 旧实现逐段同步 HTTP（技术页实测 17 段 → 17 次请求/页，100 页 ≈1700 次），
         # 开 LanguageTool 后审查从亚秒级劣化到秒级。合并后每页每种语言最多 1 次
         # 请求；重复段（MES/DOE/模板句）跨页复用，不再重复提交。
-        cache = getattr(self, "_lt_segment_cache", None)
-        if cache is None:
-            cache = self._lt_segment_cache = set()
+        cache = self._lt_segment_cache
         grouped: dict[str, list[str]] = {}
         for seg_text, seg_lang in segments:
             # 英文段降低阈值以捕获短词拼写错误 (如 "teh", "recieve")
@@ -404,8 +433,6 @@ class LanguageAuditor(BaseAuditor):
                     },
                 )
             )
-        return findings
-
         return findings
 
     def _segment_by_language(self, text: str) -> list[tuple[str, str]]:
@@ -483,6 +510,9 @@ class LanguageAuditor(BaseAuditor):
         """
         findings: list[AuditFinding] = []
 
+        # 掩码代码/URL 后再判定混排: 位置不变，因此 context 仍从原文切片
+        masked = _mask_prose_noise(text)
+
         # 使用共享的预编译正则 (来自 text_utils)，避免重复编译
         checks = [
             (
@@ -516,7 +546,10 @@ class LanguageAuditor(BaseAuditor):
             MAX_EXAMPLES = 5
             total = 0
             examples: list = []
-            for m in pattern.finditer(text):
+            for m in pattern.finditer(masked):
+                # 英文后中文标点: 仅当标点紧跟一个英文词 (≥2 纯字母) 才报
+                if rule_id == "FMT-MIXED-003" and not _latin_word_before(masked, m.start()):
+                    continue
                 total += 1
                 if len(examples) < MAX_EXAMPLES:
                     examples.append(m)
@@ -550,7 +583,8 @@ class LanguageAuditor(BaseAuditor):
     ) -> list[AuditFinding]:
         """始终执行的中文基础语法/标点模式 (不依赖 LanguageTool 后端)。"""
         findings: list[AuditFinding] = []
-        for match in check_chinese_patterns(text):
+        # 掩码代码/URL 后再匹配 (等长替换, offset 语义不变)
+        for match in check_chinese_patterns(_mask_prose_noise(text)):
             ctx = match.get("context") or {}
             context_text = ctx.get("text", "") if isinstance(ctx, dict) else ""
             findings.append(
@@ -762,11 +796,11 @@ class LanguageAuditor(BaseAuditor):
         return findings
 
     def _check_near_duplicate_pages(self, doc: Document) -> list[AuditFinding]:
-        """近似重复页检测（字符二元组 Jaccard ≥ 0.90，至少 40 字）。"""
+        """近似重复页检测（字符二元组 Jaccard ≥ near_duplicate_similarity，至少 N 字）。"""
         entries: list[tuple[int, set[str]]] = []
         for page in doc.pages:
             norm = re.sub(r"\s+", "", _body_text(page))
-            if len(norm) < 40:
+            if len(norm) < self.near_duplicate_min_chars:
                 continue
             entries.append((page.index, _bigrams(norm)))
         pairs: list[tuple[int, int, float]] = []
@@ -777,7 +811,7 @@ class LanguageAuditor(BaseAuditor):
             if not union:
                 continue
             similarity = len(si & sj) / union
-            if similarity >= 0.90:
+            if similarity >= self.near_duplicate_similarity:
                 pairs.append((i, j, similarity))
         pairs.sort(key=lambda p: -p[2])
         findings: list[AuditFinding] = []

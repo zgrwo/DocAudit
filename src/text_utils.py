@@ -1,4 +1,4 @@
-"""共享文本处理工具 — CJK 字符检测、CJK-Latin 混排正则等"""
+"""共享文本处理工具 — CJK 字符检测、CJK-Latin 混排正则、代码/URL 掩码等"""
 
 import re
 
@@ -66,6 +66,47 @@ NUMBERED_BULLET_RE = re.compile(r"^\s*(?:\d+[\.\)]\s|\(\d+\)\s|[①②③④⑤�
 
 LETTERED_BULLET_RE = re.compile(r"^\s*(?:[a-zA-Z][\.\)]\s|\([a-zA-Z]\)\s)")
 """字母类项目符号: a) A. (a)"""
+
+
+# ── 代码 / URL / Markdown 结构语法掩码 (语言类检查共用) ──────
+# 这些区间内的文本不是自然语言：其中的 `--flag`、`# 注释`、英文标识符、
+# 分隔线 `---` 不应触发混排/标点/拼写检查（2026-11 审查：README 自审时
+# `--fail-on` 被报 PUNCT-007、`---` 分隔线被报破折号、代码标识符被报 PY-SPELL）。
+# 掩码等长替换为空格，字符位置不变。
+
+MASK_FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
+MASK_CODE_RE = re.compile(r"`[^`]*`")
+MASK_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+MASK_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
+# HTML 注释 (Markdown 常用 <!-- last_updated: … -->)
+MASK_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Markdown 分隔线: 整行仅由 3+ 个 -/*/_ 组成 (可带前导空白)
+MASK_HR_RE = re.compile(r"(?m)^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
+# 顺序即掩码顺序: 先整块代码/注释, 再分隔线, 最后 URL/邮箱/行内代码
+MASK_REGEXES = (
+    MASK_FENCED_CODE_RE,
+    MASK_HTML_COMMENT_RE,
+    MASK_HR_RE,
+    MASK_URL_RE,
+    MASK_EMAIL_RE,
+    MASK_CODE_RE,
+)
+
+
+def masked_spans(text: str) -> list[tuple[int, int]]:
+    """返回代码/URL/注释/分隔线区间 [(start, end), ...]（用于跳过非自然语言文本）。"""
+    spans: list[tuple[int, int]] = []
+    for regex in MASK_REGEXES:
+        spans.extend((m.start(), m.end()) for m in regex.finditer(text))
+    return spans
+
+
+def mask_prose_noise(text: str) -> str:
+    """把代码/URL/注释/分隔线替换为等长空格，供只应检查自然语言的规则使用。"""
+    masked = text
+    for regex in MASK_REGEXES:
+        masked = regex.sub(lambda m: " " * len(m.group(0)), masked)
+    return masked
 
 
 def is_technical_token(word: str) -> bool:

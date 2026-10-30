@@ -178,3 +178,61 @@ class TestFailOnThreshold:
         )
         assert result.returncode == 0, result.stdout[-400:]
         assert "未达到 --fail-on none" in result.stdout
+
+
+class TestProfileAndBaselineExitCodes:
+    """2026-11: --profile / --baseline / --fail-on-new 的退出码契约。"""
+
+    def test_profile_relaxed_never_blocks_on_findings(self, tmp_path):
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        result = _run_cli(str(sample), "--profile", "relaxed")
+        assert result.returncode == 0, result.stdout[-500:]
+
+    def test_fail_on_overrides_profile(self, tmp_path):
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        result = _run_cli(str(sample), "--profile", "relaxed", "--fail-on", "error")
+        assert result.returncode == 1, result.stdout[-500:]
+
+    def test_baseline_same_report_all_remaining(self, tmp_path):
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        base = tmp_path / "base.json"
+        first = _run_cli(str(sample), "-o", str(base), "--fail-on", "none")
+        assert first.returncode == 0, first.stdout[-500:]
+        assert base.exists()
+        result = _run_cli(str(sample), "--baseline", str(base), "--fail-on", "none")
+        assert result.returncode == 0, result.stdout[-500:]
+        assert "新引入 0" in result.stdout, result.stdout[-800:]
+
+    def test_fail_on_new_blocks_regression(self, tmp_path):
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        empty = tmp_path / "empty.json"
+        empty.write_text('{"findings": []}', encoding="utf-8")
+        result = _run_cli(
+            str(sample), "--baseline", str(empty), "--fail-on-new", "--fail-on", "none"
+        )
+        assert result.returncode == 1, result.stdout[-500:]
+        assert "新引入" in result.stdout
+
+    def test_unknown_profile_warns_and_uses_standard(self, tmp_path):
+        clean = tmp_path / "clean.pptx"
+        _write_clean_pptx(clean)
+        result = _run_cli(str(clean), "--profile", "turbo")
+        assert "未知 profile" in result.stdout
+        # 回退 standard：干净文档（无 error）必须 exit 0，且以 error 为阈值
+        assert result.returncode == 0, result.stdout[-500:]
+        assert "未达到 --fail-on error" in result.stdout
+
+    def test_fail_on_new_without_baseline_warns(self, tmp_path):
+        """--fail-on-new 缺 --baseline 时不得静默（F8）。"""
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        result = _run_cli(str(sample), "--fail-on-new", "--fail-on", "none")
+        assert result.returncode == 0, result.stdout[-400:]
+        assert "需要配合 --baseline" in result.stdout
+
+    def test_profile_relaxed_announces_filtering(self, tmp_path):
+        """relaxed 隐藏 info 时必须显式提示（报告/分数口径透明，F9）。"""
+        sample = PROJECT_ROOT / "tests" / "fixtures" / "sample.pptx"
+        result = _run_cli(str(sample), "--profile", "relaxed")
+        assert result.returncode == 0, result.stdout[-400:]
+        assert "[PROFILE] relaxed" in result.stdout
+        assert "按可见发现计算" in result.stdout

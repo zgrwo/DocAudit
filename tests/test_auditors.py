@@ -10,7 +10,7 @@ from src.auditors.structure import StructureAuditor
 from src.converters.pptx_converter import PptxConverter
 from src.engines.rule_parser import extract_auditor_config, parse_rules_md
 from src.models.document import Document, DocumentMetadata, Page, PageElement, Paragraph
-from src.models.finding import FindingSeverity
+from src.models.finding import AuditFinding, FindingSeverity, FindingType
 
 RULES_MD = str(Path(__file__).resolve().parent.parent / "rules.md")
 
@@ -607,6 +607,30 @@ class TestFormatAuditor:
         assert findings[0].rule_id == "FMT-004"
         assert "英文字符" in findings[0].message
 
+    def test_markdown_code_block_not_paragraph_length(self):
+        """FMT-004: Markdown 围栏代码块不算"长段落" (2026-11 审查)
+
+        代码块多行是常态；旧实现把整块按段落计 → README 自审 19 条误报。
+        """
+        fa = FormatAuditor()
+        code = "```bash\n" + "\n".join(f"echo line{i}" for i in range(20)) + "\n```"
+        doc = _text_doc(code)
+        assert fa._check_paragraph_length(doc.pages[0]) == []
+
+    def test_markdown_bullet_list_not_paragraph_length(self, tmp_path):
+        """FMT-004: Markdown 列表块 (逐项拆段) 不报"长段落" (2026-11 审查)"""
+        from src.converters.md_converter import MarkdownConverter
+
+        md = "# 列表\n\n" + "\n".join(f"- 第 {i} 项要点" for i in range(5)) + "\n"
+        path = tmp_path / "list.md"
+        path.write_text(md, encoding="utf-8")
+        doc = MarkdownConverter().convert(str(path))
+        fa = FormatAuditor()
+        findings = [
+            f for p in doc.pages for f in fa._check_paragraph_length(p) if f.rule_id == "FMT-004"
+        ]
+        assert findings == [], f"列表项不应报 FMT-004, got: {[f.message for f in findings]}"
+
     def test_global_font_consistency_latin_plus_two_east_asia_ok(self):
         """FMT-001 全局: latin 统一 + 2 种 eastAsia (共 3 复合键) → 不触发"""
         from src.models.document import Run
@@ -817,36 +841,23 @@ class TestFactualAuditor:
             assert f.severity == FindingSeverity.ERROR
 
     def test_common_uppercase_words_skipped(self):
-        """CON-003: 常见英语大写单词 (THE, AND, NEW 等) 不应被标记为未定义缩写"""
-        doc = PptxConverter().convert("tests/fixtures/sample.pptx")
-        findings = FactualAuditor().audit(doc)
-        # 验证 THE/AND/NEW 等常见词不在 findings 中
-        con003_findings = [f for f in findings if f.rule_id == "CON-003"]
-        common_words = {
-            "THE",
-            "AND",
-            "FOR",
-            "ALL",
-            "BUT",
-            "NOT",
-            "CAN",
-            "ARE",
-            "WAS",
-            "HAS",
-            "NEW",
-            "SET",
-            "END",
-            "TOP",
-        }
-        for f in con003_findings:
-            # 从 context 中提取缩写字面
-            ctx = f.context or ""
-            for word in common_words:
-                if word in ctx:
-                    # 确认这不是被标记的缩写
-                    assert word not in (f.metadata.get("abbreviation") or ""), (
-                        f"Common word '{word}' should not be flagged as undefined abbreviation"
-                    )
+        """CON-003: 常见英语大写单词 (THE, AND, NEW 等) 不应被标记为未定义缩写
+
+        2026-11 审查: 旧断言取 ``metadata["abbreviation"]`` —— 该键从不写入
+        (``or ""`` 兜底) → 断言恒真, 删掉 _COMMON_UPPERCASE_WORDS 过滤也全绿。
+        改为断言 finding.message 不含常见词, 并以一个真实缩写作阳性锚点。
+        """
+        fa = FactualAuditor()
+        doc = _text_doc("THE AND FOR NEW 是常见词，XYZQ 是真实缩写。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        messages = [f.message for f in findings]
+        for word in ("THE", "AND", "FOR", "NEW"):
+            assert not any(f"「{word}」" in msg for msg in messages), (
+                f"常见词 {word} 不应被标记为未定义缩写, got: {messages}"
+            )
+        assert any("「XYZQ」" in msg for msg in messages), (
+            f"真实缩写 XYZQ 应被标记 (证明检查确实执行), got: {messages}"
+        )
 
     def test_abbreviation_accept_whitelist_skipped(self):
         """CON-003: vocab/accept.txt 中的领域缩写 (WLP/FOWLP/RDL) 不应报未定义。"""
@@ -869,6 +880,80 @@ class TestFactualAuditor:
         doc = _text_doc("Through Silicon Via (TSV) 工艺。TSV 用于先进封装。")
         findings = fa._check_abbreviation_first_defined(doc)
         assert len(findings) == 0, f"'全称 (TSV)' 应视为已定义, got: {findings}"
+
+    def test_abbreviation_multiply_defined_cross_page_same_offset(self):
+        """CON-003-B: 两页在相同字符偏移各定义一次 → 仍应报重复定义 (2026-11 审查)
+
+        def_site 是页内字符偏移；旧实现只用它去重 → 两页模板句同偏移定义被误判为
+        "同一定义站点"，CON-003-B 静默漏报。
+        """
+        text = "TSV (Through Silicon Via) 用于互连。"
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                elements=[
+                    PageElement(type="text_frame", paragraphs=[Paragraph(text=text, runs=[])])
+                ],
+            )
+            for i in range(2)
+        ]
+        doc = Document(format="md", source_path="x", metadata=DocumentMetadata(), pages=pages)
+        findings = FactualAuditor()._check_abbreviation_multiply_defined(doc)
+        assert len(findings) == 1, f"跨页重复定义应报 1 条 CON-003-B, got: {findings}"
+        assert findings[0].rule_id == "CON-003-B"
+
+    def test_abbreviation_defined_only_inside_own_definition(self):
+        """CON-003-A: 缩写仅出现在自己的定义括号内 → 应判「定义后未再使用」(2026-11 审查)
+
+        旧实现用 total_count(含括号内重复) 比 definition_count(去重站点)：
+        "TSV (硅通孔 TSV)" total=2 > def=1 → 该报的 CON-003-A 被漏掉。
+        """
+        doc = _text_doc("TSV (硅通孔 TSV) 工艺。")
+        findings = FactualAuditor()._check_abbreviation_defined_never_used(doc)
+        assert len(findings) == 1, f"仅定义处出现应报 CON-003-A, got: {findings}"
+        assert findings[0].rule_id == "CON-003-A"
+        assert findings[0].metadata["usage_count"] == 0
+
+    def test_abbreviation_same_page_later_definition_message(self):
+        """CON-003-C: 同页后文才定义时文案不得自相矛盾 (2026-11 审查)
+
+        旧文案固定为「在第 N 页使用，但在第 M 页才给出定义」，同页时输出
+        「在第 1 页使用，但在第 1 页才给出定义」。
+        """
+        doc = _text_doc("TSV 用于互连，后文给出定义 TSV (Through Silicon Via)。")
+        findings = FactualAuditor()._check_abbreviation_used_before_defined(doc)
+        assert len(findings) == 1, f"应先使用后定义, got: {findings}"
+        msg = findings[0].message
+        assert "同页后文才给出定义" in msg, msg
+        assert "但在第 1 页才给出定义" not in msg, msg
+
+    def test_abbreviation_parenthetical_mention_not_definition(self):
+        """括号内顺带提及不是"全称 (ABBR)"定义 (2026-11 审查)
+
+        旧实现把"缩写位于括号内"一律当定义 → `（核心依赖 + PDF + 开发工具）`
+        让 PDF 被当成已定义，CON-003 漏报、CON-003-A 假阳性。
+        """
+        fa = FactualAuditor()
+        doc = _text_doc("安装说明（核心依赖 + PDF + 开发工具）另见附录。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        assert any("「PDF」" in f.message for f in findings), (
+            f"括号内顺带提及不应算定义, got: {[f.message for f in findings]}"
+        )
+
+    def test_abbreviation_fullwidth_paren_definition_recognized(self):
+        """全角括号 "TSV（硅通孔）" 应识别为定义 (旧实现只认半角括号)"""
+        fa = FactualAuditor()
+        doc = _text_doc("TSV（硅通孔）用于垂直互连。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        assert findings == [], f"全角括号定义应被识别, got: {findings}"
+
+    def test_abbreviation_filename_token_skipped(self):
+        """文件名/路径片段不是待定义缩写 (AGENTS.md / MANIFEST.in)"""
+        fa = FactualAuditor()
+        doc = _text_doc("详见 MANIFEST.in 与 AGENTS.md，以及 src/CHANGELOG 说明。")
+        findings = fa._check_abbreviation_first_defined(doc)
+        assert findings == [], f"文件名不应报未定义缩写, got: {findings}"
 
     def test_abbreviation_cache_weakref_identity(self):
         """回归: 缩写扫描缓存以 weakref.ref 绑定文档身份 (曾用 id(doc) — 地址可复用)"""
@@ -1130,6 +1215,70 @@ class TestLayoutChecks:
         assert len(findings) == 1
         assert findings[0].rule_id == "STR-MASTER"
 
+    def test_multiple_title_layout_findings_not_deduped(self):
+        """版式重复使用: 多个标题版式各一条 finding, 不得被 dedup_key 折叠 (2026-11 审查)
+
+        这些 finding 无 rule_id / 无 page_index / 旧实现 context=None →
+        dedup_key 完全相同, AuditFinding.deduplicate() 只留第一条 (信息丢失)。
+        """
+        from src.models.finding import AuditFinding
+
+        names = ["标题幻灯片", "标题幻灯片", "封面", "封面"]
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                layout_name=name,
+                elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text="x")])],
+            )
+            for i, name in enumerate(names)
+        ]
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=pages
+        )
+        findings = FormatAuditor()._check_layout_consistency(doc)
+        assert len(findings) == 2, f"两个标题版式应各一条, got: {[f.message for f in findings]}"
+        deduped = AuditFinding.deduplicate(findings)
+        assert len(deduped) == 2, f"dedup 后不得丢失, got: {[f.message for f in deduped]}"
+
+    def test_layout_consistency_recognizes_english_cover(self):
+        """英文封面版式 ("Title Slide") 也要被识别 (2026-11 审查)
+
+        旧实现用 ``"标题" in name`` 字面判断 → 英文模板的标题版式复用完全不检查。
+        """
+        names = ["Title Slide", "Title Slide"]
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                layout_name=name,
+                elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text="x")])],
+            )
+            for i, name in enumerate(names)
+        ]
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=pages
+        )
+        findings = FormatAuditor()._check_layout_consistency(doc)
+        assert len(findings) == 1, f"英文标题版式复用应报 1 条, got: {findings}"
+
+    def test_layout_consistency_content_layout_not_flagged(self):
+        """内容版式名含 "Title" 但非封面 ("Title and Content") 不得被当标题版式。"""
+        names = ["Title and Content", "Title and Content"]
+        pages = [
+            Page(
+                index=i,
+                slide_number=i + 1,
+                layout_name=name,
+                elements=[PageElement(type="text_frame", paragraphs=[Paragraph(text="x")])],
+            )
+            for i, name in enumerate(names)
+        ]
+        doc = Document(
+            format="pptx", source_path="x.pptx", metadata=DocumentMetadata(), pages=pages
+        )
+        assert FormatAuditor()._check_layout_consistency(doc) == []
+
 
 class TestTableFit:
     """2026-10-29: 表格 fit 估算 (行高/列宽/越界)。几何估算，非渲染级。"""
@@ -1193,3 +1342,407 @@ class TestTableFit:
     def test_clean_table_not_flagged(self):
         elem = self._table("A1", row_heights=[30.0], col_widths=[120.0])
         assert self._findings(elem) == []
+
+
+class TestConfigurableThresholds:
+    """2026-11: 原硬编码阈值经 rules.md global parameters 可配置（行为验证）。"""
+
+    @staticmethod
+    def _frame(left: float, top: float, *, width=100.0, height=60.0) -> PageElement:
+        return PageElement(
+            type="text_frame",
+            left=left,
+            top=top,
+            width=width,
+            height=height,
+            paragraphs=[Paragraph(text="内容", runs=[])],
+        )
+
+    def test_alignment_tolerance_configurable(self):
+        page = Page(index=0, slide_number=1, elements=[self._frame(50, 50), self._frame(350, 53)])
+        # 默认容差 5pt：3pt 偏差不报
+        assert FormatAuditor()._check_alignment(page) == []
+        # 收紧到 1pt：同一行 top 偏差 3pt → FMT-ALIGN
+        findings = FormatAuditor(config={"alignment_tolerance": 1.0})._check_alignment(page)
+        assert [f.rule_id for f in findings] == ["FMT-ALIGN"]
+
+    def test_conclusion_min_paragraphs_configurable(self):
+        pages = [
+            Page(
+                index=0,
+                slide_number=1,
+                layout_name="Title and Content",
+                elements=[
+                    PageElement(
+                        type="text_frame",
+                        is_title=True,
+                        paragraphs=[Paragraph(text="工艺", runs=[])],
+                    ),
+                    PageElement(
+                        type="text_frame",
+                        is_body=True,
+                        paragraphs=[
+                            Paragraph(text="第一段说明。", runs=[]),
+                            Paragraph(text="第二段说明。", runs=[]),
+                        ],
+                    ),
+                ],
+            )
+        ]
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=pages)
+        # 默认门槛 3 段（2 段不达标）→ CON-004
+        assert [f.rule_id for f in StructureAuditor()._check_every_slide_has_conclusion(doc)] == [
+            "CON-004"
+        ]
+        # 门槛降到 2 → 满足内容实质条件，不报
+        relaxed = StructureAuditor(config={"conclusion_min_paragraphs": 2})
+        assert relaxed._check_every_slide_has_conclusion(doc) == []
+
+    def test_near_duplicate_min_chars_configurable(self):
+        def page(idx: int) -> Page:
+            return Page(
+                index=idx,
+                slide_number=idx + 1,
+                elements=[
+                    PageElement(
+                        type="text_frame",
+                        paragraphs=[
+                            Paragraph(text="这是一段二十字的重复内容用于相似检测。", runs=[])
+                        ],
+                    )
+                ],
+            )
+
+        doc = Document(
+            format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page(0), page(1)]
+        )
+        from src.auditors.language import LanguageAuditor
+
+        auditor = LanguageAuditor({"glossary_dir": None, "vocab_dir": None})
+        # 默认 40 字下限：20 字页面直接跳过
+        assert auditor._check_near_duplicate_pages(doc) == []
+        # 下限降到 10 字 → 近似重复页被报
+        real = LanguageAuditor(
+            {"glossary_dir": None, "vocab_dir": None, "near_duplicate_min_chars": 10}
+        )
+        assert [f.rule_id for f in real._check_near_duplicate_pages(doc)] == ["TXT-NEAR-DUP"]
+
+    def test_common_uppercase_extra_configurable(self):
+        doc = _text_doc("ABCX 指标需要确认。")
+        assert [f.rule_id for f in FactualAuditor()._check_abbreviation_first_defined(doc)] == [
+            "CON-003"
+        ]
+        suppressed = FactualAuditor(config={"common_uppercase_extra": ["ABCX"]})
+        assert suppressed._check_abbreviation_first_defined(doc) == []
+
+
+class TestContentChecks:
+    """2026-11 内容级检查: STR-009 / CON-005 / CON-006 / CON-007。"""
+
+    @staticmethod
+    def _page(idx, texts=None, title=None):
+        elements = []
+        if title is not None:
+            elements.append(
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[Paragraph(text=title, runs=[])],
+                )
+            )
+        if texts:
+            elements.append(
+                PageElement(
+                    type="text_frame",
+                    is_body=True,
+                    paragraphs=[Paragraph(text=t, runs=[]) for t in texts],
+                )
+            )
+        return Page(index=idx, slide_number=idx + 1, elements=elements)
+
+    @classmethod
+    def _doc(cls, pages):
+        return Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=pages)
+
+    def test_figure_without_reference_flagged(self):
+        doc = self._doc([self._page(0, ["图1: 良率趋势"]), self._page(1, ["本页说明"])])
+        assert [f.rule_id for f in StructureAuditor()._check_figure_referenced(doc)] == ["STR-009"]
+
+    def test_figure_with_reference_not_flagged(self):
+        for ref in ("从图1 可见趋势", "如图1所示", "图1中给出明细"):
+            doc = self._doc([self._page(0, ["图1: 良率趋势", ref])])
+            assert StructureAuditor()._check_figure_referenced(doc) == [], ref
+
+    def test_caption_line_with_reference_word_not_flagged(self):
+        doc = self._doc([self._page(0, ["图1: 见图2 的对比数据"])])
+        assert StructureAuditor()._check_figure_referenced(doc) == []
+
+    def test_conclusion_without_numbers_flagged(self):
+        doc = self._doc([self._page(0, ["结论：性能显著提升"])])
+        findings = StructureAuditor()._check_conclusion_evidence(doc)
+        assert [f.rule_id for f in findings] == ["CON-005"]
+        assert findings[0].severity == FindingSeverity.WARNING
+
+    def test_conclusion_with_numbers_not_flagged(self):
+        for text in ("结论：良率提升至 95%", "结论：周期缩短 20 天", "小结：共 3 项风险"):
+            doc = self._doc([self._page(0, [text])])
+            assert StructureAuditor()._check_conclusion_evidence(doc) == [], text
+
+    def test_evidence_min_numbers_configurable(self):
+        doc = self._doc([self._page(0, ["结论：良率 95%"])])
+        strict = StructureAuditor(config={"evidence_min_numbers": 2})
+        assert [f.rule_id for f in strict._check_conclusion_evidence(doc)] == ["CON-005"]
+
+    def test_section_with_only_title_flagged(self):
+        auditor = StructureAuditor(config={"required_sections": ["结论"]})
+        doc = self._doc([self._page(0, title="结论")])
+        findings = auditor._check_section_substance(doc)
+        assert [f.rule_id for f in findings] == ["CON-006"]
+
+    def test_section_with_content_not_flagged(self):
+        auditor = StructureAuditor(config={"required_sections": ["结论"]})
+        doc = self._doc(
+            [
+                self._page(
+                    0,
+                    ["本章给出良率 95%、周期缩短 20% 两项结论，并给出后续三项计划。"],
+                    title="结论",
+                )
+            ]
+        )
+        assert auditor._check_section_substance(doc) == []
+
+    def test_missing_section_not_reported_by_substance_check(self):
+        """缺章由 CON-002 负责，CON-006 不重复报。"""
+        auditor = StructureAuditor(config={"required_sections": ["结论"]})
+        doc = self._doc([self._page(0, ["正文内容"], title="方法")])
+        assert auditor._check_section_substance(doc) == []
+
+    def test_numeric_without_unit_flagged(self):
+        doc = self._doc([self._page(0, ["膜层厚度 5 需要控制"])])
+        findings = FactualAuditor()._check_numeric_unit_presence(doc)
+        assert [f.rule_id for f in findings] == ["CON-007"]
+        assert findings[0].severity == FindingSeverity.INFO
+
+    def test_numeric_with_unit_not_flagged(self):
+        for text in ("膜层厚度 5nm 需要控制", "膜层厚度 5 纳米需要控制", "厚度 5.5 mm"):
+            doc = self._doc([self._page(0, [text])])
+            assert FactualAuditor()._check_numeric_unit_presence(doc) == [], text
+
+    def test_numeric_without_keyword_not_flagged(self):
+        """普通计数/序号（无量词前缀）不误报。"""
+        doc = self._doc([self._page(0, ["第 3 项任务完成，共 5 人参与"])])
+        assert FactualAuditor()._check_numeric_unit_presence(doc) == []
+
+
+class TestMaxReviewFixes:
+    """2026-11 max-level 审查修复的回归锚点（F3/F4/F5/F6/F7/F10/F18）。"""
+
+    @staticmethod
+    def _doc(texts, fmt="md", title=None, table=False):
+        els = []
+        if title is not None:
+            els.append(
+                PageElement(
+                    type="text_frame",
+                    is_title=True,
+                    paragraphs=[Paragraph(text=title, runs=[])],
+                )
+            )
+        if table:
+            els.append(
+                PageElement(
+                    type="table",
+                    tables=[
+                        [
+                            type(
+                                "C",
+                                (),
+                                {
+                                    "text": "良率 95%",
+                                    "col": 0,
+                                    "row": 0,
+                                    "colspan": 1,
+                                    "rowspan": 1,
+                                },
+                            )()
+                        ]
+                    ],
+                )
+            )
+        els.append(
+            PageElement(
+                type="text_frame",
+                is_body=True,
+                paragraphs=[Paragraph(text=t, runs=[]) for t in texts],
+            )
+        )
+        return Document(
+            format=fmt,
+            source_path="x",
+            metadata=DocumentMetadata(),
+            pages=[Page(index=0, slide_number=1, elements=els)],
+        )
+
+    def test_batch_term_prefix_not_false_positive(self):
+        """ "本方案采用原子层沉积（ALD）" 与 "基于原子层沉积（ALD）" 是同一术语（F3）。"""
+        from src.engines.batch import cross_document_findings
+
+        a = self._doc(["本方案采用原子层沉积（ALD）工艺。"])
+        b = self._doc(["该流程基于原子层沉积（ALD）实现。"])
+        assert cross_document_findings([("a.md", a), ("b.md", b)]) == []
+
+    def test_batch_term_real_difference_still_flagged(self):
+        from src.engines.batch import cross_document_findings
+
+        a = self._doc(["原子层沉积（ALD）工艺。"])
+        b = self._doc(["原子层堆叠（ALD）工艺。"])
+        assert [f.rule_id for f in cross_document_findings([("a.md", a), ("b.md", b)])] == [
+            "BATCH-TERM"
+        ]
+
+    def test_batch_section_toc_line_not_counted(self):
+        """目录行不算章节存在（F10）：a 只有目录提及，b 有真实标题 → 报 a 缺章。"""
+        from src.engines.batch import cross_document_findings
+
+        a = self._doc(["目录：概述 工艺流程 结论"])
+        b = Document(
+            format="md",
+            source_path="b.md",
+            metadata=DocumentMetadata(),
+            pages=[
+                Page(
+                    index=0,
+                    elements=[
+                        PageElement(
+                            type="text_frame",
+                            paragraphs=[Paragraph(text="概述", level=1, runs=[])],
+                        )
+                    ],
+                )
+            ],
+        )
+        findings = cross_document_findings(
+            [("a.md", a), ("b.md", b)], required_sections=["概述", "结论"]
+        )
+        assert [f.rule_id for f in findings] == ["BATCH-SECTION"]
+        assert "概述" in findings[0].message
+
+    def test_section_with_table_counts_as_substance(self):
+        """DOCX 章节只有表格也算有实体内容（F4）。"""
+        page = Page(
+            index=0,
+            elements=[
+                PageElement(
+                    type="text_frame", paragraphs=[Paragraph(text="结论", level=1, runs=[])]
+                ),
+                PageElement(
+                    type="table",
+                    tables=[
+                        [
+                            type(
+                                "C",
+                                (),
+                                {
+                                    "text": "良率 95%",
+                                    "col": 0,
+                                    "row": 0,
+                                    "colspan": 1,
+                                    "rowspan": 1,
+                                },
+                            )()
+                        ]
+                    ],
+                ),
+            ],
+        )
+        doc = Document(format="docx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        auditor = StructureAuditor(config={"required_sections": ["结论"]})
+        assert auditor._check_section_substance(doc) == []
+
+    def test_coverage_does_not_claim_python_when_unprobed(self):
+        """语言后端未探测 → 不得宣称"纯 Python 降级"（F5）。"""
+        from src.engines.coverage import collect_coverage
+
+        class Client:
+            backend = None
+            is_available = False
+
+        class LA:
+            lt_client = Client()
+
+        doc = self._doc(["hello 中文"])
+        coverage = collect_coverage(doc, [("语言审查", LA())], [])
+        assert coverage["language_backend"] is None
+        assert any("不可用" in n for n in coverage["notes"]), coverage["notes"]
+
+    def test_baseline_matches_legacy_report_without_key(self, tmp_path):
+        """旧版 JSON（无 key 字段）必须能对上身份，不得整份误判为新引入（F6）。"""
+        import json
+
+        from src.engines.baseline import compare_with_baseline, load_baseline_keys
+
+        finding = AuditFinding(
+            type=FindingType.FORMAT,
+            severity=FindingSeverity.ERROR,
+            message="字号偏小",
+            rule_id="FMT-002",
+            page_index=0,
+            location="第 1 页",
+            context="正文 10pt",
+        )
+        legacy = {
+            "findings": [
+                {
+                    "type": finding.type.value,
+                    "severity": finding.severity.value,
+                    "message": finding.message,
+                    "rule_id": finding.rule_id,
+                    "page_index": finding.page_index,
+                    "location": finding.location,
+                    "context": finding.context,
+                    "metadata": {},
+                }
+            ]
+        }
+        path = tmp_path / "legacy.json"
+        path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+        keys = load_baseline_keys(path)
+        assert keys == {finding.exemption_key}
+        result = compare_with_baseline([finding], keys)
+        assert result["new"] == [] and result["fixed"] == 0
+
+    def test_invalid_frontmatter_yaml_is_reported(self, tmp_path):
+        """frontmatter YAML 语法错误必须被 rules validate 报告（F7）。"""
+        from src.engines.validation import validate_rules
+
+        path = tmp_path / "rules.md"
+        path.write_text(
+            "---\n"
+            'version: "1.0"\n'
+            "parameters: [unclosed\n"
+            "---\n\n"
+            "# 结构规则\n\n"
+            "## STR-001: x\n- 严重度: error\n- 检查: first_slide_has_title_layout\n",
+            encoding="utf-8",
+        )
+        result = validate_rules(path)
+        assert not result.ok
+        assert any("frontmatter" in e for e in result.errors), result.errors
+
+    def test_figure_check_handles_non_contiguous_page_index(self):
+        """页面 index 非连续时按页对象取标签，不再 IndexError（F18）。"""
+        page = Page(
+            index=7,
+            slide_number=8,
+            elements=[
+                PageElement(
+                    type="text_frame",
+                    paragraphs=[Paragraph(text="图1: 趋势", runs=[])],
+                )
+            ],
+        )
+        doc = Document(format="pptx", source_path="x", metadata=DocumentMetadata(), pages=[page])
+        findings = StructureAuditor()._check_figure_referenced(doc)
+        assert [f.rule_id for f in findings] == ["STR-009"]
+        assert findings[0].location == "第 8 页"

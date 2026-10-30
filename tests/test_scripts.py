@@ -46,6 +46,35 @@ def test_common_paths():
     assert common.venv_python().name in ("python.exe", "python")
 
 
+def test_packages_dir_prefers_project_root(tmp_path):
+    """离线依赖缓存目录: 优先项目根 packages/, 兼容旧 scripts/packages (2026-11 审查)
+
+    README/setup_offline 提示"把 packages/ 复制到项目根目录", HF 模型缓存也在
+    <项目根>/packages/hf_cache; 旧实现把 wheel 下到 scripts/packages 与说明不符。
+    """
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    legacy = scripts / "packages"
+    legacy.mkdir()
+    # 根目录尚未存在 + 旧位置存在 → 沿用旧位置（不让历史下载失效）
+    assert common._packages_dir_for(tmp_path, scripts) == legacy
+    # 根目录出现后优先根目录
+    root_packages = tmp_path / "packages"
+    root_packages.mkdir()
+    assert common._packages_dir_for(tmp_path, scripts) == root_packages
+    # 两处都不存在 → 默认项目根（新建目录在此）
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert common._packages_dir_for(empty, empty / "scripts") == empty / "packages"
+
+
+def test_offline_scripts_share_packages_semantics():
+    """setup_offline.sh 与 common.packages_dir() 的缓存位置语义必须一致 (双轨制)。"""
+    sh = (SCRIPTS / "setup_offline.sh").read_text(encoding="utf-8")
+    assert 'PACKAGES_DIR="$PROJECT_DIR/packages"' in sh
+    assert 'if [ ! -d "$PACKAGES_DIR" ] && [ -d "$SCRIPT_DIR/packages" ]' in sh
+
+
 def test_banner(capsys):
     common.banner(["DocAudit"])
     out = capsys.readouterr().out
