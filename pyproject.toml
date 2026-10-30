@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docaudit"
-version = "0.3.2"
+version = "0.3.3"
 description = "DocAudit — 本地离线文档审查系统 (PPTX/DOCX/PDF/MD)"
 readme = "README.md"
 requires-python = ">=3.10"

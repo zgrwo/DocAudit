@@ -95,12 +95,12 @@ git tag -a vX.Y.Z -m "DocAudit vX.Y.Z"
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `0.3.2`（2026-11-05，依赖刷新与缓存完整性版） |
+| 版本 | `0.3.3`（2026-11-05，安全质量补齐版） |
 | 测试 | 739 passed, 2 skipped（741 collected，~80s） |
 | 覆盖率 | 89%（门槛 82%） |
 | ruff / 门禁 / 配置校验 | 全绿 |
 | wheel 构建 | 已验证可离线构建（当前 `src/` 布局，见 `pip wheel .`） |
 | 源码包 | `MANIFEST.in` 覆盖 app.py/rules.md/glossary/vocab/docs/skills/scripts/tests |
-| tag | `v0.3.0`（本地；未 push） |
+| tag | `v0.3.3`（已 push） |
 
 <!-- last_updated: 2026-11-05 -->

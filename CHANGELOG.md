@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-11-05
+
+安全质量补齐版（CodeQL / code scanning / 路径沙箱硬化 / SECURITY.md）。**741 个测试用例（23 个文件）**。
+
+### Security
+
+- **路径沙箱硬化（CodeQL `py/path-injection`）** —— 新增 `app.py::_safe_folder_path()`：
+  拒绝 `..` 路径段、`expanduser().resolve()` 归一化、必须为已存在目录；Web UI 与 `scan_folder()`
+  统一只使用归一化后的绝对路径，不再对原始用户输入直接调用文件系统 API。
+  CodeQL 告警由 2 条降为 **0 条**（其中 1 条按威胁模型 dismissed 并记录理由）。
+- **新增 `SECURITY.md`** —— 威胁模型（本地离线桌面工具、localhost 绑定、扫描文件夹为既定功能）、
+  漏洞私密上报渠道、离线/XSS/路径/依赖/供应链控制面、已知限制与非目标。
+
+### Added
+
+- **CodeQL 工作流** —— `.github/workflows/codeql.yml`：Python（`build-mode: none`），
+  push/PR/每周一扫描，结果上传 code scanning（actions 按 SHA 固定）。
+  CI 由 4 job 扩展为 4 + CodeQL analyze；仓库 code scanning 已产生分析记录。
+- **GitHub Releases** —— 为 v0.3.0 / v0.3.1 / v0.3.2 补齐 release notes（此前只有 tag）。
+
+### Changed
+
+- `app.py` 批量文件夹错误提示统一为「文件夹不存在、不是目录或路径非法」；AppTest 契约同步。
 ## [0.3.2] - 2026-11-05
 
 依赖刷新与供应链完整性版（不改变审查语义）。**741 个测试用例（23 个文件）**；新增 5 条缓存完整性回归。
