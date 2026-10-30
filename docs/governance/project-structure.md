@@ -130,7 +130,8 @@ DocAudit/
 ├── .github/
 │   ├── dependabot.yml               # 依赖自动更新 (每周)
 │   ├── workflows/
-│   │   └── ci.yml                   # CI: pytest 矩阵 + DISPATCH + ruff + 锁文件解析
+│   │   ├── ci.yml                   # CI: pytest 矩阵 + DISPATCH + ruff + windows + 锁文件解析
+│   │   └── codeql.yml               # CodeQL 静态扫描 (Python, code scanning 上传)
 │   ├── ISSUE_TEMPLATE/              # bug / feature / docs / refactor 四类模板
 │   └── PULL_REQUEST_TEMPLATE.md     # PR 模板
 │

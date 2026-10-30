@@ -81,7 +81,7 @@
 | 测试文件 | 23 | `tests/test_*.py` |
 | 源码模块 | 35 | `docs/specification/api-reference.md` 头 |
 | Engine 模块 | 15 | `src/engines/*.py` |
-| CI job | 4（test / lint / windows / lockfile） | `.github/workflows/ci.yml` |
+| CI job | 4（test / lint / windows / lockfile）+ CodeQL analyze | `.github/workflows/ci.yml` / `codeql.yml` |
 | 全局阈值参数 | 16 | `rules.md` frontmatter `parameters:` |
 
 ### 2.2 数字自校准命令（原样执行，粘贴输出进报告）
