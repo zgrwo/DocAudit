@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-05
+
+依赖刷新与供应链完整性版（不改变审查语义）。**741 个测试用例（23 个文件）**；新增 5 条缓存完整性回归。
+
+### Changed
+
+- **依赖升级（6 个独立包）** —— streamlit 1.63.0 / accelerate 1.15.0 / filelock 3.32.6 /
+  narwhals 2.26.0 / protobuf 7.36.1 / python-dotenv 1.2.3；锁文件重建，`.venv` 实装后
+  全量 739 passed（含 AppTest），`pip install --dry-run --no-index` 三 profile 均可离线解析。
+- **离线缓存补全** —— `requirements-*.txt` 曾有 **15 个 pin 不在 `packages/`**（charset-normalizer、
+  docling-ibm-models、faker、filelock、huggingface_hub、lxml、mail-parser、marko、narwhals、
+  pygments、ruff、starlette、streamlit、typing-inspection、uvicorn），离线安装实际会失败；
+  已把缺的 wheel 补齐并重建锁文件（289 pins 全部命中）。
+- **Dependabot 策略收紧** —— `.github/dependabot.yml` 改为 `dependency-type: direct` +
+  `groups`（pdf-stack / web-stack）+ `limit: 3`：Dependabot 直接编辑生成锁文件会与
+  `gen_requirements_lock.py` 冲突（tokenizers/transformers 冲突致 lockfile job 红），
+  之后只接收直接依赖 PR，且合并前必须走 §4.2 流程。
+
+### Added
+
+- **`check_release.py::check_lock_cache`** —— 锁文件每个 pin 必须在 `packages/` 命中
+  （缺缓存时跳过，CI 不适用）；本轮实测 289/289。
+- **`tests/test_check_release.py` +5** —— 缓存缺失跳过 / 全命中 / **版本点号不得归一化**
+  （1.15.0 ≠ 1-15-0 回归）/ 缺 pin 报错 / 当前仓库缓存完整。
+- **`release-checklist.md` §4.2** —— 依赖刷新六步流程（补缓存 → 重建 → 完整性 → 实装测试 →
+  离线解析 → 提交），并注明大版本需真实 PDF 回归。
 ## [0.3.1] - 2026-11-05
 
 5S 清理 + 审查修正版（不改变审查语义：清理死代码/错位目录/悬挂配置，补文档链接门禁）。

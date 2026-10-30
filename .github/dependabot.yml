@@ -1,6 +1,7 @@
-# 依赖自动更新 — 每周检查 pyproject.toml / requirements-*.txt / GitHub Actions
-# 注意: requirements-*.txt 由 scripts/gen_requirements_lock.py 生成，
-#       dependabot 对其的 PR 需与 pyproject.toml 变更一起人工核对后合并。
+﻿# 依赖自动更新 — 每周检查 pyproject.toml / requirements-*.txt / GitHub Actions
+# 注意: requirements-*.txt 由 scripts/gen_requirements_lock.py 生成（勿手改）。
+#       2026-11 起 Dependabot 仅允许**直接依赖**；即便直接依赖的 PR 也必须在合并前
+#       重建锁文件并补齐 packages/ wheel（见 release-checklist §4.2），否则 lockfile job 会红。
 
 version: 2
 updates:
@@ -9,7 +10,14 @@ updates:
     schedule:
       interval: weekly
     versioning-strategy: increase-if-necessary
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    allow:
+      - dependency-type: "direct"
+    groups:
+      pdf-stack:
+        patterns: ["docling*", "transformers", "tokenizers", "accelerate", "torch*"]
+      web-stack:
+        patterns: ["streamlit", "altair", "narwhals", "protobuf", "pydeck"]
 
   - package-ecosystem: github-actions
     directory: "/"

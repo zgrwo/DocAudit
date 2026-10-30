@@ -71,12 +71,32 @@ git tag -a vX.Y.Z -m "DocAudit vX.Y.Z"
 > `styles/` + `.vale.ini` 为未接入 CI 的可选配置却长期占位；`masked_spans()` / `_extract_keys()`
 > 重构后残留死代码。均已于 2026-11 5S 轮清理。
 
+## 4.2 依赖刷新流程（Dependabot PR / 手动升级共用）
+
+> 2026-11 教训：Dependabot 直接改**生成物** `requirements-*.txt`，与生成流程冲突
+> （tokenizers/transformers 钉死冲突致 lockfile job 红）；且 `packages/` 曾缺 15 个锁文件
+> pin，离线安装实际会失败。锁文件与缓存必须成对维护。
+
+| 步骤 | 命令 | 通过标准 |
+| :--- | :--- | :--- |
+| 1. 补缓存 | `pip download --no-deps --dest packages <pkg>==<ver>`（连同其新版本依赖） | 新版本 wheel 落到 `packages/` |
+| 2. 重建锁文件 | `python scripts/gen_requirements_lock.py` | 3 个 profile 均 `[OK]` |
+| 3. 缓存完整性 | `python scripts/check_release.py` | `lock_cache` PASS（所有 pin 命中 packages/） |
+| 4. 实装验证 | `pip install <升级包>` 后 `pytest tests/ -q` | 全绿（含 AppTest） |
+| 5. 离线解析 | `pip install --dry-run --no-index --find-links=packages -r requirements-full.txt .` | `Would install` 出现 |
+| 6. 提交 | `git add requirements-*.txt pyproject.toml`（packages/ 是 gitignore 生成物） | lockfile job 绿 |
+
+- Dependabot 策略（`.github/dependabot.yml`）：仅 `dependency-type: direct` + `groups`，
+  避免再产生"只改生成锁文件"的 PR；直接依赖 PR 也需走本流程。
+- 大版本（如 docling-ibm-models 3→4、transformers 5.x 簇）需在**装了 pdf extra 的 ASCII 路径**
+  环境做真实 PDF 回归后再合并，不能只看单元测试。
+
 ## 5. 当前发行状态
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `0.3.1`（2026-11-05，5S 与审查修正版） |
-| 测试 | 734 passed, 2 skipped（736 collected，~85s） |
+| 版本 | `0.3.2`（2026-11-05，依赖刷新与缓存完整性版） |
+| 测试 | 739 passed, 2 skipped（741 collected，~80s） |
 | 覆盖率 | 89%（门槛 82%） |
 | ruff / 门禁 / 配置校验 | 全绿 |
 | wheel 构建 | 已验证可离线构建（当前 `src/` 布局，见 `pip wheel .`） |

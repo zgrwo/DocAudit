@@ -207,7 +207,7 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (736 用例)
+└── tests/                           # 🧪 测试 (741 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX

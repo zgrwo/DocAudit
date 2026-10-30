@@ -91,3 +91,46 @@ def test_release_checklist_documented():
     assert checklist.exists()
     index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
     assert "release-checklist.md" in index
+
+
+class TestLockCacheIntegrity:
+    """2026-11 审查：锁文件 pin 必须存在于离线缓存（离线安装可执行）。"""
+
+    @staticmethod
+    def _pin(path: Path, lines: list[str]) -> None:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_missing_cache_is_skipped(self, tmp_path):
+        ok, detail = check_release.check_lock_cache(tmp_path)
+        assert ok and "跳过" in detail
+
+    def test_all_pins_present_passes(self, tmp_path):
+        packages = tmp_path / "packages"
+        packages.mkdir()
+        (packages / "demo_pkg-1.2.3-py3-none-any.whl").write_bytes(b"")
+        self._pin(tmp_path / "requirements-core.txt", ["demo-pkg==1.2.3"])
+        ok, detail = check_release.check_lock_cache(tmp_path)
+        assert ok, detail
+        assert "命中" in detail
+
+    def test_version_dots_are_not_normalized(self, tmp_path):
+        """1.15.0 不能被归一化成 1-15-0（历史 bug 回归）。"""
+        packages = tmp_path / "packages"
+        packages.mkdir()
+        (packages / "accelerate-1.15.0-py3-none-any.whl").write_bytes(b"")
+        self._pin(tmp_path / "requirements-full.txt", ["accelerate==1.15.0"])
+        ok, detail = check_release.check_lock_cache(tmp_path)
+        assert ok, detail
+
+    def test_missing_pin_fails_with_preview(self, tmp_path):
+        packages = tmp_path / "packages"
+        packages.mkdir()
+        self._pin(tmp_path / "requirements-pdf.txt", ["demo-pkg==9.9.9"])
+        ok, detail = check_release.check_lock_cache(tmp_path)
+        assert not ok
+        assert "demo-pkg==9.9.9" in detail
+
+    def test_project_cache_is_complete(self):
+        """当前仓库：packages/ 存在时全部 pin 必须命中（防止锁文件/缓存再次漂移）。"""
+        ok, detail = check_release.check_lock_cache(ROOT)
+        assert ok, detail

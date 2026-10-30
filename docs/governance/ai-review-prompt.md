@@ -77,7 +77,7 @@
 | 配置规则（`##` 条目） | 30 | `rules.md` / `parse_rules_md` |
 | 注册检查（`CHECK_REGISTRY`） | 23 | `src/engines/check_registry.py` |
 | 内置检查（`rules.md` 表） | 32 | `rules.md` 末尾表格 |
-| 测试用例 | 736（734 passed + 2 skip） | `pytest --collect-only -q` |
+| 测试用例 | 741（739 passed + 2 skip） | `pytest --collect-only -q` |
 | 测试文件 | 23 | `tests/test_*.py` |
 | 源码模块 | 35 | `docs/specification/api-reference.md` 头 |
 | Engine 模块 | 15 | `src/engines/*.py` |
@@ -177,7 +177,7 @@ UI/CLI (app.py / src/cli.py) → Reporter → Auditor → Engine → Converter �
 
 | # | 门禁 | 能证明 | **不能证明** |
 | :--- | :--- | :--- | :--- |
-| ① | `pytest tests/`（736） | 已知用例不回归 | 未覆盖语义正确 |
+| ① | `pytest tests/`（741） | 已知用例不回归 | 未覆盖语义正确 |
 | ② | 黄金测试三路径 | CLI/AppTest/API 封装一致 | 引擎/审计器语义正确（共享 pipeline） |
 | ③ | `validate_dispatch()` | 注册条目可调用 | 标志位（per_page/pptx_only）语义正确 |
 | ④ | `rules validate` | 配置 schema/正则/范围 | 参数是否真的被消费（6 节点链路） |

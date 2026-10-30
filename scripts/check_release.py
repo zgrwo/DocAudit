@@ -136,6 +136,7 @@ def run_checks(
         ("version_sync", check_version_sync(root)),
         ("changelog", check_changelog(version, root, allow_unreleased)),
         ("required_files", check_required_files(root)),
+        ("lock_cache", check_lock_cache(root)),
         ("cli_version", check_cli_version(version, root)),
     ]
     if require_tag:
@@ -162,6 +163,65 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{'PASS' if row['ok'] else 'FAIL'}] {row['id']}: {row['detail']}")
         print(f"[RELEASE] {'OK' if not failed else f'FAILED — {len(failed)} 项未通过'}")
     return 0 if not failed else 1
+
+
+def _normalized_package(name: str) -> str:
+    """PEP 503 名称归一化（大小写/`_`/`.` → `-`）。"""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _cache_has(packages: Path, name: str, version: str) -> bool:
+    """packages/ 中是否存在 name==version 的 wheel/sdist（文件名前缀匹配）。
+
+    注意：只归一化**包名**部分，版本号里的点必须保留（否则 1.15.0 → 1-15-0 永远匹配不上）。
+    """
+    target = _normalized_package(name) + "-" + version.lower()
+    for path in packages.iterdir():
+        if not path.is_file():
+            continue
+        # wheel/sdist 文件名中的包名常用下划线（python_dotenv），版本号保持原样
+        filename = path.name.lower().replace("_", "-")
+        if not filename.startswith(target):
+            continue
+        rest = filename[len(target) :]
+        if not rest or rest[0] in "-.":
+            return True
+    return False
+
+
+def check_lock_cache(root: Path = ROOT) -> tuple[bool, str]:
+    """锁文件每个 pin 必须在离线缓存 packages/ 中存在（防"锁文件声称、离线装不了"）。
+
+    2026-11 审查发现：requirements-*.txt 有 15 个版本不在 packages/，离线安装会失败。
+    packages/ 不存在时（CI / 干净 clone）跳过该项。
+    """
+    packages = root / "packages"
+    if not packages.is_dir():
+        return True, "跳过（无离线缓存 packages/，CI 环境不适用）"
+    missing: list[str] = []
+    total = 0
+    for profile in ("core", "pdf", "full"):
+        lock = root / f"requirements-{profile}.txt"
+        if not lock.exists():
+            continue
+        for line in lock.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = re.match(r"^([A-Za-z0-9_.-]+)==([^;\s]+)", line)
+            if not match:
+                continue
+            total += 1
+            name, version = match.group(1), match.group(2)
+            if not _cache_has(packages, name, version):
+                missing.append(f"{name}=={version}")
+    if missing:
+        preview = ", ".join(sorted(set(missing))[:5])
+        return (
+            False,
+            f"{len(set(missing))} 个 pin 不在 packages/（离线安装会失败）: {preview}",
+        )
+    return True, f"锁文件 {total} 个 pin 均命中离线缓存 packages/"
 
 
 if __name__ == "__main__":
