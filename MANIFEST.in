@@ -18,6 +18,6 @@ recursive-include vocab *.txt
 recursive-include docs *.md
 recursive-include skills *.md
 recursive-include scripts *.py *.sh *.bat
-recursive-include tests *.py
+recursive-include tests *.py *.pptx *.docx *.pdf
 recursive-include .github *.yml *.md
 recursive-include .streamlit *.toml

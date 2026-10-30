@@ -93,14 +93,6 @@ MASK_REGEXES = (
 )
 
 
-def masked_spans(text: str) -> list[tuple[int, int]]:
-    """返回代码/URL/注释/分隔线区间 [(start, end), ...]（用于跳过非自然语言文本）。"""
-    spans: list[tuple[int, int]] = []
-    for regex in MASK_REGEXES:
-        spans.extend((m.start(), m.end()) for m in regex.finditer(text))
-    return spans
-
-
 def mask_prose_noise(text: str) -> str:
     """把代码/URL/注释/分隔线替换为等长空格，供只应检查自然语言的规则使用。"""
     masked = text

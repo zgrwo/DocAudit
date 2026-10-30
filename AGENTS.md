@@ -75,7 +75,7 @@
 - [ ] 依赖安装与离线流程：优先 `scripts/run.bat`（Windows）或 `scripts/run.sh`；离线环境用 `setup_offline` + `packages/`；离线 PDF 需在有网机器预下载 docling 模型到 `packages/hf_cache/`（模型不随 pip 包分发，README 方案 C 第 1.5 步）
 - [ ] `packages/`、`requirements-*.txt` 是生成物：`requirements-*.txt` 由 `scripts/gen_requirements_lock.py` 生成，勿手改
 - [ ] `docs/` 分区：`governance/`（治理与陷阱清单）、`specification/`（规格与签名 SSOT）、`user-manual/`（用户手册）；`.venv`、`build/`、`docaudit.egg-info/`、`__pycache__/` 为生成物，扫描/审查时排除
-- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（735 用例）
+- [ ] 聚焦测试：改单个模块先跑对应 `tests/test_*.py`，全量 `pytest tests/ -v`（736 用例）
 - [ ] 安全边界：`git push` 必须经用户明确同意；LanguageTool 只连本地服务
 - [ ] 配置门禁与豁免：改 rules.md/glossary/vocab 后跑 `python src/cli.py rules validate`；`.docauditignore` 是团队豁免基线（可入库），Web UI 保存、CLI `--exempt-file` 读取
 - [ ] 修改模块边界前必读 `docs/specification/api-reference.md`（签名唯一信源）
@@ -100,7 +100,7 @@ UI/CLI → Reporter → Auditor → Engine → Converter → Model
 DocAudit/
 ├── src/                              # 源码（models / converters / engines / auditors / reporters）
 ├── app.py                            # Streamlit Web UI
-├── tests/                            # 735 个用例（23 个文件，含黄金测试）
+├── tests/                            # 736 个用例（23 个文件，含黄金测试）
 ├── docs/                             # 治理与规范文档（governance / specification / user-manual）
 ├── skills/                           # Skill 定义
 ├── scripts/                          # 安装/启动/离线/锁文件生成脚本
@@ -163,7 +163,7 @@ DocAudit/
 
 ## 测试
 
-735 个用例，23 个文件：
+736 个用例，23 个文件：
 
 | 文件 | 内容 |
 |------|------|
@@ -189,7 +189,7 @@ DocAudit/
 | test_exemptions.py | 豁免持久化 `.docauditignore`（加载/保存/CLI `--exempt-file`） |
 | test_validation.py | 配置校验（rules/glossary/vocab schema + `docaudit rules validate`） |
 | test_check_release.py | 发行自检（版本双源/CHANGELOG 发行头/必备文件/CLI --version） |
-| test_gates.py | 治理门禁 pytest 化（裸异常 / HTML 转义 / api 同步 / 文档数字，原 tools/ 五门禁回归版） |
+| test_gates.py | 治理门禁 pytest 化（裸异常 / HTML 转义 / api 同步 / 文档数字 / Markdown 链接，原 tools/ 五门禁回归版 + 2026-11 新增链接门禁） |
 
 ### 黄金测试
 
@@ -200,7 +200,7 @@ DocAudit/
 | 场景 | 命令 |
 | :--- | :--- |
 | 安装 | `pip install .[all]` |
-| 运行测试 | `pytest tests/ -v`（735 用例；`-m "not slow"` 为 ~40s 快测子集） |
+| 运行测试 | `pytest tests/ -v`（736 用例；`-m "not slow"` 为 ~40s 快测子集） |
 | 启动 Web UI | `streamlit run app.py` |
 | CLI 审查 | `python src/cli.py report.pptx --rules rules.md` |
 | CI 门禁阈值 | `--fail-on {error,warning,info,none}`（默认 error） |
@@ -212,7 +212,7 @@ DocAudit/
 | pre-commit | `pre-commit run --all-files`（lint + 配置校验；快测挂 pre-push） |
 | 豁免持久化 | `python src/cli.py report.pptx --exempt-file .docauditignore` |
 | DISPATCH 验证 | `python -c "from src.auditors.custom_rules import CustomRulesAuditor; print(CustomRulesAuditor.validate_dispatch())"` |
-| 治理门禁 | `pytest tests/test_gates.py -v`（裸异常 / HTML 转义 / api 同步 / 文档数字） |
+| 治理门禁 | `pytest tests/test_gates.py -v`（裸异常 / HTML 转义 / api 同步 / 文档数字 / Markdown 链接） |
 | 离线下载/安装 | `bash scripts/setup_offline.sh download|install [core\|pdf\|full]` |
 | 重新生成锁文件 | `python scripts/gen_requirements_lock.py` |
 
@@ -267,7 +267,7 @@ DocAudit/
 
 ### 提交前必检
 
-- [ ] `pytest tests/ -v` 全绿（含 `tests/test_gates.py` 四门禁：裸异常 / HTML 转义 / api 同步 / 文档数字）
+- [ ] `pytest tests/ -v` 全绿（含 `tests/test_gates.py` 五门禁：裸异常 / HTML 转义 / api 同步 / 文档数字 / Markdown 链接）
 - [ ] `ruff check` + `ruff format --check` 通过
 - [ ] 新增 check_type 已完成 2 步注册（Auditor 方法 + `CHECK_REGISTRY`；`_DISPATCH`/`_skip_checks` 自动派生）
 - [ ] 新增 Public 接口已同步 api-reference.md

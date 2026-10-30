@@ -364,7 +364,8 @@ CLI `audit` 参数：`--profile {strict,standard,relaxed}`、`--baseline <上一
 | `save_exemptions` | `(path: str \| Path, keys: Iterable[str], findings: list[AuditFinding] \| None = None)` | `bool` | 写入版本化 JSON（原子写）；findings 用于补齐 rule_id/page/message 元数据；返回 False 时调用方必须提示失败 |
 | `apply_exemptions` | `(findings: list[AuditFinding], keys: set[str])` | `tuple[list[AuditFinding], int]` | 过滤已豁免项，返回 (保留列表, 豁免条数) |
 | `DEFAULT_EXEMPTION_FILE` | `str` | `".docauditignore"` | 默认文件名 |
-| `_extract_keys` | `(data)` | `set[str]` | 内部：解析两种文件形态 |
+
+`exemption_stats()` / `load_exemption_entries()` 见同模块（生命周期统计与原始条目读取）。
 
 ---
 

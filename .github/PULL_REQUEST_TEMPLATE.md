@@ -11,8 +11,8 @@
 - [ ] Streamlit UI renders correctly with the change
 - [ ] `ruff check` passes with zero errors
 - [ ] `pytest tests/ -x -q` passes
-- [ ] [README.md](README.md) updated (if configuration or usage changes)
-- [ ] [CHANGELOG.md](CHANGELOG.md) updated
+- [ ] [README.md](../README.md) updated (if configuration or usage changes)
+- [ ] [CHANGELOG.md](../CHANGELOG.md) updated
 
 ## Type of change
 

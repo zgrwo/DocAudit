@@ -681,3 +681,32 @@ def test_python310_syntax_compatible():
         except SyntaxError as e:
             errors.append(f"{path.relative_to(PROJECT_ROOT)}:{e.lineno}: {e.msg}")
     assert not errors, "以下文件使用了 Python 3.10 不支持的语法:\n" + "\n".join(errors)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 门禁 6：Markdown 相对链接完整性（2026-11 5S 新增）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_docs_links_gate():
+    """项目内 Markdown 相对链接必须可解析（移动/归档/删除后不得留悬挂链接）。
+
+    5S 轮把历史文档移入 archive/、生成器移入 scripts/ 时，人工同步了引用；
+    该门禁防止后续再出现"文件已移动、链接未更新"的静默腐化。
+    """
+    link_re = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)")
+    skipped_parts = {".venv", ".git", "logs", "node_modules"}
+    md_files = [
+        path for path in PROJECT_ROOT.rglob("*.md") if not (set(path.parts) & skipped_parts)
+    ]
+    assert md_files, "仓库内应有 Markdown 文档"
+    broken: list[str] = []
+    for path in md_files:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in link_re.finditer(text):
+            target = match.group(1).strip().split("#")[0].strip()
+            if not target or target.startswith(("http://", "https://", "mailto:")):
+                continue
+            if not (path.parent / target).resolve().exists():
+                broken.append(f"{path.relative_to(PROJECT_ROOT)} -> {target}")
+    assert not broken, "悬挂的 Markdown 相对链接:\n" + "\n".join(broken[:20])

@@ -2,7 +2,7 @@
 
 > 本文是 DocAudit 的**发行唯一标准**（SSOT）。任何版本发布前必须逐项通过；
 > 机器可判定部分由 `python scripts/check_release.py` 自动检查，其余为人工确认。
-> 历史检查记录见 `docs/governance/handoff-*.md`（logs/ 内审查报告不入库）。
+> 历史检查记录见 `docs/governance/archive/handoff-*.md`（logs/ 内审查报告不入库）。
 
 ## 1. 发行标准（全部必须通过）
 
@@ -57,16 +57,30 @@ git tag -a vX.Y.Z -m "DocAudit vX.Y.Z"
 - 未 push：`git tag -d vX.Y.Z` + `git reset --hard HEAD~1`（仅限本地，确认后执行）。
 - 已发行：发 PATCH 版本回滚缺陷，不移动既有 tag（避免下游缓存不一致）。
 
+## 4.1 5S 例行清理（每次发行前 / 大改动后）
+
+| 步骤 | 动作 | 检查命令 |
+| :--- | :--- | :--- |
+| **整理** (Seiri) | 删除无引用文件/函数/配置：零引用的脚本、未被测试或文档引用的 fixture、未接入的可选配置（如未接 CI 的 Vale `styles/` + `.vale.ini`） | `Select-String <name> src/ tests/ docs/ scripts/ app.py` 零命中即候选 |
+| **整顿** (Seiton) | 历史文档归档到 `docs/governance/archive/`；工具脚本进 `scripts/`、数据进 `tests/fixtures/`；生成物回到文档声明位置（`packages/` 在根） | 对照 `project-structure.md` 目录树 |
+| **清扫** (Seiso) | 删除生成物：`build/`、`*.egg-info/`、`__pycache__/`、`.pytest_cache/`、`.ruff_cache/`、`.coverage`；跑 `ruff format` + `ruff check` | `git status --ignored` 只剩 `.venv/ packages/ logs/` |
+| **清洁** (Seiketsu) | `.gitignore` 覆盖全部生成物；无用配置/依赖同步删除；文档索引同步归档路径 | `python scripts/check_release.py` + 文档门禁 |
+| **素养** (Shitsuke) | 5S 结果记入 `logs/reports/`；本表与 `project-structure.md` 同步；禁止把临时产物留在仓库根 | 本轮审查报告附录 |
+
+> 历史教训：`scripts/packages/` 曾积累 391MB 旧离线包且与文档声明的根 `packages/` 不符；
+> `styles/` + `.vale.ini` 为未接入 CI 的可选配置却长期占位；`masked_spans()` / `_extract_keys()`
+> 重构后残留死代码。均已于 2026-11 5S 轮清理。
+
 ## 5. 当前发行状态
 
 | 项 | 状态 |
 |---|---|
-| 版本 | `0.3.0`（2026-11-05，质量评估与内容级检查增强版） |
-| 测试 | 733 passed, 2 skipped（735 collected，~85s） |
+| 版本 | `0.3.1`（2026-11-05，5S 与审查修正版） |
+| 测试 | 734 passed, 2 skipped（736 collected，~85s） |
 | 覆盖率 | 89%（门槛 82%） |
 | ruff / 门禁 / 配置校验 | 全绿 |
-| wheel 构建 | 已验证可离线构建（docaudit-0.2.0-py3-none-any.whl，41 文件，含 src/） |
+| wheel 构建 | 已验证可离线构建（当前 `src/` 布局，见 `pip wheel .`） |
 | 源码包 | `MANIFEST.in` 覆盖 app.py/rules.md/glossary/vocab/docs/skills/scripts/tests |
-| tag | `v0.2.0`（本地；未 push） |
+| tag | `v0.3.0`（本地；未 push） |
 
-<!-- last_updated: 2026-10-29 -->
+<!-- last_updated: 2026-11-05 -->

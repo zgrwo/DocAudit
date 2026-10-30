@@ -92,7 +92,6 @@ DocAudit/
 ├── requirements-core.txt            # 离线依赖锁定文件 (生成物，勿手改)
 ├── requirements-pdf.txt             # 离线依赖锁定文件 (生成物，勿手改)
 ├── requirements-full.txt            # 离线依赖锁定文件 (生成物，勿手改)
-├── .vale.ini                        # Vale 配置 (可选，未接入 CI)
 ├── LICENSE                          # MIT 许可证
 ├── CHANGELOG.md                     # 变更日志 (keepachangelog)
 ├── CONTRIBUTING.md                  # 贡献指南 (含两步注册法)
@@ -110,8 +109,10 @@ DocAudit/
 │   │   ├── tooling-pitfalls.md      #     工具/脚本坑位清单 (cmd/bat/pip/git)
 │   │   ├── falsy-pitfalls.md        #     Python falsy 值误判检查清单
 │   │   ├── refactoring-plan.md      #     重构计划（历史，2026-10-29 收口）
-│   │   ├── remediation-plan-2026-08.md  # 2026-08 整改计划（历史）
-│   │   └── handoff-2026-10-29.md    # 2026-10-29 交接说明（含第二批收尾记录）
+│   │   └── archive/                 #     历史归档（只读，不入主索引）
+│   │       ├── handoff-2026-10-29.md    # 2026-10-29 交接说明
+│   │       ├── remediation-plan-2026-08.md  # 2026-08 整改计划
+│   │       └── README.md            #     归档说明
 │   ├── specification/               #   规格文档
 │   │   ├── specification.md         #     项目规格文档
 │   │   └── api-reference.md         #     函数签名速查 — 唯一信源
@@ -139,6 +140,7 @@ DocAudit/
 │   ├── install.bat / install.sh / install.py   # 安装依赖
 │   ├── setup_offline.bat / .sh / .py           # 离线安装 (下载三步: 锁文件+构建依赖+自检)
 │   ├── gen_requirements_lock.py     #   从 packages/ 离线解析生成 requirements-*.txt
+│   ├── gen_sample_pdf.py            #   生成 tests/fixtures/sample.pdf（xref 程序化计算）
 │   ├── benchmark.py                 #   性能基线：合成 10/50/100 页文档分段计时
 │   └── check_release.py             #   发行自检：版本/CHANGELOG/必备文件/CLI 版本
 │
@@ -154,8 +156,6 @@ DocAudit/
 ├── vocab/                           # 📝 词汇白名单/黑名单
 │   ├── accept.txt                   #   术语白名单 (80+ 词)
 │   └── reject.txt                   #   禁用词黑名单 (11 条)
-│
-├── styles/                          # 🎨 Vale 风格配置 (可选，未接入 CI)
 │
 ├── .streamlit/
 │   └── config.toml                  # Streamlit 配置
@@ -207,14 +207,13 @@ DocAudit/
 │       ├── csv_reporter.py          #     CSV 报告生成 (防公式注入)
 │       └── sarif_reporter.py        #     SARIF v2.1.0 报告生成
 │
-└── tests/                           # 🧪 测试 (735 用例)
+└── tests/                           # 🧪 测试 (736 用例)
     ├── __init__.py
     ├── fixtures/
     │   ├── sample.pptx              #     测试用 PPTX
     │   ├── sample.docx              #     测试用 DOCX (存根)
     │   ├── sample_round2_test.pptx  #     第二轮测试 PPTX
-    │   ├── sample.pdf               #     最小合法 PDF (docling 集成测试)
-    │   └── gen_sample_pdf.py        #     sample.pdf 生成器 (xref 偏移程序化计算)
+    │   └── sample.pdf               #     最小合法 PDF (生成器: scripts/gen_sample_pdf.py)
     ├── test_models.py               #     Document + Finding 模型测试
     ├── test_auditors.py             #     Structure + Format + Factual 审计器测试
     ├── test_engines.py              #     Terminology + Vocabulary + 语言分段 + LT 客户端测试

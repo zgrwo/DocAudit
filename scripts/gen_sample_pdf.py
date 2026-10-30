@@ -5,12 +5,12 @@
 2. 记录每个 "N 0 obj" 的实际字节偏移；
 3. 最后写 xref 表 / trailer / startxref，保证偏移正确。
 
-用法: python tests/fixtures/gen_sample_pdf.py
+用法: python scripts/gen_sample_pdf.py
 """
 
 from pathlib import Path
 
-OUTPUT = Path(__file__).parent / "sample.pdf"
+OUTPUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "sample.pdf"
 
 
 def _build() -> bytes:

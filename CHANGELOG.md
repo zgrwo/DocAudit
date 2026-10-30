@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-05
+
+5S 清理 + 审查修正版（不改变审查语义：清理死代码/错位目录/悬挂配置，补文档链接门禁）。
+**736 个测试用例（23 个文件）**；新增 1 条链接完整性门禁。
+
+### 整理 / 整顿（5S）
+
+- **离线包目录归位** —— `scripts/packages/`（391MB 旧下载缓存，与文档声明的根 `packages/` 不符）
+  迁移到根 `packages/`；`common.packages_dir()` 直接命中新位置，旧位置兼容逻辑保留。
+- **删除死代码** —— `text_utils.masked_spans()`、`exemptions._extract_keys()`：重构后全仓库零引用
+  （含文档），按 5S 移除；api-reference 同步删除对应条目。
+- **删除未接入配置** —— `styles/custom/*.yml` + `.vale.ini`：Vale 未接入 CI 且无任何引用
+  （git 历史可恢复）；project-structure 目录树同步。
+- **历史文档归档** —— `handoff-2026-10-29.md`、`remediation-plan-2026-08.md` 移入
+  `docs/governance/archive/`，新增归档 README 与索引；结构树/释放清单链接同步。
+- **工具归位** —— `tests/fixtures/gen_sample_pdf.py` → `scripts/gen_sample_pdf.py`（fixture 只放数据）。
+- **生成物清扫** —— 删除 `build/`、`docaudit.egg-info/`、全部 `__pycache__/`、`.pytest_cache/`、
+  `.ruff_cache/`、`.coverage`；`git status --ignored` 仅剩 `.venv/ packages/ logs/`。
+
+### Fixed
+
+- **生成器路径回归** —— 移动后 `OUTPUT` 仍是 `Path(__file__).parent / "sample.pdf"`，会把
+  `sample.pdf` 写到 `scripts/`；改为 `tests/fixtures/sample.pdf`（实测重生成后 git 无 diff）。
+- **PR 模板悬挂链接** —— `.github/PULL_REQUEST_TEMPLATE.md` 中 `README.md` / `CHANGELOG.md`
+  相对 `.github/` 解析失败；改为 `../README.md` / `../CHANGELOG.md`（全库 75 条链接 0 悬挂）。
+
+### Added
+
+- **文档链接门禁** —— `tests/test_gates.py::test_docs_links_gate`：扫描全库 Markdown 相对链接，
+  移动/归档/删除文件后悬挂链接会 FAIL；负向注入（改坏 `docs/README.md` 一条链接）实测 FAIL→复原 PASS。
+- **5S 例行清单** —— `docs/governance/release-checklist.md` §4.1（整理/整顿/清扫/清洁/素养 + 检查命令 +
+  历史教训），作为每次发行前的固定动作。
 ## [0.3.0] - 2026-11-05
 
 产品能力增强版（在 0.2.2 深度审查修复之上）：把"发现列表"升级为"可解释的质量评估"，

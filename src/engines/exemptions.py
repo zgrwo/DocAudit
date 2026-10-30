@@ -170,11 +170,6 @@ def apply_exemptions(
     return kept, len(findings) - len(kept)
 
 
-def _extract_keys(data) -> set[str]:
-    """兼容多种形态: {"exemptions": [...]} / 裸列表；元素可为 str 或 {"key": …}。"""
-    return {entry["key"] for entry in _extract_entries(data)}
-
-
 def _extract_entries(data) -> list[dict]:
     """兼容多种形态，统一成 ``[{"key": ..., 其余元数据}]``（保序）。"""
     entries = data.get("exemptions", []) if isinstance(data, dict) else data
