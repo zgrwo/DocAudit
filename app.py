@@ -184,6 +184,25 @@ def convert_file_path(file_path: str | Path) -> Document | None:
     return converter.convert(str(path))
 
 
+def _safe_folder_path(folder_path: str) -> Path | None:
+    """把用户输入的文件夹路径解析为绝对路径；非法/越界路径返回 None。
+
+    安全（路径沙箱 + CodeQL py/path-injection 硬化）：
+    - 先拒绝含 ``..`` 的路径段（Path.parts 判断，非子串）；
+    - ``expanduser().resolve()`` 归一化（符号链接/相对路径/``~``）；
+    - 解析后仍必须是已存在的目录，否则返回 None。
+    返回值是**已归一化的绝对路径**，后续文件系统操作只使用它。
+    """
+    raw = Path(folder_path)
+    if ".." in raw.parts or not str(folder_path).strip():
+        return None
+    try:
+        resolved = raw.expanduser().resolve(strict=False)
+    except (OSError, RuntimeError):
+        return None
+    return resolved if resolved.is_dir() else None
+
+
 def scan_folder(folder_path: str) -> list[Path]:
     """扫描文件夹，返回所有支持的文件路径。
 
@@ -192,8 +211,8 @@ def scan_folder(folder_path: str) -> list[Path]:
     """
     from src.engines.pipeline import SUPPORTED_EXTENSIONS
 
-    folder = Path(folder_path)
-    if ".." in folder.parts or not folder.is_dir():
+    folder = _safe_folder_path(folder_path)
+    if folder is None:
         return []
     # 先过滤再排序，避免对非文档条目排序
     files = sorted(
@@ -458,16 +477,14 @@ with st.sidebar:
             key="folder_path",
         )
         if folder_path:
-            # 路径沙箱: 拒绝 ".." 路径段 (Path.parts 判断，非子串判断) 与非目录路径，
-            # 防止任意路径读取 (原实现仅 warning 不阻止)
+            # 路径沙箱: 统一经 _safe_folder_path 归一化（拒绝 '..'、非目录、空串），
+            # 后续只使用归一化后的绝对路径（CodeQL py/path-injection 硬化，2026-11）
             folder_files: list = []
-            path_obj = Path(folder_path)
-            if ".." in path_obj.parts:
-                st.error("路径包含 '..'（上层目录跳转），已阻止访问。请使用不含 '..' 的路径。")
-            elif not path_obj.is_dir():
-                st.error(f"文件夹不存在或不是目录: {folder_path}")
+            safe_folder = _safe_folder_path(folder_path)
+            if safe_folder is None:
+                st.error("文件夹不存在、不是目录或路径非法（不允许 '..' 跳转）。")
             else:
-                folder_files = scan_folder(folder_path)
+                folder_files = scan_folder(str(safe_folder))
                 if folder_files:
                     st.caption(f"发现 {len(folder_files)} 个文件:")
                     for f in folder_files[:20]:

@@ -95,6 +95,7 @@ DocAudit/
 ├── LICENSE                          # MIT 许可证
 ├── CHANGELOG.md                     # 变更日志 (keepachangelog)
 ├── CONTRIBUTING.md                  # 贡献指南 (含两步注册法)
+├── SECURITY.md                      # 安全策略/威胁模型/漏洞上报
 ├── .gitignore                       # Git 忽略规则
 ├── .pre-commit-config.yaml          # 提交钩子：ruff + 配置校验（快测挂 pre-push）
 │
